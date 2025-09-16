@@ -10,7 +10,8 @@ include = ["numbox*"]
 name = "numbduck"
 dependencies = [
     "duckdb~=1.3.2",
-    "numbox~=0.2.10"
+    "numbox~=0.2.11",
+    "numba<0.62.0",
 ]
 dynamic = ["version"]
 requires-python = ">=3.9"
