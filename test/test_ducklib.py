@@ -6,7 +6,6 @@ from numbduck import ducklib
 from numbduck.duckdb_utils import (
     create_duckdb_connection, create_duckdb_database, create_duckdb_result
 )
-# from numbduck.utils import make_duckdb_result
 
 
 def aux_open_database(db_name_p_):

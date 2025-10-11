@@ -77,16 +77,17 @@ def _duckdb_fetch_chunk(typingctx, duckdb_result_tup_ty):
         for i in range(duckdb_result_tup_ty.count):
             arg = builder.extract_value(duckdb_result_tup, i)
             st = builder.insert_value(st, arg, i)
-        ptr = builder.alloca(struct_ty)
-        builder.store(st, ptr)
-        func_ty_ll = FunctionType(IntType(64), [ptr.type])
+        struct_stack_p = builder.alloca(struct_ty)
+        builder.store(st, struct_stack_p)
+        func_ty_ll = FunctionType(IntType(64), [struct_ty.as_pointer()])
         func_p = get_or_insert_function(builder.module, func_ty_ll, "duckdb_fetch_chunk")
-        return builder.call(func_p, [ptr])
+        return builder.call(func_p, [struct_stack_p])
     return intp(UniTuple(intp, 6)), codegen
 
 
 @njit(cache=True)
 def duckdb_fetch_chunk(args):
+    """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_fetch_chunk """
     return _duckdb_fetch_chunk(args)
 
 
