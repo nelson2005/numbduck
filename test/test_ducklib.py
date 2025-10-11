@@ -6,7 +6,7 @@ from numbduck import ducklib
 from numbduck.duckdb_utils import (
     create_duckdb_connection, create_duckdb_database, create_duckdb_result
 )
-from numbduck.utils import make_duckdb_result
+# from numbduck.utils import make_duckdb_result
 
 
 def aux_open_database(db_name_p_):
@@ -97,11 +97,8 @@ def test_duckdb_destroy_result():
 
 def aux_get_data_vector():
     out_result = aux_query_1()
-    duckdb_result, duckdb_result_p = make_duckdb_result(out_result)
-    if duckdb_result_p != 0:
-        data_chunk_p = ducklib.duckdb_fetch_chunk(duckdb_result_p)
-    else:
-        data_chunk_p = ducklib.duckdb_fetch_chunk(duckdb_result)
+    duckdb_result = tuple(out_result)
+    data_chunk_p = ducklib.duckdb_fetch_chunk(duckdb_result)
     assert data_chunk_p, f"Expected pointer to data chunk, got {data_chunk_p}"
 
     i_vec_p = ducklib.duckdb_data_chunk_get_vector(data_chunk_p, 0)

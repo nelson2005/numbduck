@@ -28,15 +28,3 @@ def find_duckdb_shared_lib():
 def load_duckdb():
     duckdb_shared_lib_path = find_duckdb_shared_lib()
     return CDLL(duckdb_shared_lib_path, mode=RTLD_GLOBAL)
-
-
-def make_duckdb_result(out_result: ndarray, duckdb_result_type_class=DuckdbResultTypeClass):
-    from numbduck.ducklib import struct_by_pointer
-    if not struct_by_pointer:
-        return tuple(out_result), 0
-    duckdb_result_type = make_structref("DuckdbResultType", {
-        "f1": intp, "f2": intp, "f3": intp, "f4": intp, "f5": intp, "f6": intp
-    }, duckdb_result_type_class)
-    duckdb_result = duckdb_result_type(*out_result)
-    _, data_p = structref_meminfo(duckdb_result)
-    return duckdb_result, data_p

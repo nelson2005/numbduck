@@ -1,8 +1,10 @@
-import platform
-
-from numba.core.types import int8, int32, intp, uint64, UniTuple, void
+from llvmlite.ir import FunctionType, LiteralStructType, Undefined, IntType
+from numba import njit
+from numba.core.types import int8, int32, intp, uint64, UniTuple, Tuple, void
+from numba.extending import intrinsic
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
+from numba.core.cgutils import get_or_insert_function
 from numbox.utils.highlevel import cres
 
 from numbduck.utils import load_duckdb
@@ -10,8 +12,6 @@ from numbduck.utils import load_duckdb
 
 duckdb_lib = load_duckdb()
 
-struct_by_pointer = True if platform.machine() in ("aarch64", "arm64") else False
-duckdb_result_ty_numba = intp if struct_by_pointer else UniTuple(intp, 6)
 duckdb_state_ty = int32
 
 DuckDBSuccess = 0
@@ -23,7 +23,6 @@ signatures["duckdb_connect"] = duckdb_state_ty(intp, intp)
 signatures["duckdb_data_chunk_get_vector"] = intp(intp, intp)
 signatures["duckdb_destroy_data_chunk"] = void(intp)
 signatures["duckdb_destroy_result"] = void(intp)
-signatures["duckdb_fetch_chunk"] = intp(duckdb_result_ty_numba)
 signatures["duckdb_open"] = duckdb_state_ty(intp, intp)
 signatures["duckdb_query"] = duckdb_state_ty(intp, intp, intp)
 signatures["duckdb_row_count"] = intp(intp)
@@ -69,10 +68,26 @@ def duckdb_destroy_result(duckdb_result_p):
     return _call_lib_func("duckdb_destroy_result", (duckdb_result_p,))
 
 
-@cres(signatures.get("duckdb_fetch_chunk"))
-def duckdb_fetch_chunk(duckdb_result_p):
-    """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_fetch_chunk """
-    return _call_lib_func("duckdb_fetch_chunk", (duckdb_result_p,))
+@intrinsic
+def _duckdb_fetch_chunk(typingctx, duckdb_result_tup_ty):
+    def codegen(context, builder, signature, arguments):
+        struct_ty = LiteralStructType([IntType(64) for _ in range(duckdb_result_tup_ty.count)])
+        st = struct_ty(Undefined)
+        duckdb_result_tup = arguments[0]
+        for i in range(duckdb_result_tup_ty.count):
+            arg = builder.extract_value(duckdb_result_tup, i)
+            st = builder.insert_value(st, arg, i)
+        ptr = builder.alloca(struct_ty)
+        builder.store(st, ptr)
+        func_ty_ll = FunctionType(IntType(64), [ptr.type])
+        func_p = get_or_insert_function(builder.module, func_ty_ll, "duckdb_fetch_chunk")
+        return builder.call(func_p, [ptr])
+    return intp(UniTuple(intp, 6)), codegen
+
+
+@njit(cache=True)
+def duckdb_fetch_chunk(args):
+    return _duckdb_fetch_chunk(args)
 
 
 @cres(signatures.get("duckdb_open"))
