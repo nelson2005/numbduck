@@ -1,6 +1,6 @@
-from llvmlite.ir import FunctionType, LiteralStructType, Undefined, IntType
+from llvmlite.ir import IRBuilder, FunctionType, IntType
 from numba import njit
-from numba.core.types import int8, int32, intp, uint64, UniTuple, Tuple, void
+from numba.core.types import int8, int32, intp, uint64, UniTuple, void
 from numba.extending import intrinsic
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
@@ -17,12 +17,15 @@ duckdb_state_ty = int32
 DuckDBSuccess = 0
 DuckDBError = 1
 
+duckdb_result_ty = UniTuple(intp, 6)
+
 signatures["duckdb_close"] = void(intp)
 signatures["duckdb_column_count"] = intp(intp)
 signatures["duckdb_connect"] = duckdb_state_ty(intp, intp)
 signatures["duckdb_data_chunk_get_vector"] = intp(intp, intp)
 signatures["duckdb_destroy_data_chunk"] = void(intp)
 signatures["duckdb_destroy_result"] = void(intp)
+signatures["duckdb_fetch_chunk"] = intp(duckdb_result_ty)
 signatures["duckdb_open"] = duckdb_state_ty(intp, intp)
 signatures["duckdb_query"] = duckdb_state_ty(intp, intp, intp)
 signatures["duckdb_row_count"] = intp(intp)
@@ -70,22 +73,20 @@ def duckdb_destroy_result(duckdb_result_p):
 
 @intrinsic
 def _duckdb_fetch_chunk(typingctx, duckdb_result_tup_ty):
-    def codegen(context, builder, signature, arguments):
-        struct_ty = LiteralStructType([IntType(64) for _ in range(duckdb_result_tup_ty.count)])
-        st = struct_ty(Undefined)
+    def codegen(context, builder: IRBuilder, signature, arguments):
         duckdb_result_tup = arguments[0]
-        for i in range(duckdb_result_tup_ty.count):
-            arg = builder.extract_value(duckdb_result_tup, i)
-            st = builder.insert_value(st, arg, i)
-        struct_stack_p = builder.alloca(struct_ty)
-        builder.store(st, struct_stack_p)
-        func_ty_ll = FunctionType(IntType(64), [struct_ty.as_pointer()])
+        duckdb_result_tup_ty_ll = context.get_value_type(duckdb_result_tup_ty)
+        duckdb_result_tup_stack_p = builder.alloca(duckdb_result_tup_ty_ll)
+        builder.store(duckdb_result_tup, duckdb_result_tup_stack_p)
+        func_ty_ll = FunctionType(
+            context.get_value_type(signature.return_type), [duckdb_result_tup_ty_ll.as_pointer()]
+        )
         func_p = get_or_insert_function(builder.module, func_ty_ll, "duckdb_fetch_chunk")
-        return builder.call(func_p, [struct_stack_p])
-    return intp(UniTuple(intp, 6)), codegen
+        return builder.call(func_p, [duckdb_result_tup_stack_p])
+    return intp(duckdb_result_ty), codegen
 
 
-@njit(cache=True)
+@njit(signatures.get("duckdb_fetch_chunk"))
 def duckdb_fetch_chunk(args):
     """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_fetch_chunk """
     return _duckdb_fetch_chunk(args)
