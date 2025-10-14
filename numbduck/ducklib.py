@@ -1,4 +1,4 @@
-from llvmlite.ir import IRBuilder, FunctionType, IntType
+from llvmlite.ir import IRBuilder, FunctionType
 from numba import njit
 from numba.core.types import int8, int32, intp, uint64, UniTuple, void
 from numba.extending import intrinsic
