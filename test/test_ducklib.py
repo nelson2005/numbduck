@@ -107,6 +107,12 @@ def aux_get_data_vector():
     return duckdb_result, data_chunk_p
 
 
+def test_duckdb_data_chunk_get_size():
+    duckdb_result, data_chunk_p = aux_get_data_vector()
+    chunk_size = ducklib.duckdb_data_chunk_get_size(data_chunk_p)
+    assert chunk_size == 3, f"Expected 3 rows in chunk, got {chunk_size}"
+
+
 def test_duckdb_fetch_chunk_data_chunk_get_vector_get_data_vector():
     duckdb_result, data_chunk_p = aux_get_data_vector()
     assert data_chunk_p
