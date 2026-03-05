@@ -58,3 +58,4 @@ Uses a custom `@intrinsic` (`_duckdb_fetch_chunk`) instead of `_call_lib_func` b
 - Environment details go in MEMORY.md only (may change between OS installs)
 - Always exclude CLAUDE.md from upstream PRs (use a dedicated branch based on upstream/main)
 - Always use a feature branch — never commit directly to main
+- Always enable GitHub Actions on forked repos
