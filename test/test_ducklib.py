@@ -39,13 +39,23 @@ def aux_connect_db():
 
 def test_connect():
     duckdb_database, duckdb_connection = aux_connect_db()
-    assert duckdb_database, duckdb_connection
+    duckdb_database_p = duckdb_database[0]
+    duckdb_connection_p = duckdb_connection[0]
+    assert duckdb_database_p != 0, f"Expected pointer to DB, got {duckdb_database_p}"
+    assert duckdb_connection_p != 0, f"Expected pointer to connection, got {duckdb_connection_p}"
 
 
 def test_disconnect():
     duckdb_database, duckdb_connection = aux_connect_db()
+    duckdb_connection_p = duckdb_connection[0]
+    assert duckdb_connection_p != 0, f"Expected pointer to connection, got {duckdb_connection_p}"
+    query_txt = "SELECT 1;"
+    query_p = get_unicode_data_p(query_txt)
+    rc = ducklib.duckdb_query(duckdb_connection_p, query_p, 0)
+    assert rc == ducklib.DuckDBSuccess, f"Query before disconnect failed, rc = {rc}"
     duckdb_connection_pp = duckdb_connection.ctypes.data
     ducklib.duckdb_disconnect(duckdb_connection_pp)
+    assert duckdb_connection[0] == 0, f"Expected null pointer after disconnect, got {duckdb_connection[0]}"
 
 
 i_col = [3, 5, 7]
@@ -97,6 +107,8 @@ def test_duckdb_column_count_and_duckdb_row_count():
 def test_duckdb_destroy_result():
     out_result = aux_query_1()
     out_result_p = out_result.ctypes.data
+    num_of_cols = ducklib.duckdb_column_count(out_result_p)
+    assert num_of_cols == 2, f"Expected valid result before destroy, got {num_of_cols} columns"
     ducklib.duckdb_destroy_result(out_result_p)
 
 
