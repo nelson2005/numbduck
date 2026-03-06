@@ -42,6 +42,12 @@ def test_connect():
     assert duckdb_database, duckdb_connection
 
 
+def test_disconnect():
+    duckdb_database, duckdb_connection = aux_connect_db()
+    duckdb_connection_pp = duckdb_connection.ctypes.data
+    ducklib.duckdb_disconnect(duckdb_connection_pp)
+
+
 i_col = [3, 5, 7]
 j_col = [4, 6, "NULL"]
 arr_ty = ctypes.c_int32 * 3
@@ -105,6 +111,12 @@ def aux_get_data_vector():
     i_arr = arr_ty.from_address(i_vec_data_p)
     assert all([i_arr_ == i_col_ for i_arr_, i_col_ in zip(i_arr, i_col)])
     return duckdb_result, data_chunk_p
+
+
+def test_duckdb_data_chunk_get_column_count():
+    duckdb_result, data_chunk_p = aux_get_data_vector()
+    col_count = ducklib.duckdb_data_chunk_get_column_count(data_chunk_p)
+    assert col_count == 2, f"Expected 2 columns, got {col_count}"
 
 
 def test_duckdb_data_chunk_get_size():
