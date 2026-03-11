@@ -561,10 +561,14 @@ def test_bind_timestamp_invalid_param_index():
 
 
 # --- JIT Tests ---
+# Note: get_unicode_data_p segfaults inside @njit (NRT frees the string's
+# backing memory).  Use numpy.frombuffer(b"...\x00", dtype=numpy.uint8) with
+# array_data_p() to pass null-terminated C strings from JIT context instead.
 
 def test_array_data_p():
-    arr = numpy.zeros(1, dtype=numpy.int64)
-    assert array_data_p(arr) == arr.ctypes.data
+    for dtype in [numpy.int64, numpy.float64, numpy.uint8]:
+        arr = numpy.zeros(1, dtype=dtype)
+        assert array_data_p(arr) == arr.ctypes.data
 
 
 @njit
