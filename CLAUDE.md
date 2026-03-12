@@ -50,6 +50,16 @@ Uses a custom `@intrinsic` (`_duckdb_fetch_chunk`) instead of `_call_lib_func` b
 - `numbduck/utils.py` — shared library loader
 - `test/test_ducklib.py` — integration tests
 
+## Numba Scope and Liveness
+
+Numba's NRT (Numba Runtime) can decref/free objects as soon as the compiler determines they are no longer "live" — even if a raw pointer extracted from them is still in use. This causes use-after-free bugs when passing pointers to C functions.
+
+- **Reference:** [Zero-initialization of variables](https://numba.readthedocs.io/en/stable/reference/pysemantics.html#zero-initialization-of-variables) — Numba does not track variable liveness at runtime
+- **Reference:** [numba#5853 comment](https://github.com/numba/numba/issues/5853#issuecomment-893275330) — NRT decrefs parent objects while pointers to their members are still in use
+- **Impact:** `get_unicode_data_p` segfaults inside `@njit` because NRT frees the string before the C function reads the pointer
+- **Workaround:** Use `numpy.frombuffer(b"...\x00", dtype=numpy.uint8)` for C strings, and keep parent arrays alive (referenced) until after the C call completes
+- **Rule:** In JIT code, never extract a pointer from an object unless that object remains referenced for the entire duration the pointer is used
+
 ## Error Handling
 
 Bindings must mirror the DuckDB C API error-handling protocol exactly — return state codes (`DuckDBSuccess`/`DuckDBError`) and pointers, never inject exceptions. Callers do C-style return code checks. See [numbox issue #5](https://github.com/Goykhman/numbox/issues/5) for rationale.
