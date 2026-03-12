@@ -58,6 +58,7 @@ Numba's NRT (Numba Runtime) can decref/free objects as soon as the compiler dete
 - **Reference:** [numba#5853 comment](https://github.com/numba/numba/issues/5853#issuecomment-893275330) — NRT decrefs parent objects while pointers to their members are still in use
 - **Impact:** `get_unicode_data_p` segfaults inside `@njit` because NRT frees the string before the C function reads the pointer
 - **Workaround:** Use `numpy.frombuffer(b"...\x00", dtype=numpy.uint8)` for C strings, and keep parent arrays alive (referenced) until after the C call completes
+- **Sink pattern:** Create a "sink" function that references all parent objects, called after the C calls complete, to prevent NRT from freeing them prematurely (see numba#5853 comment)
 - **Rule:** In JIT code, never extract a pointer from an object unless that object remains referenced for the entire duration the pointer is used
 
 ## Error Handling
