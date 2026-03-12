@@ -46,6 +46,7 @@ Uses a custom `@intrinsic` (`_duckdb_fetch_chunk`) instead of `_call_lib_func` b
 
 - `numbduck/ducklib.py` — all DuckDB C API bindings
 - `numbduck/duckdb_utils.py` — buffer allocators for DuckDB structs
+- `numbduck/jit_utils.py` — JIT-compatible utility intrinsics (array_data_p)
 - `numbduck/utils.py` — shared library loader
 - `test/test_ducklib.py` — integration tests
 
