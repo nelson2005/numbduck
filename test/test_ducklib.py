@@ -2,6 +2,7 @@ import ctypes
 
 import numpy
 from numba import njit
+from numba import carray
 from numbox.utils.lowlevel import get_unicode_data_p
 
 from numbduck import ducklib
@@ -10,7 +11,7 @@ from numbduck.duckdb_utils import (
     create_duckdb_database, create_duckdb_prepared_statement,
     create_duckdb_result
 )
-from numbduck.jit_utils import array_data_p
+from numbduck.jit_utils import array_data_p, i32_ptr, i64_ptr, f64_ptr
 
 
 def aux_open_database(db_name_p_):
@@ -619,6 +620,29 @@ def test_array_data_p():
     for dtype in [numpy.int64, numpy.float64, numpy.uint8]:
         arr = numpy.zeros(1, dtype=dtype)
         assert array_data_p(arr) == arr.ctypes.data
+
+
+def test_i64_ptr():
+    @njit
+    def _use_i64_ptr():
+        arr = numpy.zeros(2, dtype=numpy.int64)
+        arr[0] = 42
+        arr[1] = 2**40
+        return carray(i64_ptr(array_data_p(arr)), (2,))[0], \
+               carray(i64_ptr(array_data_p(arr)), (2,))[1]
+    v0, v1 = _use_i64_ptr()
+    assert v0 == 42
+    assert v1 == 2**40
+
+
+def test_f64_ptr():
+    @njit
+    def _use_f64_ptr():
+        arr = numpy.zeros(1, dtype=numpy.float64)
+        arr[0] = 3.14
+        return carray(f64_ptr(array_data_p(arr)), (1,))[0]
+    v = _use_f64_ptr()
+    assert abs(v - 3.14) < 1e-10
 
 
 @njit
