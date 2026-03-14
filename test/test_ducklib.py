@@ -625,14 +625,27 @@ def test_array_data_p():
         assert array_data_p(arr) == arr.ctypes.data
 
 
+def test_i32_ptr():
+    @njit
+    def _use_i32_ptr():
+        arr = numpy.zeros(2, dtype=numpy.int32)
+        arr[0] = 99
+        arr[1] = -1
+        result = carray(i32_ptr(array_data_p(arr)), (2,))
+        return result[0], result[1]
+    v0, v1 = _use_i32_ptr()
+    assert v0 == 99
+    assert v1 == -1
+
+
 def test_i64_ptr():
     @njit
     def _use_i64_ptr():
         arr = numpy.zeros(2, dtype=numpy.int64)
         arr[0] = 42
         arr[1] = 2**40
-        return carray(i64_ptr(array_data_p(arr)), (2,))[0], \
-               carray(i64_ptr(array_data_p(arr)), (2,))[1]
+        result = carray(i64_ptr(array_data_p(arr)), (2,))
+        return result[0], result[1]
     v0, v1 = _use_i64_ptr()
     assert v0 == 42
     assert v1 == 2**40
