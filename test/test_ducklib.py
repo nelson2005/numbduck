@@ -620,6 +620,16 @@ def test_bind_timestamp_invalid_param_index():
 # Caution: frombuffer produces a read-only array — only safe for args the
 # C function reads (like path strings), not for output buffers.
 
+def test_jit_create_duckdb_database():
+    @njit
+    def _jit_create():
+        db = create_duckdb_database()
+        return db.shape[0], db[0]
+    size, val = _jit_create()
+    assert size == 1
+    assert val == 0
+
+
 def test_array_data_p():
     for dtype in [numpy.int64, numpy.float64, numpy.uint8]:
         arr = numpy.zeros(1, dtype=dtype)
