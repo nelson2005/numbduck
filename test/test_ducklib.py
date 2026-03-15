@@ -638,7 +638,7 @@ def test_array_data_p():
 
 @njit
 def jit_open_close():
-    db = numpy.zeros(1, dtype=numpy.int64)
+    db = create_duckdb_database()
     db_name = numpy.frombuffer(b":memory:\x00", dtype=numpy.uint8)
     rc = ducklib.duckdb_open(array_data_p(db_name), array_data_p(db))
     db_p = db[0]
@@ -654,8 +654,8 @@ def test_jit_open_close_database():
 
 @njit
 def jit_connect_query_disconnect():
-    db = numpy.zeros(1, dtype=numpy.int64)
-    conn = numpy.zeros(1, dtype=numpy.int64)
+    db = create_duckdb_database()
+    conn = create_duckdb_connection()
 
     open_rc = ducklib.duckdb_open(0, array_data_p(db))
     db_p = db[0]
@@ -686,9 +686,9 @@ def test_jit_connect_query_disconnect():
 
 @njit
 def jit_prepare_bind_execute():
-    db = numpy.zeros(1, dtype=numpy.int64)
-    conn = numpy.zeros(1, dtype=numpy.int64)
-    stmt = numpy.zeros(1, dtype=numpy.int64)
+    db = create_duckdb_database()
+    conn = create_duckdb_connection()
+    stmt = create_duckdb_prepared_statement()
 
     open_rc = ducklib.duckdb_open(0, array_data_p(db))
     connect_rc = ducklib.duckdb_connect(db[0], array_data_p(conn))
@@ -710,7 +710,7 @@ def jit_prepare_bind_execute():
     bind4_rc = ducklib.duckdb_bind_null(stmt_p, numpy.uint64(4))
 
     # execute
-    result = numpy.zeros(6, dtype=numpy.int64)
+    result = create_duckdb_result()
     exec_rc = ducklib.duckdb_execute_prepared(stmt_p, array_data_p(result))
 
     # fetch chunk and read back values
@@ -744,7 +744,7 @@ def jit_prepare_bind_execute():
         intp(v3_validity_p), intp(0))
 
     # cleanup (reverse order)
-    chunk_buf = numpy.zeros(1, dtype=numpy.int64)
+    chunk_buf = create_duckdb_data_chunk()
     chunk_buf[0] = chunk_p
     ducklib.duckdb_destroy_data_chunk(array_data_p(chunk_buf))
     ducklib.duckdb_destroy_result(array_data_p(result))
