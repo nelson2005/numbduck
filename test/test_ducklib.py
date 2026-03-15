@@ -14,7 +14,8 @@ from numbduck.duckdb_utils import (
     create_duckdb_result
 )
 from numbduck.ducklib import _duckdb_fetch_chunk
-from numbduck.jit_utils import array_data_p, i32_ptr, i64_ptr, f64_ptr
+from numbox.utils.lowlevel import _cast_int_to_void_p
+from numbduck.jit_utils import array_data_p
 
 
 def aux_open_database(db_name_p_):
@@ -625,42 +626,6 @@ def test_array_data_p():
         assert array_data_p(arr) == arr.ctypes.data
 
 
-def test_i32_ptr():
-    @njit
-    def _use_i32_ptr():
-        arr = numpy.zeros(2, dtype=numpy.int32)
-        arr[0] = 99
-        arr[1] = -1
-        result = carray(i32_ptr(array_data_p(arr)), (2,))
-        return result[0], result[1]
-    v0, v1 = _use_i32_ptr()
-    assert v0 == 99
-    assert v1 == -1
-
-
-def test_i64_ptr():
-    @njit
-    def _use_i64_ptr():
-        arr = numpy.zeros(2, dtype=numpy.int64)
-        arr[0] = 42
-        arr[1] = 2**40
-        result = carray(i64_ptr(array_data_p(arr)), (2,))
-        return result[0], result[1]
-    v0, v1 = _use_i64_ptr()
-    assert v0 == 42
-    assert v1 == 2**40
-
-
-def test_f64_ptr():
-    @njit
-    def _use_f64_ptr():
-        arr = numpy.zeros(1, dtype=numpy.float64)
-        arr[0] = 3.14
-        return carray(f64_ptr(array_data_p(arr)), (1,))[0]
-    v = _use_f64_ptr()
-    assert abs(v - 3.14) < 1e-10
-
-
 @njit
 def jit_open_close():
     db = numpy.zeros(1, dtype=numpy.int64)
@@ -747,17 +712,20 @@ def jit_prepare_bind_execute():
     # col 0: int32
     v0_p = ducklib.duckdb_vector_get_data(
         ducklib.duckdb_data_chunk_get_vector(chunk_p, 0))
-    col0 = carray(i32_ptr(v0_p), (chunk_size,))[0]
+    vp0 = _cast_int_to_void_p(v0_p)
+    col0 = carray(vp0, (chunk_size,), dtype=numpy.int32)[0]
 
     # col 1: int64
     v1_p = ducklib.duckdb_vector_get_data(
         ducklib.duckdb_data_chunk_get_vector(chunk_p, 1))
-    col1 = carray(i64_ptr(v1_p), (chunk_size,))[0]
+    vp1 = _cast_int_to_void_p(v1_p)
+    col1 = carray(vp1, (chunk_size,), dtype=numpy.int64)[0]
 
     # col 2: double
     v2_p = ducklib.duckdb_vector_get_data(
         ducklib.duckdb_data_chunk_get_vector(chunk_p, 2))
-    col2 = carray(f64_ptr(v2_p), (chunk_size,))[0]
+    vp2 = _cast_int_to_void_p(v2_p)
+    col2 = carray(vp2, (chunk_size,), dtype=numpy.float64)[0]
 
     # col 3: null check
     v3_p = ducklib.duckdb_data_chunk_get_vector(chunk_p, 3)
