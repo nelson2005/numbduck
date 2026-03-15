@@ -1,0 +1,18 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "subject": "Add @njit to duckdb_utils functions",
+      "status": "completed",
+      "blockedBy": [],
+      "lastUpdated": "2026-03-15T00:01:00Z"
+    },
+    {
+      "id": "2",
+      "subject": "Update JIT tests to use duckdb_utils",
+      "status": "completed",
+      "blockedBy": ["1"],
+      "lastUpdated": "2026-03-15T00:02:00Z"
+    }
+  ]
+}
