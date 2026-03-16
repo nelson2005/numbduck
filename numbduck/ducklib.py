@@ -349,6 +349,9 @@ def _duckdb_bind_hugeint(typingctx, prepared_statement_p_ty, param_idx_ty, hugei
 
     def codegen(context, builder: IRBuilder, signature, arguments):
         prepared_statement_p, param_idx, hugeint_tup = arguments
+        # Numba lowers Tuple((uint64, int64)) to LLVM {i64, i64}, which
+        # matches the C struct layout directly — no repacking needed
+        # (unlike interval, which has mixed-width i32/i64 fields).
         hugeint_ll_ty = context.get_value_type(duckdb_hugeint_ty)
         if _is_win:
             # Windows x64: structs >8 bytes passed by pointer
@@ -385,6 +388,8 @@ def _duckdb_bind_uhugeint(typingctx, prepared_statement_p_ty, param_idx_ty, uhug
 
     def codegen(context, builder: IRBuilder, signature, arguments):
         prepared_statement_p, param_idx, uhugeint_tup = arguments
+        # Numba lowers UniTuple(uint64, 2) to LLVM {i64, i64}, which
+        # matches the C struct layout directly — no repacking needed.
         uhugeint_ll_ty = context.get_value_type(duckdb_uhugeint_ty)
         if _is_win:
             # Windows x64: structs >8 bytes passed by pointer
@@ -468,9 +473,11 @@ def duckdb_bind_interval(prepared_statement_p, param_idx, val):
 @intrinsic
 def _duckdb_bind_decimal(typingctx, prepared_statement_p_ty, param_idx_ty, decimal_tup_ty):
     import platform
+    import sys
     # Only SysV x86-64 (Linux/macOS) needs byval — Windows AMD64 passes
-    # >8-byte structs by pointer like arm64.
-    _is_sysv_x86_64 = platform.machine() == 'x86_64'
+    # >8-byte structs by pointer like arm64.  Windows reports 'AMD64' for
+    # platform.machine(), but we exclude it explicitly for clarity.
+    _is_sysv_x86_64 = platform.machine() == 'x86_64' and sys.platform != 'win32'
 
     def codegen(context, builder: IRBuilder, signature, arguments):
         from llvmlite import ir
@@ -513,6 +520,8 @@ def _duckdb_bind_decimal(typingctx, prepared_statement_p_ty, param_idx_ty, decim
             # NOTE: optnone applies to the entire enclosing @njit wrapper.
             # This is safe because the wrapper is trivial, but revisit with
             # volatile stores if llvmlite adds support.
+            # TODO(llvmlite): replace optnone with volatile stores when
+            # llvmlite exposes builder.store(..., volatile=True).
             func_p.args[2].add_attribute('byval')
             builder.function.attributes.add('optnone')
             builder.function.attributes.add('noinline')

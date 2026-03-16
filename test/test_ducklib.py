@@ -775,6 +775,36 @@ def test_bind_blob():
     aux_close_db(duckdb_database, duckdb_connection)
 
 
+def test_bind_int8_negative():
+    duckdb_database, duckdb_connection = aux_connect_db()
+    connection_p = duckdb_connection[0]
+    stmt, rc = aux_prepare(connection_p, "SELECT $1::TINYINT;")
+    assert rc == ducklib.DuckDBSuccess
+    rc = ducklib.duckdb_bind_int8(stmt[0], 1, -42)
+    assert rc == ducklib.DuckDBSuccess
+    out_result, chunk_p = aux_execute_prepared(stmt[0])
+    data_p = aux_read_column_data(chunk_p, 0)
+    assert (ctypes.c_int8 * 1).from_address(data_p)[0] == -42
+    ducklib.duckdb_destroy_result(out_result.ctypes.data)
+    aux_destroy_prepared(stmt)
+    aux_close_db(duckdb_database, duckdb_connection)
+
+
+def test_bind_int16_negative():
+    duckdb_database, duckdb_connection = aux_connect_db()
+    connection_p = duckdb_connection[0]
+    stmt, rc = aux_prepare(connection_p, "SELECT $1::SMALLINT;")
+    assert rc == ducklib.DuckDBSuccess
+    rc = ducklib.duckdb_bind_int16(stmt[0], 1, -1234)
+    assert rc == ducklib.DuckDBSuccess
+    out_result, chunk_p = aux_execute_prepared(stmt[0])
+    data_p = aux_read_column_data(chunk_p, 0)
+    assert (ctypes.c_int16 * 1).from_address(data_p)[0] == -1234
+    ducklib.duckdb_destroy_result(out_result.ctypes.data)
+    aux_destroy_prepared(stmt)
+    aux_close_db(duckdb_database, duckdb_connection)
+
+
 def test_bind_parameter_index():
     duckdb_database, duckdb_connection = aux_connect_db()
     connection_p = duckdb_connection[0]
