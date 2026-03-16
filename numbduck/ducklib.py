@@ -419,6 +419,9 @@ def duckdb_bind_interval(prepared_statement_p, param_idx, val):
 
 @intrinsic
 def _duckdb_bind_decimal(typingctx, prepared_statement_p_ty, param_idx_ty, decimal_tup_ty):
+    import platform
+    _is_x86_64 = platform.machine() in ('x86_64', 'AMD64')
+
     def codegen(context, builder: IRBuilder, signature, arguments):
         from llvmlite import ir
         prepared_statement_p, param_idx, decimal_tup = arguments
@@ -426,23 +429,15 @@ def _duckdb_bind_decimal(typingctx, prepared_statement_p_ty, param_idx_ty, decim
         i32 = ir.IntType(32)
         i64 = ir.IntType(64)
         # C struct: { uint8 width, uint8 scale, pad[6], {uint64 lower, int64 upper} }
-        # 24 bytes = MEMORY class on SysV x86-64, passed on stack via byval
+        # 24 bytes — ABI handling varies by platform:
+        # - x86-64 SysV: MEMORY class (>16 bytes), passed on stack via byval
+        # - arm64/Windows: passed by implicit pointer in register
         hugeint_struct = ir.LiteralStructType([i64, i64])
         decimal_struct = ir.LiteralStructType([i8, i8, hugeint_struct])
         width = builder.extract_value(decimal_tup, 0)
         scale = builder.extract_value(decimal_tup, 1)
         lower = builder.extract_value(decimal_tup, 2)
         upper = builder.extract_value(decimal_tup, 3)
-        # Disable optimization for the enclosing function to prevent LLVM
-        # from eliminating stores to the byval alloca. Without this, the
-        # optimizer drops the GEP stores and the C function reads garbage.
-        # NOTE: optnone applies to the entire enclosing @njit wrapper, not
-        # just this intrinsic. This is safe because the wrapper is trivial,
-        # but if this intrinsic is ever inlined into a larger function, that
-        # function will also lose optimization. Revisit with volatile stores
-        # or @llvm.memcpy if llvmlite adds volatile store support.
-        builder.function.attributes.add('optnone')
-        builder.function.attributes.add('noinline')
         zero = ir.Constant(i32, 0)
         decimal_stack_p = builder.alloca(decimal_struct)
         width_p = builder.gep(decimal_stack_p, [zero, ir.Constant(i32, 0)])
@@ -460,7 +455,19 @@ def _duckdb_bind_decimal(typingctx, prepared_statement_p_ty, param_idx_ty, decim
             [prepared_statement_p.type, param_idx.type, decimal_struct.as_pointer()]
         )
         func_p = get_or_insert_function(builder.module, func_ty_ll, "duckdb_bind_decimal")
-        func_p.args[2].add_attribute('byval')
+        if _is_x86_64:
+            # On x86-64 SysV, byval tells LLVM to copy the struct to the
+            # stack for the callee. optnone prevents the optimizer from
+            # eliminating the GEP stores to the alloca. Without optnone,
+            # the optimizer drops stores and the C function reads garbage.
+            # NOTE: optnone applies to the entire enclosing @njit wrapper.
+            # This is safe because the wrapper is trivial, but revisit with
+            # volatile stores if llvmlite adds support.
+            func_p.args[2].add_attribute('byval')
+            builder.function.attributes.add('optnone')
+            builder.function.attributes.add('noinline')
+        # On arm64 and Windows, the C ABI already passes >16-byte structs
+        # by pointer, so a plain pointer parameter matches the ABI.
         return builder.call(func_p, [prepared_statement_p, param_idx, decimal_stack_p])
     return duckdb_state_ty(intp, uint64, duckdb_decimal_ty), codegen
 
