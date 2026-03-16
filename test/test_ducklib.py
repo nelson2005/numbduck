@@ -764,8 +764,12 @@ def test_bind_blob():
     rc = ducklib.duckdb_bind_blob(stmt[0], 1, blob_p, 4)
     assert rc == ducklib.DuckDBSuccess
     out_result, chunk_p = aux_execute_prepared(stmt[0])
-    chunk_size = ducklib.duckdb_data_chunk_get_size(chunk_p)
-    assert chunk_size == 1
+    data_p = aux_read_column_data(chunk_p, 0)
+    # BLOB uses same string_t layout: uint32 length + inline data
+    blob_len = ctypes.c_uint32.from_address(data_p).value
+    assert blob_len == 4
+    raw = (ctypes.c_char * blob_len).from_address(data_p + 4)
+    assert raw[:] == b"\x00\x01\x02\x03"
     ducklib.duckdb_destroy_result(out_result.ctypes.data)
     aux_destroy_prepared(stmt)
     aux_close_db(duckdb_database, duckdb_connection)
@@ -852,8 +856,11 @@ def test_bind_decimal():
     rc = ducklib.duckdb_bind_decimal(stmt[0], 1, (10, 2, 12345, 0))
     assert rc == ducklib.DuckDBSuccess
     out_result, chunk_p = aux_execute_prepared(stmt[0])
-    chunk_size = ducklib.duckdb_data_chunk_get_size(chunk_p)
-    assert chunk_size == 1
+    data_p = aux_read_column_data(chunk_p, 0)
+    # DECIMAL(10,2) uses INT64 physical storage (width <= 18)
+    # The stored value is the unscaled integer: 12345 represents 123.45
+    stored = (ctypes.c_int64 * 1).from_address(data_p)[0]
+    assert stored == 12345
     ducklib.duckdb_destroy_result(out_result.ctypes.data)
     aux_destroy_prepared(stmt)
     aux_close_db(duckdb_database, duckdb_connection)
