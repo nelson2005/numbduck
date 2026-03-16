@@ -433,8 +433,14 @@ def _duckdb_bind_decimal(typingctx, prepared_statement_p_ty, param_idx_ty, decim
         scale = builder.extract_value(decimal_tup, 1)
         lower = builder.extract_value(decimal_tup, 2)
         upper = builder.extract_value(decimal_tup, 3)
-        # Disable optimization for this function to prevent the optimizer
-        # from eliminating stores to the byval alloca (LLVM bug)
+        # Disable optimization for the enclosing function to prevent LLVM
+        # from eliminating stores to the byval alloca. Without this, the
+        # optimizer drops the GEP stores and the C function reads garbage.
+        # NOTE: optnone applies to the entire enclosing @njit wrapper, not
+        # just this intrinsic. This is safe because the wrapper is trivial,
+        # but if this intrinsic is ever inlined into a larger function, that
+        # function will also lose optimization. Revisit with volatile stores
+        # or @llvm.memcpy if llvmlite adds volatile store support.
         builder.function.attributes.add('optnone')
         builder.function.attributes.add('noinline')
         zero = ir.Constant(i32, 0)
