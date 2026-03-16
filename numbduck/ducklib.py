@@ -344,9 +344,25 @@ def duckdb_vector_get_validity(duckdb_vector_p):
 
 @intrinsic
 def _duckdb_bind_hugeint(typingctx, prepared_statement_p_ty, param_idx_ty, hugeint_tup_ty):
+    import sys
+    _is_win = sys.platform == 'win32'
+
     def codegen(context, builder: IRBuilder, signature, arguments):
         prepared_statement_p, param_idx, hugeint_tup = arguments
         hugeint_ll_ty = context.get_value_type(duckdb_hugeint_ty)
+        if _is_win:
+            # Windows x64: structs >8 bytes passed by pointer
+            stack_p = builder.alloca(hugeint_ll_ty)
+            builder.store(hugeint_tup, stack_p)
+            func_ty_ll = FunctionType(
+                context.get_value_type(signature.return_type),
+                [prepared_statement_p.type, param_idx.type,
+                 hugeint_ll_ty.as_pointer()]
+            )
+            func_p = get_or_insert_function(
+                builder.module, func_ty_ll, "duckdb_bind_hugeint")
+            return builder.call(
+                func_p, [prepared_statement_p, param_idx, stack_p])
         func_ty_ll = FunctionType(
             context.get_value_type(signature.return_type),
             [prepared_statement_p.type, param_idx.type, hugeint_ll_ty]
@@ -364,9 +380,25 @@ def duckdb_bind_hugeint(prepared_statement_p, param_idx, val):
 
 @intrinsic
 def _duckdb_bind_uhugeint(typingctx, prepared_statement_p_ty, param_idx_ty, uhugeint_tup_ty):
+    import sys
+    _is_win = sys.platform == 'win32'
+
     def codegen(context, builder: IRBuilder, signature, arguments):
         prepared_statement_p, param_idx, uhugeint_tup = arguments
         uhugeint_ll_ty = context.get_value_type(duckdb_uhugeint_ty)
+        if _is_win:
+            # Windows x64: structs >8 bytes passed by pointer
+            stack_p = builder.alloca(uhugeint_ll_ty)
+            builder.store(uhugeint_tup, stack_p)
+            func_ty_ll = FunctionType(
+                context.get_value_type(signature.return_type),
+                [prepared_statement_p.type, param_idx.type,
+                 uhugeint_ll_ty.as_pointer()]
+            )
+            func_p = get_or_insert_function(
+                builder.module, func_ty_ll, "duckdb_bind_uhugeint")
+            return builder.call(
+                func_p, [prepared_statement_p, param_idx, stack_p])
         func_ty_ll = FunctionType(
             context.get_value_type(signature.return_type),
             [prepared_statement_p.type, param_idx.type, uhugeint_ll_ty]
@@ -384,12 +416,15 @@ def duckdb_bind_uhugeint(prepared_statement_p, param_idx, val):
 
 @intrinsic
 def _duckdb_bind_interval(typingctx, prepared_statement_p_ty, param_idx_ty, interval_tup_ty):
+    import sys
+    _is_win = sys.platform == 'win32'
+
     def codegen(context, builder: IRBuilder, signature, arguments):
         from llvmlite import ir
         prepared_statement_p, param_idx, interval_tup = arguments
         i64 = ir.IntType(64)
         # C struct: { int32 months, int32 days, int64 micros } = 16 bytes
-        # Pack two i32 fields into one i64 to match the ABI register layout
+        # Pack two i32 fields into one i64 to match the C struct layout
         interval_struct = ir.LiteralStructType([i64, i64])
         months = builder.extract_value(interval_tup, 0)
         days = builder.extract_value(interval_tup, 1)
@@ -402,6 +437,19 @@ def _duckdb_bind_interval(typingctx, prepared_statement_p_ty, param_idx_ty, inte
         val = ir.Constant(interval_struct, ir.Undefined)
         val = builder.insert_value(val, packed, 0)
         val = builder.insert_value(val, micros, 1)
+        if _is_win:
+            # Windows x64: structs >8 bytes passed by pointer
+            stack_p = builder.alloca(interval_struct)
+            builder.store(val, stack_p)
+            func_ty_ll = FunctionType(
+                context.get_value_type(signature.return_type),
+                [prepared_statement_p.type, param_idx.type,
+                 interval_struct.as_pointer()]
+            )
+            func_p = get_or_insert_function(
+                builder.module, func_ty_ll, "duckdb_bind_interval")
+            return builder.call(
+                func_p, [prepared_statement_p, param_idx, stack_p])
         func_ty_ll = FunctionType(
             context.get_value_type(signature.return_type),
             [prepared_statement_p.type, param_idx.type, interval_struct]
@@ -420,7 +468,9 @@ def duckdb_bind_interval(prepared_statement_p, param_idx, val):
 @intrinsic
 def _duckdb_bind_decimal(typingctx, prepared_statement_p_ty, param_idx_ty, decimal_tup_ty):
     import platform
-    _is_x86_64 = platform.machine() in ('x86_64', 'AMD64')
+    # Only SysV x86-64 (Linux/macOS) needs byval — Windows AMD64 passes
+    # >8-byte structs by pointer like arm64.
+    _is_sysv_x86_64 = platform.machine() == 'x86_64'
 
     def codegen(context, builder: IRBuilder, signature, arguments):
         from llvmlite import ir
@@ -455,7 +505,7 @@ def _duckdb_bind_decimal(typingctx, prepared_statement_p_ty, param_idx_ty, decim
             [prepared_statement_p.type, param_idx.type, decimal_struct.as_pointer()]
         )
         func_p = get_or_insert_function(builder.module, func_ty_ll, "duckdb_bind_decimal")
-        if _is_x86_64:
+        if _is_sysv_x86_64:
             # On x86-64 SysV, byval tells LLVM to copy the struct to the
             # stack for the callee. optnone prevents the optimizer from
             # eliminating the GEP stores to the alloca. Without optnone,
@@ -466,7 +516,7 @@ def _duckdb_bind_decimal(typingctx, prepared_statement_p_ty, param_idx_ty, decim
             func_p.args[2].add_attribute('byval')
             builder.function.attributes.add('optnone')
             builder.function.attributes.add('noinline')
-        # On arm64 and Windows, the C ABI already passes >16-byte structs
+        # On arm64 and Windows x64, the C ABI passes >16/>8-byte structs
         # by pointer, so a plain pointer parameter matches the ABI.
         return builder.call(func_p, [prepared_statement_p, param_idx, decimal_stack_p])
     return duckdb_state_ty(intp, uint64, duckdb_decimal_ty), codegen
