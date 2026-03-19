@@ -49,6 +49,35 @@ def _call_byval(context, builder, signature, func_name, arg_ty, arg_val):
     return builder.call(func_p, [stack_p])
 
 
+@intrinsic(prefer_literal=True)
+def _call_lib_func_byval(typingctx, func_name_ty, args_ty):
+    """Like _call_lib_func, but passes the first arg by pointer on the stack.
+
+    Used for C functions that take a struct by value (e.g. duckdb_result).
+    """
+    func_name = func_name_ty.literal_value
+    func_sig = signatures.get(func_name, None)
+    if func_sig is None:
+        raise ValueError(f"Undefined signature for {func_name}")
+
+    def codegen(context, builder, signature, arguments):
+        _, args = arguments
+        arg = builder.extract_value(args, 0)
+        arg_ll_ty = context.get_value_type(args_ty[0])
+        stack_p = builder.alloca(arg_ll_ty)
+        builder.store(arg, stack_p)
+        func_ty_ll = FunctionType(
+            context.get_value_type(signature.return_type),
+            [arg_ll_ty.as_pointer()]
+        )
+        func_p = get_or_insert_function(
+            builder.module, func_ty_ll, func_name)
+        return builder.call(func_p, [stack_p])
+
+    sig = func_sig.return_type(func_name_ty, args_ty)
+    return sig, codegen
+
+
 signatures["duckdb_bind_blob"] = duckdb_state_ty(intp, uint64, intp, uint64)
 signatures["duckdb_bind_boolean"] = duckdb_state_ty(intp, uint64, int8)
 signatures["duckdb_bind_date"] = duckdb_state_ty(intp, uint64, int32)
@@ -116,6 +145,7 @@ signatures["duckdb_destroy_result"] = void(intp)
 signatures["duckdb_destroy_value"] = void(intp)
 signatures["duckdb_disconnect"] = void(intp)
 signatures["duckdb_execute_prepared"] = duckdb_state_ty(intp, intp)
+signatures["duckdb_fetch_chunk"] = intp(duckdb_result_ty)
 signatures["duckdb_free"] = void(intp)
 signatures["duckdb_get_bool"] = int8(intp)
 signatures["duckdb_get_date"] = int32(intp)
@@ -153,6 +183,8 @@ signatures["duckdb_prepare_error"] = intp(intp)
 signatures["duckdb_query"] = duckdb_state_ty(intp, intp, intp)
 signatures["duckdb_result_error"] = intp(intp)
 signatures["duckdb_result_error_type"] = int32(intp)
+signatures["duckdb_result_return_type"] = int32(duckdb_result_ty)
+signatures["duckdb_result_statement_type"] = int32(duckdb_result_ty)
 signatures["duckdb_row_count"] = intp(intp)
 signatures["duckdb_rows_changed"] = uint64(intp)
 signatures["duckdb_validity_row_is_valid"] = int8(intp, intp)
@@ -909,18 +941,10 @@ def duckdb_is_null_value(value_p):
     return _call_lib_func("duckdb_is_null_value", (value_p,))
 
 
-@intrinsic
-def _duckdb_fetch_chunk(typingctx, duckdb_result_tup_ty):
-    def codegen(context, builder, signature, arguments):
-        return _call_byval(context, builder, signature,
-                           "duckdb_fetch_chunk", duckdb_result_tup_ty, arguments[0])
-    return intp(duckdb_result_ty), codegen
-
-
-@cres(intp(duckdb_result_ty))
-def duckdb_fetch_chunk(args):
-    """ https://duckdb.org/docs/stable/clients/c/query#duckdb_fetch_chunk """
-    return _duckdb_fetch_chunk(args)
+@cres(signatures.get("duckdb_fetch_chunk"))
+def duckdb_fetch_chunk(duckdb_result):
+    """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_fetch_chunk """
+    return _call_lib_func_byval("duckdb_fetch_chunk", (duckdb_result,))
 
 
 @cres(signatures.get("duckdb_free"))
@@ -1253,32 +1277,16 @@ def duckdb_result_error_type(duckdb_result_p):
     return _call_lib_func("duckdb_result_error_type", (duckdb_result_p,))
 
 
-@intrinsic
-def _duckdb_result_return_type(typingctx, duckdb_result_tup_ty):
-    def codegen(context, builder, signature, arguments):
-        return _call_byval(context, builder, signature,
-                           "duckdb_result_return_type", duckdb_result_tup_ty, arguments[0])
-    return int32(duckdb_result_ty), codegen
-
-
-@cres(int32(duckdb_result_ty))
+@cres(signatures.get("duckdb_result_return_type"))
 def duckdb_result_return_type(result):
     """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_result_return_type """
-    return _duckdb_result_return_type(result)
+    return _call_lib_func_byval("duckdb_result_return_type", (result,))
 
 
-@intrinsic
-def _duckdb_result_statement_type(typingctx, duckdb_result_tup_ty):
-    def codegen(context, builder, signature, arguments):
-        return _call_byval(context, builder, signature,
-                           "duckdb_result_statement_type", duckdb_result_tup_ty, arguments[0])
-    return int32(duckdb_result_ty), codegen
-
-
-@cres(int32(duckdb_result_ty))
+@cres(signatures.get("duckdb_result_statement_type"))
 def duckdb_result_statement_type(result):
     """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_result_statement_type """
-    return _duckdb_result_statement_type(result)
+    return _call_lib_func_byval("duckdb_result_statement_type", (result,))
 
 
 @cres(signatures.get("duckdb_row_count"))
