@@ -758,8 +758,8 @@ def test_bind_blob():
     connection_p = duckdb_connection[0]
     stmt, rc = aux_prepare(connection_p, "SELECT $1::BLOB;")
     assert rc == ducklib.DuckDBSuccess
-    blob_data = ctypes.c_char_p(b"\x00\x01\x02\x03")
-    blob_p = ctypes.c_void_p.from_buffer(blob_data).value
+    blob_data = ctypes.create_string_buffer(b"\x00\x01\x02\x03", 4)
+    blob_p = ctypes.cast(blob_data, ctypes.c_void_p).value
     rc = ducklib.duckdb_bind_blob(stmt[0], 1, blob_p, 4)
     assert rc == ducklib.DuckDBSuccess
     out_result, chunk_p = aux_execute_prepared(stmt[0])
@@ -1236,8 +1236,8 @@ def test_create_get_timestamp_tz():
 
 
 def test_create_get_blob():
-    blob_data = ctypes.c_char_p(b"\x00\x01\x02\x03")
-    blob_p = ctypes.c_void_p.from_buffer(blob_data).value
+    blob_data = ctypes.create_string_buffer(b"\x00\x01\x02\x03", 4)
+    blob_p = ctypes.cast(blob_data, ctypes.c_void_p).value
     val_p = ducklib.duckdb_create_blob(blob_p, 4)
     assert val_p != 0
     result = ducklib.duckdb_get_blob(val_p)
@@ -1329,8 +1329,8 @@ def test_create_get_uuid():
 
 
 def test_create_get_varint():
-    data_bytes = ctypes.c_char_p(b"\x01\x00")
-    data_p = ctypes.c_void_p.from_buffer(data_bytes).value
+    data_bytes = ctypes.create_string_buffer(b"\x01\x00", 2)
+    data_p = ctypes.cast(data_bytes, ctypes.c_void_p).value
     val_p = ducklib.duckdb_create_varint((data_p, 2, 0))
     assert val_p != 0
     result = ducklib.duckdb_get_varint(val_p)
@@ -1343,8 +1343,8 @@ def test_create_get_varint():
 
 
 def test_create_get_bit():
-    data_bytes = ctypes.c_char_p(b"\x05\xA0")
-    data_p = ctypes.c_void_p.from_buffer(data_bytes).value
+    data_bytes = ctypes.create_string_buffer(b"\x05\xA0", 2)
+    data_p = ctypes.cast(data_bytes, ctypes.c_void_p).value
     val_p = ducklib.duckdb_create_bit((data_p, 2))
     assert val_p != 0
     result = ducklib.duckdb_get_bit(val_p)

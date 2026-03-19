@@ -39,7 +39,7 @@ def create_duckdb_result():
 
 @njit
 def create_duckdb_value():
-    """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_destroy_value """
+    """Allocate a buffer for a duckdb_value pointer-to-handle."""
     return allocate_buffer(1)
 
 

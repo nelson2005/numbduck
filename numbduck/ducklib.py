@@ -36,16 +36,25 @@ _i64 = ir.IntType(64)
 _i32 = ir.IntType(32)
 
 
-@intrinsic(prefer_literal=True)
-def _call_lib_func_byval(typingctx, func_name_ty, args_ty):
-    """Like _call_lib_func, but passes the first arg by pointer on the stack.
-
-    Used for C functions that take a struct by value (e.g. duckdb_result).
-    """
-    func_name = func_name_ty.literal_value
+def _resolve_sig(func_name):
+    """Look up a function's signature in the signatures dict."""
     func_sig = signatures.get(func_name, None)
     if func_sig is None:
         raise ValueError(f"Undefined signature for {func_name}")
+    return func_sig
+
+
+@intrinsic(prefer_literal=True)
+def _call_lib_func_byval(typingctx, func_name_ty, args_ty):
+    """Like _call_lib_func, but allocates the first arg on the stack
+    and passes a pointer to that stack slot.
+
+    Used for C functions whose parameter is a pointer to a struct
+    (e.g. ``duckdb_result *``), when the caller has the struct as
+    a value.
+    """
+    func_name = func_name_ty.literal_value
+    func_sig = _resolve_sig(func_name)
 
     def codegen(context, builder, signature, arguments):
         _, args = arguments
@@ -73,9 +82,7 @@ def _call_lib_func_struct_in(typingctx, func_name_ty, args_ty):
     On other platforms: passes the struct directly by value.
     """
     func_name = func_name_ty.literal_value
-    func_sig = signatures.get(func_name, None)
-    if func_sig is None:
-        raise ValueError(f"Undefined signature for {func_name}")
+    func_sig = _resolve_sig(func_name)
 
     def codegen(context, builder, signature, arguments):
         _, args = arguments
@@ -111,9 +118,7 @@ def _call_lib_func_struct_out(typingctx, func_name_ty, args_ty):
     On other platforms: returns the struct directly by value.
     """
     func_name = func_name_ty.literal_value
-    func_sig = signatures.get(func_name, None)
-    if func_sig is None:
-        raise ValueError(f"Undefined signature for {func_name}")
+    func_sig = _resolve_sig(func_name)
 
     def codegen(context, builder, signature, arguments):
         _, args = arguments
