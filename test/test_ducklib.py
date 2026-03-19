@@ -1149,3 +1149,206 @@ def test_jit_prepare_bind_execute():
     assert col1 == 2**40, f"col1: expected 2^40, got {col1}"
     assert abs(col2 - 3.14) < 1e-10, f"col2: expected 3.14, got {col2}"
     assert col3_valid == 0, f"col3: expected NULL, validity={col3_valid}"
+
+
+# --- Value Interface ---
+
+def aux_destroy_value(val_p):
+    """Destroy a duckdb_value by storing the handle in a buffer and passing
+    the buffer address (pointer-to-handle) to duckdb_destroy_value."""
+    buf = numpy.zeros(1, dtype=numpy.intp)
+    buf[0] = val_p
+    ducklib.duckdb_destroy_value(buf.ctypes.data)
+
+
+def test_create_get_date():
+    days = numpy.int32(19000)
+    val_p = ducklib.duckdb_create_date(days)
+    assert val_p != 0
+    result = ducklib.duckdb_get_date(val_p)
+    assert result == days
+    aux_destroy_value(val_p)
+
+
+def test_create_get_time():
+    micros = numpy.int64(45000000000)
+    val_p = ducklib.duckdb_create_time(micros)
+    assert val_p != 0
+    result = ducklib.duckdb_get_time(val_p)
+    assert result == micros
+    aux_destroy_value(val_p)
+
+
+def test_create_get_time_tz():
+    micros = numpy.int64(45000000000)
+    offset = numpy.int32(3600)
+    time_tz = ducklib.duckdb_create_time_tz(micros, offset)
+    assert time_tz != 0
+    val_p = ducklib.duckdb_create_time_tz_value(time_tz)
+    assert val_p != 0
+    result = ducklib.duckdb_get_time_tz(val_p)
+    assert result == time_tz
+    aux_destroy_value(val_p)
+
+
+def test_create_get_timestamp():
+    micros = numpy.int64(1735689600000000)
+    val_p = ducklib.duckdb_create_timestamp(micros)
+    assert val_p != 0
+    result = ducklib.duckdb_get_timestamp(val_p)
+    assert result == micros
+    aux_destroy_value(val_p)
+
+
+def test_create_get_timestamp_ms():
+    ms = numpy.int64(1735689600000)
+    val_p = ducklib.duckdb_create_timestamp_ms(ms)
+    assert val_p != 0
+    result = ducklib.duckdb_get_timestamp_ms(val_p)
+    assert result == ms
+    aux_destroy_value(val_p)
+
+
+def test_create_get_timestamp_ns():
+    ns = numpy.int64(1735689600000000000)
+    val_p = ducklib.duckdb_create_timestamp_ns(ns)
+    assert val_p != 0
+    result = ducklib.duckdb_get_timestamp_ns(val_p)
+    assert result == ns
+    aux_destroy_value(val_p)
+
+
+def test_create_get_timestamp_s():
+    secs = numpy.int64(1735689600)
+    val_p = ducklib.duckdb_create_timestamp_s(secs)
+    assert val_p != 0
+    result = ducklib.duckdb_get_timestamp_s(val_p)
+    assert result == secs
+    aux_destroy_value(val_p)
+
+
+def test_create_get_timestamp_tz():
+    micros = numpy.int64(1735689600000000)
+    val_p = ducklib.duckdb_create_timestamp_tz(micros)
+    assert val_p != 0
+    result = ducklib.duckdb_get_timestamp_tz(val_p)
+    assert result == micros
+    aux_destroy_value(val_p)
+
+
+def test_create_get_blob():
+    blob_data = ctypes.c_char_p(b"\x00\x01\x02\x03")
+    blob_p = ctypes.c_void_p.from_buffer(blob_data).value
+    val_p = ducklib.duckdb_create_blob(blob_p, 4)
+    assert val_p != 0
+    result = ducklib.duckdb_get_blob(val_p)
+    data_p = result[0]
+    size = result[1]
+    assert size == 4
+    raw = (ctypes.c_char * size).from_address(data_p)
+    assert raw[:] == b"\x00\x01\x02\x03"
+    ducklib.duckdb_free(data_p)
+    aux_destroy_value(val_p)
+
+
+def test_create_get_hugeint():
+    val_p = ducklib.duckdb_create_hugeint((42, 0))
+    assert val_p != 0
+    result = ducklib.duckdb_get_hugeint(val_p)
+    assert result[0] == 42
+    assert result[1] == 0
+    aux_destroy_value(val_p)
+
+
+def test_create_get_hugeint_negative():
+    val_p = ducklib.duckdb_create_hugeint((0, -1))
+    assert val_p != 0
+    result = ducklib.duckdb_get_hugeint(val_p)
+    assert result[0] == 0
+    assert result[1] == -1
+    aux_destroy_value(val_p)
+
+
+def test_create_get_uhugeint():
+    val_p = ducklib.duckdb_create_uhugeint((100, 0))
+    assert val_p != 0
+    result = ducklib.duckdb_get_uhugeint(val_p)
+    assert result[0] == 100
+    assert result[1] == 0
+    aux_destroy_value(val_p)
+
+
+def test_create_get_uhugeint_large():
+    val_p = ducklib.duckdb_create_uhugeint((2**63, 1))
+    assert val_p != 0
+    result = ducklib.duckdb_get_uhugeint(val_p)
+    assert result[0] == 2**63
+    assert result[1] == 1
+    aux_destroy_value(val_p)
+
+
+def test_create_get_interval():
+    val_p = ducklib.duckdb_create_interval((1, 2, 3000000))
+    assert val_p != 0
+    result = ducklib.duckdb_get_interval(val_p)
+    assert result[0] == 1
+    assert result[1] == 2
+    assert result[2] == 3000000
+    aux_destroy_value(val_p)
+
+
+def test_create_get_interval_zero():
+    val_p = ducklib.duckdb_create_interval((0, 0, 0))
+    assert val_p != 0
+    result = ducklib.duckdb_get_interval(val_p)
+    assert result[0] == 0
+    assert result[1] == 0
+    assert result[2] == 0
+    aux_destroy_value(val_p)
+
+
+def test_create_get_decimal():
+    val_p = ducklib.duckdb_create_decimal((10, 2, 12345, 0))
+    assert val_p != 0
+    result = ducklib.duckdb_get_decimal(val_p)
+    assert result[0] == 10
+    assert result[1] == 2
+    assert result[2] == 12345
+    assert result[3] == 0
+    aux_destroy_value(val_p)
+
+
+def test_create_get_uuid():
+    lower = numpy.uint64(0x0123456789ABCDEF)
+    upper = numpy.uint64(0xFEDCBA9876543210)
+    val_p = ducklib.duckdb_create_uuid((lower, upper))
+    assert val_p != 0
+    result = ducklib.duckdb_get_uuid(val_p)
+    assert result[0] == lower
+    assert result[1] == upper
+    aux_destroy_value(val_p)
+
+
+def test_create_get_varint():
+    data_bytes = ctypes.c_char_p(b"\x01\x00")
+    data_p = ctypes.c_void_p.from_buffer(data_bytes).value
+    val_p = ducklib.duckdb_create_varint((data_p, 2, 0))
+    assert val_p != 0
+    result = ducklib.duckdb_get_varint(val_p)
+    size = result[1]
+    assert size == 2
+    raw = (ctypes.c_char * size).from_address(result[0])
+    assert raw[:] == b"\x01\x00"
+    ducklib.duckdb_free(result[0])
+    aux_destroy_value(val_p)
+
+
+def test_create_get_bit():
+    data_bytes = ctypes.c_char_p(b"\x05\xA0")
+    data_p = ctypes.c_void_p.from_buffer(data_bytes).value
+    val_p = ducklib.duckdb_create_bit((data_p, 2))
+    assert val_p != 0
+    result = ducklib.duckdb_get_bit(val_p)
+    assert result[1] == 2
+    ducklib.duckdb_free(result[0])
+    aux_destroy_value(val_p)
