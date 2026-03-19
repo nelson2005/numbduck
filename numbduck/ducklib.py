@@ -36,19 +36,6 @@ _i64 = ir.IntType(64)
 _i32 = ir.IntType(32)
 
 
-def _call_byval(context, builder, signature, func_name, arg_ty, arg_val):
-    """Generate IR to call a C function that takes a struct by value (via stack pointer)."""
-    arg_ll_ty = context.get_value_type(arg_ty)
-    stack_p = builder.alloca(arg_ll_ty)
-    builder.store(arg_val, stack_p)
-    func_ty_ll = FunctionType(
-        context.get_value_type(signature.return_type),
-        [arg_ll_ty.as_pointer()]
-    )
-    func_p = get_or_insert_function(builder.module, func_ty_ll, func_name)
-    return builder.call(func_p, [stack_p])
-
-
 @intrinsic(prefer_literal=True)
 def _call_lib_func_byval(typingctx, func_name_ty, args_ty):
     """Like _call_lib_func, but passes the first arg by pointer on the stack.
@@ -73,6 +60,80 @@ def _call_lib_func_byval(typingctx, func_name_ty, args_ty):
         func_p = get_or_insert_function(
             builder.module, func_ty_ll, func_name)
         return builder.call(func_p, [stack_p])
+
+    sig = func_sig.return_type(func_name_ty, args_ty)
+    return sig, codegen
+
+
+@intrinsic(prefer_literal=True)
+def _call_lib_func_struct_in(typingctx, func_name_ty, args_ty):
+    """Like _call_lib_func, but the first arg is a small struct.
+
+    On Windows: passes via stack pointer.
+    On other platforms: passes the struct directly by value.
+    """
+    func_name = func_name_ty.literal_value
+    func_sig = signatures.get(func_name, None)
+    if func_sig is None:
+        raise ValueError(f"Undefined signature for {func_name}")
+
+    def codegen(context, builder, signature, arguments):
+        _, args = arguments
+        arg = builder.extract_value(args, 0)
+        arg_ll_ty = context.get_value_type(args_ty[0])
+        if _is_win:
+            stack_p = builder.alloca(arg_ll_ty)
+            builder.store(arg, stack_p)
+            func_ty_ll = FunctionType(
+                context.get_value_type(signature.return_type),
+                [arg_ll_ty.as_pointer()]
+            )
+            func_p = get_or_insert_function(
+                builder.module, func_ty_ll, func_name)
+            return builder.call(func_p, [stack_p])
+        func_ty_ll = FunctionType(
+            context.get_value_type(signature.return_type),
+            [arg_ll_ty]
+        )
+        func_p = get_or_insert_function(
+            builder.module, func_ty_ll, func_name)
+        return builder.call(func_p, [arg])
+
+    sig = func_sig.return_type(func_name_ty, args_ty)
+    return sig, codegen
+
+
+@intrinsic(prefer_literal=True)
+def _call_lib_func_struct_out(typingctx, func_name_ty, args_ty):
+    """Like _call_lib_func, but the return value is a struct.
+
+    On Windows: uses sret (hidden first pointer arg, void return).
+    On other platforms: returns the struct directly by value.
+    """
+    func_name = func_name_ty.literal_value
+    func_sig = signatures.get(func_name, None)
+    if func_sig is None:
+        raise ValueError(f"Undefined signature for {func_name}")
+
+    def codegen(context, builder, signature, arguments):
+        _, args = arguments
+        arg = builder.extract_value(args, 0)
+        ret_ll_ty = context.get_value_type(signature.return_type)
+        if _is_win:
+            sret_p = builder.alloca(ret_ll_ty)
+            func_ty_ll = FunctionType(
+                ir.VoidType(),
+                [ret_ll_ty.as_pointer(), arg.type]
+            )
+            func_p = get_or_insert_function(
+                builder.module, func_ty_ll, func_name)
+            func_p.args[0].add_attribute('sret')
+            builder.call(func_p, [sret_p, arg])
+            return builder.load(sret_p)
+        func_ty_ll = FunctionType(ret_ll_ty, [arg.type])
+        func_p = get_or_insert_function(
+            builder.module, func_ty_ll, func_name)
+        return builder.call(func_p, [arg])
 
     sig = func_sig.return_type(func_name_ty, args_ty)
     return sig, codegen
@@ -104,6 +165,7 @@ signatures["duckdb_column_count"] = intp(intp)
 signatures["duckdb_column_logical_type"] = intp(intp, uint64)
 signatures["duckdb_column_name"] = intp(intp, uint64)
 signatures["duckdb_column_type"] = int32(intp, uint64)
+signatures["duckdb_create_bit"] = intp(duckdb_bit_ty)
 signatures["duckdb_create_blob"] = intp(intp, uint64)
 signatures["duckdb_create_date"] = intp(int32)
 signatures["duckdb_create_time"] = intp(int64)
@@ -119,6 +181,7 @@ signatures["duckdb_create_array_value"] = intp(intp, intp, uint64)
 signatures["duckdb_create_bool"] = intp(int8)
 signatures["duckdb_create_double"] = intp(float64)
 signatures["duckdb_create_enum_value"] = intp(intp, uint64)
+signatures["duckdb_create_hugeint"] = intp(duckdb_hugeint_ty)
 signatures["duckdb_create_float"] = intp(float32)
 signatures["duckdb_create_int8"] = intp(int8)
 signatures["duckdb_create_int16"] = intp(int16)
@@ -128,11 +191,13 @@ signatures["duckdb_create_list_value"] = intp(intp, intp, uint64)
 signatures["duckdb_create_map_value"] = intp(intp, intp, intp, uint64)
 signatures["duckdb_create_null_value"] = intp()
 signatures["duckdb_create_struct_value"] = intp(intp, intp)
+signatures["duckdb_create_uhugeint"] = intp(duckdb_uhugeint_ty)
 signatures["duckdb_create_uint8"] = intp(uint8)
 signatures["duckdb_create_uint16"] = intp(uint16)
 signatures["duckdb_create_uint32"] = intp(uint32)
 signatures["duckdb_create_uint64"] = intp(uint64)
 signatures["duckdb_create_union_value"] = intp(intp, uint64, intp)
+signatures["duckdb_create_uuid"] = intp(duckdb_uhugeint_ty)
 signatures["duckdb_create_varchar"] = intp(intp)
 signatures["duckdb_create_varchar_length"] = intp(intp, uint64)
 signatures["duckdb_data_chunk_get_column_count"] = intp(intp)
@@ -147,11 +212,14 @@ signatures["duckdb_disconnect"] = void(intp)
 signatures["duckdb_execute_prepared"] = duckdb_state_ty(intp, intp)
 signatures["duckdb_fetch_chunk"] = intp(duckdb_result_ty)
 signatures["duckdb_free"] = void(intp)
+signatures["duckdb_get_bit"] = duckdb_bit_ty(intp)
+signatures["duckdb_get_blob"] = duckdb_blob_ty(intp)
 signatures["duckdb_get_bool"] = int8(intp)
 signatures["duckdb_get_date"] = int32(intp)
 signatures["duckdb_get_double"] = float64(intp)
 signatures["duckdb_get_enum_value"] = uint64(intp)
 signatures["duckdb_get_float"] = float32(intp)
+signatures["duckdb_get_hugeint"] = duckdb_hugeint_ty(intp)
 signatures["duckdb_get_int8"] = int8(intp)
 signatures["duckdb_get_int16"] = int16(intp)
 signatures["duckdb_get_int32"] = int32(intp)
@@ -169,10 +237,12 @@ signatures["duckdb_get_timestamp_ms"] = int64(intp)
 signatures["duckdb_get_timestamp_ns"] = int64(intp)
 signatures["duckdb_get_timestamp_s"] = int64(intp)
 signatures["duckdb_get_timestamp_tz"] = int64(intp)
+signatures["duckdb_get_uhugeint"] = duckdb_uhugeint_ty(intp)
 signatures["duckdb_get_uint8"] = uint8(intp)
 signatures["duckdb_get_uint16"] = uint16(intp)
 signatures["duckdb_get_uint32"] = uint32(intp)
 signatures["duckdb_get_uint64"] = uint64(intp)
+signatures["duckdb_get_uuid"] = duckdb_uhugeint_ty(intp)
 signatures["duckdb_get_value_type"] = intp(intp)
 signatures["duckdb_get_varchar"] = intp(intp)
 signatures["duckdb_is_null_value"] = int8(intp)
@@ -487,35 +557,10 @@ def duckdb_connect(duckdb_database_p, duckdb_connection_pp):
     return _call_lib_func("duckdb_connect", (duckdb_database_p, duckdb_connection_pp))
 
 
-@intrinsic
-def _duckdb_create_bit(typingctx, bit_tup_ty):
-    def codegen(context, builder, signature, arguments):
-        bit_tup = arguments[0]
-        bit_ll_ty = context.get_value_type(duckdb_bit_ty)
-        if _is_win:
-            stack_p = builder.alloca(bit_ll_ty)
-            builder.store(bit_tup, stack_p)
-            func_ty_ll = FunctionType(
-                context.get_value_type(signature.return_type),
-                [bit_ll_ty.as_pointer()]
-            )
-            func_p = get_or_insert_function(
-                builder.module, func_ty_ll, "duckdb_create_bit")
-            return builder.call(func_p, [stack_p])
-        func_ty_ll = FunctionType(
-            context.get_value_type(signature.return_type),
-            [bit_ll_ty]
-        )
-        func_p = get_or_insert_function(
-            builder.module, func_ty_ll, "duckdb_create_bit")
-        return builder.call(func_p, [bit_tup])
-    return intp(duckdb_bit_ty), codegen
-
-
-@cres(intp(duckdb_bit_ty))
+@cres(signatures.get("duckdb_create_bit"))
 def duckdb_create_bit(val):
     """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_create_bit """
-    return _duckdb_create_bit(val)
+    return _call_lib_func_struct_in("duckdb_create_bit", (val,))
 
 
 @cres(signatures.get("duckdb_create_blob"))
@@ -557,35 +602,10 @@ def duckdb_create_decimal(val):
     return _duckdb_create_decimal(val)
 
 
-@intrinsic
-def _duckdb_create_hugeint(typingctx, hugeint_tup_ty):
-    def codegen(context, builder, signature, arguments):
-        hugeint_tup = arguments[0]
-        hugeint_ll_ty = context.get_value_type(duckdb_hugeint_ty)
-        if _is_win:
-            stack_p = builder.alloca(hugeint_ll_ty)
-            builder.store(hugeint_tup, stack_p)
-            func_ty_ll = FunctionType(
-                context.get_value_type(signature.return_type),
-                [hugeint_ll_ty.as_pointer()]
-            )
-            func_p = get_or_insert_function(
-                builder.module, func_ty_ll, "duckdb_create_hugeint")
-            return builder.call(func_p, [stack_p])
-        func_ty_ll = FunctionType(
-            context.get_value_type(signature.return_type),
-            [hugeint_ll_ty]
-        )
-        func_p = get_or_insert_function(
-            builder.module, func_ty_ll, "duckdb_create_hugeint")
-        return builder.call(func_p, [hugeint_tup])
-    return intp(duckdb_hugeint_ty), codegen
-
-
-@cres(intp(duckdb_hugeint_ty))
+@cres(signatures.get("duckdb_create_hugeint"))
 def duckdb_create_hugeint(val):
     """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_create_hugeint """
-    return _duckdb_create_hugeint(val)
+    return _call_lib_func_struct_in("duckdb_create_hugeint", (val,))
 
 
 @intrinsic
@@ -677,66 +697,16 @@ def duckdb_create_timestamp_tz(val):
     return _call_lib_func("duckdb_create_timestamp_tz", (val,))
 
 
-@intrinsic
-def _duckdb_create_uhugeint(typingctx, uhugeint_tup_ty):
-    def codegen(context, builder, signature, arguments):
-        uhugeint_tup = arguments[0]
-        uhugeint_ll_ty = context.get_value_type(duckdb_uhugeint_ty)
-        if _is_win:
-            stack_p = builder.alloca(uhugeint_ll_ty)
-            builder.store(uhugeint_tup, stack_p)
-            func_ty_ll = FunctionType(
-                context.get_value_type(signature.return_type),
-                [uhugeint_ll_ty.as_pointer()]
-            )
-            func_p = get_or_insert_function(
-                builder.module, func_ty_ll, "duckdb_create_uhugeint")
-            return builder.call(func_p, [stack_p])
-        func_ty_ll = FunctionType(
-            context.get_value_type(signature.return_type),
-            [uhugeint_ll_ty]
-        )
-        func_p = get_or_insert_function(
-            builder.module, func_ty_ll, "duckdb_create_uhugeint")
-        return builder.call(func_p, [uhugeint_tup])
-    return intp(duckdb_uhugeint_ty), codegen
-
-
-@cres(intp(duckdb_uhugeint_ty))
+@cres(signatures.get("duckdb_create_uhugeint"))
 def duckdb_create_uhugeint(val):
     """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_create_uhugeint """
-    return _duckdb_create_uhugeint(val)
+    return _call_lib_func_struct_in("duckdb_create_uhugeint", (val,))
 
 
-@intrinsic
-def _duckdb_create_uuid(typingctx, uhugeint_tup_ty):
-    def codegen(context, builder, signature, arguments):
-        uhugeint_tup = arguments[0]
-        uhugeint_ll_ty = context.get_value_type(duckdb_uhugeint_ty)
-        if _is_win:
-            stack_p = builder.alloca(uhugeint_ll_ty)
-            builder.store(uhugeint_tup, stack_p)
-            func_ty_ll = FunctionType(
-                context.get_value_type(signature.return_type),
-                [uhugeint_ll_ty.as_pointer()]
-            )
-            func_p = get_or_insert_function(
-                builder.module, func_ty_ll, "duckdb_create_uuid")
-            return builder.call(func_p, [stack_p])
-        func_ty_ll = FunctionType(
-            context.get_value_type(signature.return_type),
-            [uhugeint_ll_ty]
-        )
-        func_p = get_or_insert_function(
-            builder.module, func_ty_ll, "duckdb_create_uuid")
-        return builder.call(func_p, [uhugeint_tup])
-    return intp(duckdb_uhugeint_ty), codegen
-
-
-@cres(intp(duckdb_uhugeint_ty))
+@cres(signatures.get("duckdb_create_uuid"))
 def duckdb_create_uuid(val):
     """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_create_uuid """
-    return _duckdb_create_uuid(val)
+    return _call_lib_func_struct_in("duckdb_create_uuid", (val,))
 
 
 @intrinsic
@@ -953,62 +923,16 @@ def duckdb_free(ptr):
     return _call_lib_func("duckdb_free", (ptr,))
 
 
-@intrinsic
-def _duckdb_get_bit(typingctx, val_p_ty):
-    def codegen(context, builder, signature, arguments):
-        val_p = arguments[0]
-        bit_ll_ty = context.get_value_type(duckdb_bit_ty)
-        if _is_win:
-            sret_p = builder.alloca(bit_ll_ty)
-            func_ty_ll = FunctionType(
-                ir.VoidType(),
-                [bit_ll_ty.as_pointer(), val_p.type]
-            )
-            func_p = get_or_insert_function(
-                builder.module, func_ty_ll, "duckdb_get_bit")
-            func_p.args[0].add_attribute('sret')
-            builder.call(func_p, [sret_p, val_p])
-            return builder.load(sret_p)
-        func_ty_ll = FunctionType(bit_ll_ty, [val_p.type])
-        func_p = get_or_insert_function(
-            builder.module, func_ty_ll, "duckdb_get_bit")
-        return builder.call(func_p, [val_p])
-    return duckdb_bit_ty(intp), codegen
-
-
-@cres(duckdb_bit_ty(intp))
+@cres(signatures.get("duckdb_get_bit"))
 def duckdb_get_bit(val_p):
     """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_get_bit """
-    return _duckdb_get_bit(val_p)
+    return _call_lib_func_struct_out("duckdb_get_bit", (val_p,))
 
 
-@intrinsic
-def _duckdb_get_blob(typingctx, val_p_ty):
-    def codegen(context, builder, signature, arguments):
-        val_p = arguments[0]
-        blob_ll_ty = context.get_value_type(duckdb_blob_ty)
-        if _is_win:
-            sret_p = builder.alloca(blob_ll_ty)
-            func_ty_ll = FunctionType(
-                ir.VoidType(),
-                [blob_ll_ty.as_pointer(), val_p.type]
-            )
-            func_p = get_or_insert_function(
-                builder.module, func_ty_ll, "duckdb_get_blob")
-            func_p.args[0].add_attribute('sret')
-            builder.call(func_p, [sret_p, val_p])
-            return builder.load(sret_p)
-        func_ty_ll = FunctionType(blob_ll_ty, [val_p.type])
-        func_p = get_or_insert_function(
-            builder.module, func_ty_ll, "duckdb_get_blob")
-        return builder.call(func_p, [val_p])
-    return duckdb_blob_ty(intp), codegen
-
-
-@cres(duckdb_blob_ty(intp))
+@cres(signatures.get("duckdb_get_blob"))
 def duckdb_get_blob(val_p):
     """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_get_blob """
-    return _duckdb_get_blob(val_p)
+    return _call_lib_func_struct_out("duckdb_get_blob", (val_p,))
 
 
 @cres(signatures.get("duckdb_get_date"))
@@ -1041,33 +965,10 @@ def duckdb_get_decimal(val_p):
     return _duckdb_get_decimal(val_p)
 
 
-@intrinsic
-def _duckdb_get_hugeint(typingctx, val_p_ty):
-    def codegen(context, builder, signature, arguments):
-        val_p = arguments[0]
-        hugeint_ll_ty = context.get_value_type(duckdb_hugeint_ty)
-        if _is_win:
-            sret_p = builder.alloca(hugeint_ll_ty)
-            func_ty_ll = FunctionType(
-                ir.VoidType(),
-                [hugeint_ll_ty.as_pointer(), val_p.type]
-            )
-            func_p = get_or_insert_function(
-                builder.module, func_ty_ll, "duckdb_get_hugeint")
-            func_p.args[0].add_attribute('sret')
-            builder.call(func_p, [sret_p, val_p])
-            return builder.load(sret_p)
-        func_ty_ll = FunctionType(hugeint_ll_ty, [val_p.type])
-        func_p = get_or_insert_function(
-            builder.module, func_ty_ll, "duckdb_get_hugeint")
-        return builder.call(func_p, [val_p])
-    return duckdb_hugeint_ty(intp), codegen
-
-
-@cres(duckdb_hugeint_ty(intp))
+@cres(signatures.get("duckdb_get_hugeint"))
 def duckdb_get_hugeint(val_p):
     """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_get_hugeint """
-    return _duckdb_get_hugeint(val_p)
+    return _call_lib_func_struct_out("duckdb_get_hugeint", (val_p,))
 
 
 @intrinsic
@@ -1153,62 +1054,16 @@ def duckdb_get_timestamp_tz(val_p):
     return _call_lib_func("duckdb_get_timestamp_tz", (val_p,))
 
 
-@intrinsic
-def _duckdb_get_uhugeint(typingctx, val_p_ty):
-    def codegen(context, builder, signature, arguments):
-        val_p = arguments[0]
-        uhugeint_ll_ty = context.get_value_type(duckdb_uhugeint_ty)
-        if _is_win:
-            sret_p = builder.alloca(uhugeint_ll_ty)
-            func_ty_ll = FunctionType(
-                ir.VoidType(),
-                [uhugeint_ll_ty.as_pointer(), val_p.type]
-            )
-            func_p = get_or_insert_function(
-                builder.module, func_ty_ll, "duckdb_get_uhugeint")
-            func_p.args[0].add_attribute('sret')
-            builder.call(func_p, [sret_p, val_p])
-            return builder.load(sret_p)
-        func_ty_ll = FunctionType(uhugeint_ll_ty, [val_p.type])
-        func_p = get_or_insert_function(
-            builder.module, func_ty_ll, "duckdb_get_uhugeint")
-        return builder.call(func_p, [val_p])
-    return duckdb_uhugeint_ty(intp), codegen
-
-
-@cres(duckdb_uhugeint_ty(intp))
+@cres(signatures.get("duckdb_get_uhugeint"))
 def duckdb_get_uhugeint(val_p):
     """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_get_uhugeint """
-    return _duckdb_get_uhugeint(val_p)
+    return _call_lib_func_struct_out("duckdb_get_uhugeint", (val_p,))
 
 
-@intrinsic
-def _duckdb_get_uuid(typingctx, val_p_ty):
-    def codegen(context, builder, signature, arguments):
-        val_p = arguments[0]
-        uhugeint_ll_ty = context.get_value_type(duckdb_uhugeint_ty)
-        if _is_win:
-            sret_p = builder.alloca(uhugeint_ll_ty)
-            func_ty_ll = FunctionType(
-                ir.VoidType(),
-                [uhugeint_ll_ty.as_pointer(), val_p.type]
-            )
-            func_p = get_or_insert_function(
-                builder.module, func_ty_ll, "duckdb_get_uuid")
-            func_p.args[0].add_attribute('sret')
-            builder.call(func_p, [sret_p, val_p])
-            return builder.load(sret_p)
-        func_ty_ll = FunctionType(uhugeint_ll_ty, [val_p.type])
-        func_p = get_or_insert_function(
-            builder.module, func_ty_ll, "duckdb_get_uuid")
-        return builder.call(func_p, [val_p])
-    return duckdb_uhugeint_ty(intp), codegen
-
-
-@cres(duckdb_uhugeint_ty(intp))
+@cres(signatures.get("duckdb_get_uuid"))
 def duckdb_get_uuid(val_p):
     """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_get_uuid """
-    return _duckdb_get_uuid(val_p)
+    return _call_lib_func_struct_out("duckdb_get_uuid", (val_p,))
 
 
 @intrinsic
