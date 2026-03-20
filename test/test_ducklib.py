@@ -205,7 +205,7 @@ def test_duckdb_fetch_chunk_exhausted():
     out_result, duckdb_database, duckdb_connection = aux_query_1()
     duckdb_result = tuple(out_result)
     chunk_p = ducklib.duckdb_fetch_chunk(duckdb_result)
-    assert chunk_p != 0, f"Expected first chunk, got null"
+    assert chunk_p != 0, "Expected first chunk, got null"
     chunk_p = ducklib.duckdb_fetch_chunk(duckdb_result)
     assert chunk_p == 0, f"Expected null for exhausted result, got {chunk_p}"
     aux_close_db(duckdb_database, duckdb_connection)
