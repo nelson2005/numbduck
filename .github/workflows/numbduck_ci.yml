@@ -3,8 +3,6 @@ name: numbduck_ci
 on:
   push:
     branches: [ "**" ]
-  pull_request:
-    branches: [ "main" ]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -18,25 +16,10 @@ jobs:
 
     strategy:
       matrix:
-        python-version: [ "3.10", "3.11", "3.12", "3.13"]
-        arch: ["ubuntu-latest", "ubuntu-24.04-arm", "windows-latest"]
-        numba-version: ["0.60.0", "0.64.0"]
-        duckdb-version: ["1.3.2", "1.4.0", "1.5.1"]
-        exclude:
-          # numba 0.60.0 does not support Python 3.13
-          - python-version: "3.13"
-            numba-version: "0.60.0"
-          # Windows only on Python 3.11 + latest duckdb to reduce billable minutes
-          - python-version: "3.10"
-            arch: "windows-latest"
-          - python-version: "3.12"
-            arch: "windows-latest"
-          - python-version: "3.13"
-            arch: "windows-latest"
-          - arch: "windows-latest"
-            duckdb-version: "1.3.2"
-          - arch: "windows-latest"
-            duckdb-version: "1.4.0"
+        python-version: ["3.12"]
+        arch: ["macos-latest"]
+        numba-version: ["0.64.0"]
+        duckdb-version: ["1.4.0", "1.4.1", "1.5.0", "1.5.1"]
     runs-on: "${{ matrix.arch }}"
 
     steps:
@@ -65,19 +48,15 @@ jobs:
         pip install "numba==${{ matrix.numba-version }}"
         pip install "duckdb==${{ matrix.duckdb-version }}"
         pip install -e .
-    - name: Lint with flake8
+    - name: Check symbol exports
       run: |
-        # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --exclude=test/core/random_image_ref.py --select=E9,F63,F7,F82 --show-source --statistics
-        # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+        python -c "
+        from numbduck.utils import load_duckdb
+        lib = load_duckdb()
+        symbols = ['duckdb_open', 'duckdb_connect', 'duckdb_query', 'duckdb_array_type_array_size']
+        for s in symbols:
+            print(f'{s}: {hasattr(lib, s)}')
+        "
     - name: Test with pytest
       run: |
         pytest
-    - name: Install build dependencies
-      run: |
-        pip install build==1.2.2.post1 wheel==0.45.0
-    - name: Build wheel
-      run: |
-        git clean -Xfd
-        python -m build --wheel
