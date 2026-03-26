@@ -29,76 +29,17 @@ jobs:
         python -m pip install --upgrade pip
         pip install pytest "numba==0.64.0" "duckdb==1.5.0"
         pip install --no-deps -e .
-    - name: Probe ADBC entry point and function pointers
+    - name: ADBC full round-trip test
       run: |
         python -c "
-        import ctypes, ctypes.util, struct
+        import ctypes
 
         from numbduck.utils import find_duckdb_shared_lib
         lib_path = find_duckdb_shared_lib()
-        print(f'=== {lib_path}')
-        print()
-
-        # Load the .so
         lib = ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
 
-        # Verify duckdb_adbc_init is callable
-        print('--- duckdb_adbc_init ---')
-        print(f'  symbol found: {hasattr(lib, \"duckdb_adbc_init\")}')
-        adbc_init = lib.duckdb_adbc_init
-        print(f'  function: {adbc_init}')
-        print()
+        # --- ADBC struct definitions ---
 
-        # ADBC structs from adbc.h:
-        # AdbcError: { char* message; int32_t vendor_code; char[5] sqlstate;
-        #              void (*release)(AdbcError*); ... }
-        # AdbcDatabase: { void* private_data; AdbcDriver* private_driver; }
-        # AdbcDriver has ~40 function pointers
-
-        # The ADBC init signature is:
-        # AdbcStatusCode duckdb_adbc_init(int version, void* raw_driver, AdbcError* error)
-        # where version = ADBC_VERSION_1_1_0 = 1001000
-        # raw_driver points to an AdbcDriver struct that gets filled in
-
-        ADBC_VERSION_1_1_0 = 1001000
-        ADBC_VERSION_1_0_0 = 1000000
-
-        # AdbcDriver is a large struct of function pointers
-        # From adbc.h, the layout (v1.0.0) is roughly:
-        # void* private_data
-        # void* private_manager
-        # AdbcStatusCode (*release)(AdbcDriver*, AdbcError*)
-        # AdbcStatusCode (*DatabaseInit)(AdbcDatabase*, AdbcError*)
-        # AdbcStatusCode (*DatabaseNew)(AdbcDatabase*, AdbcError*)
-        # AdbcStatusCode (*DatabaseSetOption)(AdbcDatabase*, const char*, const char*, AdbcError*)
-        # AdbcStatusCode (*DatabaseRelease)(AdbcDatabase*, AdbcError*)
-        # AdbcStatusCode (*ConnectionCommit)(AdbcConnection*, AdbcError*)
-        # AdbcStatusCode (*ConnectionGetInfo)(AdbcConnection*, const uint32_t*, size_t, ArrowArrayStream*, AdbcError*)
-        # AdbcStatusCode (*ConnectionGetObjects)(...)
-        # AdbcStatusCode (*ConnectionGetTableSchema)(...)
-        # AdbcStatusCode (*ConnectionGetTableTypes)(...)
-        # AdbcStatusCode (*ConnectionInit)(AdbcConnection*, AdbcError*)
-        # AdbcStatusCode (*ConnectionNew)(AdbcConnection*, AdbcError*)
-        # AdbcStatusCode (*ConnectionSetOption)(AdbcConnection*, const char*, const char*, AdbcError*)
-        # AdbcStatusCode (*ConnectionRelease)(AdbcConnection*, AdbcError*)
-        # AdbcStatusCode (*ConnectionReadPartition)(...)
-        # AdbcStatusCode (*ConnectionRollback)(AdbcConnection*, AdbcError*)
-        # AdbcStatusCode (*StatementBind)(AdbcStatement*, ArrowArray*, ArrowSchema*, AdbcError*)
-        # AdbcStatusCode (*StatementBindStream)(AdbcStatement*, ArrowArrayStream*, AdbcError*)
-        # AdbcStatusCode (*StatementExecuteQuery)(AdbcStatement*, ArrowArrayStream*, int64_t*, AdbcError*)
-        # AdbcStatusCode (*StatementNew)(AdbcConnection*, AdbcStatement*, AdbcError*)
-        # AdbcStatusCode (*StatementPrepare)(AdbcStatement*, AdbcError*)
-        # AdbcStatusCode (*StatementRelease)(AdbcStatement*, AdbcError*)
-        # AdbcStatusCode (*StatementSetOption)(AdbcStatement*, const char*, const char*, AdbcError*)
-        # AdbcStatusCode (*StatementSetSqlQuery)(AdbcStatement*, const char*, AdbcError*)
-        # ... (more in v1.1.0)
-
-        # Allocate a buffer big enough for AdbcDriver (>= 50 function pointers)
-        DRIVER_SIZE = 8 * 60  # 60 pointer-sized fields should be plenty
-        driver_buf = (ctypes.c_uint8 * DRIVER_SIZE)()
-        ctypes.memset(driver_buf, 0, DRIVER_SIZE)
-
-        # AdbcError struct
         class AdbcError(ctypes.Structure):
             _fields_ = [
                 ('message', ctypes.c_char_p),
@@ -109,82 +50,220 @@ jobs:
                 ('private_driver', ctypes.c_void_p),
             ]
 
-        error = AdbcError()
-
-        # Call duckdb_adbc_init
-        print('--- Calling duckdb_adbc_init ---')
-        adbc_init.restype = ctypes.c_int
-        adbc_init.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(AdbcError)]
-
-        # Try v1.1.0 first, fall back to v1.0.0
-        for version in [ADBC_VERSION_1_1_0, ADBC_VERSION_1_0_0]:
-            ctypes.memset(driver_buf, 0, DRIVER_SIZE)
-            status = adbc_init(version, ctypes.cast(driver_buf, ctypes.c_void_p), ctypes.byref(error))
-            print(f'  version {version}: status={status} (0=OK)')
-            if status == 0:
-                break
-            if error.message:
-                print(f'  error: {error.message.decode()}')
-        print()
-
-        if status == 0:
-            # Read function pointers from the driver struct
-            print('--- AdbcDriver function pointers ---')
-            ptr_size = ctypes.sizeof(ctypes.c_void_p)
-            driver_addr = ctypes.addressof(driver_buf)
-            non_null = 0
-            null_count = 0
-
-            # Known field names (approximate order from adbc.h)
-            field_names = [
-                'private_data', 'private_manager',
-                'release',
-                'DatabaseInit', 'DatabaseNew', 'DatabaseSetOption', 'DatabaseRelease',
-                'ConnectionCommit', 'ConnectionGetInfo', 'ConnectionGetObjects',
-                'ConnectionGetTableSchema', 'ConnectionGetTableTypes',
-                'ConnectionInit', 'ConnectionNew', 'ConnectionSetOption',
-                'ConnectionRelease', 'ConnectionReadPartition', 'ConnectionRollback',
-                'StatementBind', 'StatementBindStream',
-                'StatementExecuteQuery', 'StatementNew', 'StatementPrepare',
-                'StatementRelease', 'StatementSetOption', 'StatementSetSqlQuery',
-                'StatementExecutePartitions',
+        class AdbcDatabase(ctypes.Structure):
+            _fields_ = [
+                ('private_data', ctypes.c_void_p),
+                ('private_driver', ctypes.c_void_p),
             ]
 
-            for i in range(min(50, DRIVER_SIZE // ptr_size)):
-                ptr = ctypes.c_void_p.from_address(driver_addr + i * ptr_size).value
-                name = field_names[i] if i < len(field_names) else f'field_{i}'
-                if ptr and ptr != 0:
-                    non_null += 1
-                    print(f'  [{i:2d}] {name}: {hex(ptr)}')
-                else:
-                    null_count += 1
+        class AdbcConnection(ctypes.Structure):
+            _fields_ = [
+                ('private_data', ctypes.c_void_p),
+                ('private_driver', ctypes.c_void_p),
+            ]
 
-            print(f'  non-null pointers: {non_null}')
-            print(f'  null pointers: {null_count}')
-            print()
+        class AdbcStatement(ctypes.Structure):
+            _fields_ = [
+                ('private_data', ctypes.c_void_p),
+                ('private_driver', ctypes.c_void_p),
+            ]
 
-            # Verify a function pointer is callable — try DatabaseNew
-            print('--- Test: call DatabaseNew ---')
-            # AdbcDatabase: { void* private_data; AdbcDriver* private_driver; }
-            class AdbcDatabase(ctypes.Structure):
-                _fields_ = [
-                    ('private_data', ctypes.c_void_p),
-                    ('private_driver', ctypes.c_void_p),
-                ]
+        # Arrow C Data Interface structs
+        class ArrowSchema(ctypes.Structure):
+            _fields_ = [
+                ('format', ctypes.c_char_p),
+                ('name', ctypes.c_char_p),
+                ('metadata', ctypes.c_char_p),
+                ('flags', ctypes.c_int64),
+                ('n_children', ctypes.c_int64),
+                ('children', ctypes.c_void_p),  # ArrowSchema**
+                ('dictionary', ctypes.c_void_p),  # ArrowSchema*
+                ('release', ctypes.c_void_p),  # void (*)(ArrowSchema*)
+                ('private_data', ctypes.c_void_p),
+            ]
 
-            # Get DatabaseNew function pointer (field index 4)
-            db_new_ptr = ctypes.c_void_p.from_address(driver_addr + 4 * ptr_size).value
-            if db_new_ptr:
-                DB_NEW_FUNC = ctypes.CFUNCTYPE(ctypes.c_int,
-                    ctypes.POINTER(AdbcDatabase), ctypes.POINTER(AdbcError))
-                db_new = DB_NEW_FUNC(db_new_ptr)
-                db = AdbcDatabase()
-                err2 = AdbcError()
-                result = db_new(ctypes.byref(db), ctypes.byref(err2))
-                print(f'  DatabaseNew result: {result} (0=OK)')
-                print(f'  db.private_data: {hex(db.private_data or 0)}')
-                print(f'  db.private_driver: {hex(db.private_driver or 0)}')
-            print()
+        class ArrowArray(ctypes.Structure):
+            _fields_ = [
+                ('length', ctypes.c_int64),
+                ('null_count', ctypes.c_int64),
+                ('offset', ctypes.c_int64),
+                ('n_buffers', ctypes.c_int64),
+                ('n_children', ctypes.c_int64),
+                ('buffers', ctypes.c_void_p),  # const void**
+                ('children', ctypes.c_void_p),  # ArrowArray**
+                ('dictionary', ctypes.c_void_p),  # ArrowArray*
+                ('release', ctypes.c_void_p),  # void (*)(ArrowArray*)
+                ('private_data', ctypes.c_void_p),
+            ]
 
-        print('DONE')
+        class ArrowArrayStream(ctypes.Structure):
+            _fields_ = [
+                ('get_schema', ctypes.c_void_p),
+                ('get_next', ctypes.c_void_p),
+                ('get_last_error', ctypes.c_void_p),
+                ('release', ctypes.c_void_p),
+                ('private_data', ctypes.c_void_p),
+            ]
+
+        # --- Helper to call ADBC functions via pointer ---
+
+        ptr_size = ctypes.sizeof(ctypes.c_void_p)
+        DRIVER_SIZE = 8 * 60
+        driver_buf = (ctypes.c_uint8 * DRIVER_SIZE)()
+        ctypes.memset(driver_buf, 0, DRIVER_SIZE)
+        driver_addr = ctypes.addressof(driver_buf)
+
+        def get_fp(index):
+            return ctypes.c_void_p.from_address(driver_addr + index * ptr_size).value
+
+        def check(name, status, error):
+            if status != 0:
+                msg = error.message.decode() if error.message else 'unknown'
+                print(f'  FAIL {name}: status={status}, error={msg}')
+                raise RuntimeError(f'{name} failed')
+            print(f'  OK {name}')
+
+        # --- Init driver ---
+        print('=== ADBC round-trip on macOS ARM64 duckdb 1.5.0 ===')
+        print()
+
+        adbc_init = lib.duckdb_adbc_init
+        adbc_init.restype = ctypes.c_int
+        adbc_init.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(AdbcError)]
+        err = AdbcError()
+        status = adbc_init(1001000, ctypes.cast(driver_buf, ctypes.c_void_p), ctypes.byref(err))
+        check('duckdb_adbc_init', status, err)
+        print()
+
+        # Field indices from previous probe
+        IDX_DB_INIT = 3
+        IDX_DB_NEW = 4
+        IDX_DB_SET_OPT = 5
+        IDX_DB_RELEASE = 6
+        IDX_CONN_INIT = 12
+        IDX_CONN_NEW = 13
+        IDX_CONN_RELEASE = 15
+        IDX_STMT_NEW = 21
+        IDX_STMT_SET_SQL = 25
+        IDX_STMT_EXEC = 20
+        IDX_STMT_RELEASE = 23
+
+        # --- 1. Create and init database ---
+        print('--- Database ---')
+        DB_NEW = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(AdbcDatabase), ctypes.POINTER(AdbcError))
+        DB_SET_OPT = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(AdbcDatabase), ctypes.c_char_p, ctypes.c_char_p, ctypes.POINTER(AdbcError))
+        DB_INIT = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(AdbcDatabase), ctypes.POINTER(AdbcError))
+        DB_RELEASE = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(AdbcDatabase), ctypes.POINTER(AdbcError))
+
+        db = AdbcDatabase()
+        err = AdbcError()
+        check('DatabaseNew', DB_NEW(get_fp(IDX_DB_NEW))(ctypes.byref(db), ctypes.byref(err)), err)
+        # Set path to in-memory
+        check('DatabaseSetOption(path)', DB_SET_OPT(get_fp(IDX_DB_SET_OPT))(ctypes.byref(db), b'path', b':memory:', ctypes.byref(err)), err)
+        check('DatabaseInit', DB_INIT(get_fp(IDX_DB_INIT))(ctypes.byref(db), ctypes.byref(err)), err)
+        print()
+
+        # --- 2. Create and init connection ---
+        print('--- Connection ---')
+        CONN_NEW = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(AdbcConnection), ctypes.POINTER(AdbcError))
+        CONN_INIT = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(AdbcConnection), ctypes.POINTER(AdbcError))
+        CONN_RELEASE = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(AdbcConnection), ctypes.POINTER(AdbcError))
+
+        conn = AdbcConnection()
+        err = AdbcError()
+        check('ConnectionNew', CONN_NEW(get_fp(IDX_CONN_NEW))(ctypes.byref(conn), ctypes.byref(err)), err)
+        # ConnectionInit needs the database — ADBC sets it via private_driver
+        conn.private_driver = db.private_driver or ctypes.addressof(driver_buf)
+        # Actually, ADBC ConnectionInit signature takes (AdbcConnection*, AdbcDatabase*, AdbcError*)
+        # Let me check — the standard ADBC has it differently
+        # From adbc.h: AdbcStatusCode ConnectionInit(AdbcConnection*, AdbcDatabase*, AdbcError*)
+        # Wait no — it depends on the version. Let's try the 2-arg version first
+        # The driver fills conn.private_driver itself in some implementations
+        # Actually looking at adbc.h more carefully:
+        # AdbcConnectionInit(conn, db, error) — 3 args
+
+        CONN_INIT_3 = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(AdbcConnection), ctypes.POINTER(AdbcDatabase), ctypes.POINTER(AdbcError))
+        check('ConnectionInit', CONN_INIT_3(get_fp(IDX_CONN_INIT))(ctypes.byref(conn), ctypes.byref(db), ctypes.byref(err)), err)
+        print()
+
+        # --- 3. Create statement, set SQL, execute ---
+        print('--- Statement ---')
+        STMT_NEW = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(AdbcConnection), ctypes.POINTER(AdbcStatement), ctypes.POINTER(AdbcError))
+        STMT_SET_SQL = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(AdbcStatement), ctypes.c_char_p, ctypes.POINTER(AdbcError))
+        STMT_EXEC = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(AdbcStatement), ctypes.POINTER(ArrowArrayStream), ctypes.POINTER(ctypes.c_int64), ctypes.POINTER(AdbcError))
+        STMT_RELEASE = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(AdbcStatement), ctypes.POINTER(AdbcError))
+
+        stmt = AdbcStatement()
+        err = AdbcError()
+        check('StatementNew', STMT_NEW(get_fp(IDX_STMT_NEW))(ctypes.byref(conn), ctypes.byref(stmt), ctypes.byref(err)), err)
+        check('StatementSetSqlQuery', STMT_SET_SQL(get_fp(IDX_STMT_SET_SQL))(ctypes.byref(stmt), b'SELECT 42 AS answer, 3.14 AS pi', ctypes.byref(err)), err)
+
+        stream = ArrowArrayStream()
+        rows_affected = ctypes.c_int64(-1)
+        check('StatementExecuteQuery', STMT_EXEC(get_fp(IDX_STMT_EXEC))(ctypes.byref(stmt), ctypes.byref(stream), ctypes.byref(rows_affected), ctypes.byref(err)), err)
+        print(f'  rows_affected: {rows_affected.value}')
+        print()
+
+        # --- 4. Read results from Arrow stream ---
+        print('--- Read Arrow results ---')
+        # get_schema: int (*)(ArrowArrayStream*, ArrowSchema*)
+        GET_SCHEMA = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(ArrowArrayStream), ctypes.POINTER(ArrowSchema))
+        schema = ArrowSchema()
+        rc = GET_SCHEMA(stream.get_schema)(ctypes.byref(stream), ctypes.byref(schema))
+        print(f'  get_schema: rc={rc}')
+        print(f'  schema.format: {schema.format}')
+        print(f'  schema.n_children: {schema.n_children}')
+
+        # Read child schemas (column names and types)
+        if schema.n_children > 0 and schema.children:
+            children_arr = (ctypes.POINTER(ArrowSchema) * schema.n_children).from_address(schema.children)
+            for i in range(schema.n_children):
+                child = children_arr[i].contents
+                print(f'  column {i}: name={child.name}, format={child.format}')
+        print()
+
+        # get_next: int (*)(ArrowArrayStream*, ArrowArray*)
+        GET_NEXT = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.POINTER(ArrowArrayStream), ctypes.POINTER(ArrowArray))
+        batch = ArrowArray()
+        rc = GET_NEXT(stream.get_next)(ctypes.byref(stream), ctypes.byref(batch))
+        print(f'  get_next: rc={rc}')
+        print(f'  batch.length: {batch.length}')
+        print(f'  batch.n_children: {batch.n_children}')
+        print(f'  batch.n_buffers: {batch.n_buffers}')
+
+        # Read the actual data from child arrays
+        if batch.n_children > 0 and batch.children:
+            children_arr = (ctypes.POINTER(ArrowArray) * batch.n_children).from_address(batch.children)
+            for i in range(batch.n_children):
+                child = children_arr[i].contents
+                print(f'  child {i}: length={child.length}, n_buffers={child.n_buffers}')
+                if child.n_buffers >= 2 and child.buffers:
+                    bufs = (ctypes.c_void_p * child.n_buffers).from_address(child.buffers)
+                    data_buf = bufs[1]  # buffer 0 is validity, buffer 1 is data
+                    if data_buf:
+                        # Try reading as int32 (for 'answer' column) or float64 (for 'pi')
+                        if i == 0:  # answer column — int32
+                            val = ctypes.c_int32.from_address(data_buf).value
+                            print(f'    value (int32): {val}')
+                        elif i == 1:  # pi column — float64
+                            val = ctypes.c_double.from_address(data_buf).value
+                            print(f'    value (float64): {val}')
+        print()
+
+        # --- 5. Cleanup ---
+        print('--- Cleanup ---')
+        err = AdbcError()
+        check('StatementRelease', STMT_RELEASE(get_fp(IDX_STMT_RELEASE))(ctypes.byref(stmt), ctypes.byref(err)), err)
+        check('ConnectionRelease', CONN_RELEASE(get_fp(IDX_CONN_RELEASE))(ctypes.byref(conn), ctypes.byref(err)), err)
+        check('DatabaseRelease', DB_RELEASE(get_fp(IDX_DB_RELEASE))(ctypes.byref(db), ctypes.byref(err)), err)
+        print()
+
+        # Release Arrow stream
+        if stream.release:
+            STREAM_RELEASE = ctypes.CFUNCTYPE(None, ctypes.POINTER(ArrowArrayStream))
+            STREAM_RELEASE(stream.release)(ctypes.byref(stream))
+            print('  Arrow stream released')
+
+        print()
+        print('=== ROUND-TRIP COMPLETE ===')
         "
