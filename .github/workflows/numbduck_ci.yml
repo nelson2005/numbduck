@@ -29,39 +29,91 @@ jobs:
         python -m pip install --upgrade pip
         pip install pytest "numba==0.64.0" "duckdb==1.5.0"
         pip install --no-deps -e .
-    - name: nm vs ctypes symbol check
+    - name: Probe hidden symbols
       run: |
         python -c "
-        import subprocess, ctypes
+        import subprocess, ctypes, ctypes.util, glob, os, sys
+
         from numbduck.utils import find_duckdb_shared_lib, load_duckdb
 
         lib_path = find_duckdb_shared_lib()
-        print(f'shared lib: {lib_path}')
+        site_pkg = os.path.dirname(lib_path)
+        test_syms = ['duckdb_array_type_array_size', 'duckdb_open', 'duckdb_query']
 
-        # nm check (what Goykhman reported)
-        result = subprocess.run(['nm', '-g', lib_path], capture_output=True, text=True)
-        nm_symbols = result.stdout
-        test_sym = 'duckdb_array_type_array_size'
-        nm_found = test_sym in nm_symbols
-        print(f'nm -g finds {test_sym}: {nm_found}')
-
-        nm_exported = [l for l in nm_symbols.splitlines() if ' T _duckdb_' in l]
-        print(f'nm -g exported duckdb_ symbol count: {len(nm_exported)}')
-        if nm_exported:
-            for s in nm_exported[:5]:
-                print(f'  {s}')
-
-        # ctypes check (what numbduck uses at runtime)
-        lib = load_duckdb()
-        ctypes_found = hasattr(lib, test_sym)
-        print(f'ctypes/dlsym finds {test_sym}: {ctypes_found}')
-
+        print(f'=== shared lib: {lib_path}')
+        print(f'=== site-packages: {site_pkg}')
         print()
-        print(f'HYPOTHESIS: nm={nm_found}, ctypes={ctypes_found}')
-        if not nm_found and ctypes_found:
-            print('CONFIRMED: nm hides symbol but dlsym resolves it via RTLD_GLOBAL')
-        elif nm_found and ctypes_found:
-            print('BOTH VISIBLE: symbol is exported normally')
-        elif not nm_found and not ctypes_found:
-            print('BOTH HIDDEN: symbol truly unavailable')
+
+        # 1. Check for other .so/.dylib files in duckdb package
+        print('--- Other libs in duckdb package ---')
+        for pat in ['*.so', '*.dylib', '**/*.so', '**/*.dylib']:
+            for f in glob.glob(os.path.join(site_pkg, pat), recursive=True):
+                if f != lib_path:
+                    print(f'  {f}')
+        # Also check for a duckdb/ subdir
+        duckdb_dir = os.path.join(site_pkg, 'duckdb')
+        if os.path.isdir(duckdb_dir):
+            for f in glob.glob(os.path.join(duckdb_dir, '**/*'), recursive=True):
+                if f.endswith(('.so', '.dylib')):
+                    print(f'  {f}')
+        print()
+
+        # 2. nm -g (exported/global) vs nm (all including local)
+        print('--- nm -g (global only) ---')
+        r = subprocess.run(['nm', '-g', lib_path], capture_output=True, text=True)
+        global_duckdb = [l for l in r.stdout.splitlines() if '_duckdb_' in l]
+        print(f'  duckdb_ global symbols: {len(global_duckdb)}')
+        for s in global_duckdb[:5]:
+            print(f'    {s}')
+
+        print('--- nm (all symbols) ---')
+        r = subprocess.run(['nm', lib_path], capture_output=True, text=True)
+        all_duckdb = [l for l in r.stdout.splitlines() if '_duckdb_' in l]
+        local_only = [l for l in all_duckdb if ' t ' in l.lower()]
+        print(f'  duckdb_ total symbols: {len(all_duckdb)}')
+        print(f'  duckdb_ local (hidden) symbols: {len(local_only)}')
+        for sym in test_syms:
+            matches = [l for l in all_duckdb if sym in l]
+            if matches:
+                print(f'  {sym}: {matches[0].strip()}')
+            else:
+                print(f'  {sym}: NOT FOUND in any visibility')
+        print()
+
+        # 3. Check Mach-O exports trie via objdump
+        print('--- objdump --macho --exports-trie (first 10 duckdb_) ---')
+        r = subprocess.run(['objdump', '--macho', '--exports-trie', lib_path],
+                           capture_output=True, text=True)
+        exports = [l for l in r.stdout.splitlines() if 'duckdb_' in l]
+        print(f'  exports trie duckdb_ count: {len(exports)}')
+        for e in exports[:10]:
+            print(f'    {e.strip()}')
+        print()
+
+        # 4. Try DYLD_FORCE_FLAT_NAMESPACE
+        print('--- dlopen with RTLD_GLOBAL (current approach) ---')
+        lib = load_duckdb()
+        for sym in test_syms:
+            print(f'  hasattr({sym}): {hasattr(lib, sym)}')
+
+        print('--- ctypes.CDLL direct load with RTLD_GLOBAL|RTLD_NOW ---')
+        try:
+            lib2 = ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+            for sym in test_syms:
+                print(f'  hasattr({sym}): {hasattr(lib2, sym)}')
+        except Exception as e:
+            print(f'  FAILED: {e}')
+
+        # 5. Try finding libduckdb via system paths
+        print('--- ctypes.util.find_library(duckdb) ---')
+        found = ctypes.util.find_library('duckdb')
+        print(f'  result: {found}')
+        if found:
+            lib3 = ctypes.CDLL(found, mode=ctypes.RTLD_GLOBAL)
+            for sym in test_syms:
+                print(f'  hasattr({sym}): {hasattr(lib3, sym)}')
+
+        # 6. File size sanity check
+        size_mb = os.path.getsize(lib_path) / (1024*1024)
+        print(f'--- .so file size: {size_mb:.1f} MB ---')
         "
