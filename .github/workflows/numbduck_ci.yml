@@ -29,130 +29,115 @@ jobs:
         python -m pip install --upgrade pip
         pip install pytest "numba==0.64.0" "duckdb==1.5.0"
         pip install --no-deps -e .
-    - name: Probe pybind11 conduit and C++ pointers
+    - name: Probe C++ mangled symbols and symbol table
       run: |
         python -c "
-        import ctypes, sys
+        import subprocess, os
 
-        import duckdb
-        import _duckdb
-
-        print(f'duckdb {duckdb.__version__}')
+        from numbduck.utils import find_duckdb_shared_lib
+        lib_path = find_duckdb_shared_lib()
+        print(f'=== {lib_path}')
         print()
 
-        conn = duckdb.connect(':memory:')
-
-        # 1. Explore _pybind11_conduit_v1_
-        print('--- _pybind11_conduit_v1_ ---')
-        conduit = getattr(conn, '_pybind11_conduit_v1_', None)
-        print(f'  conduit method: {conduit}')
-        print(f'  type: {type(conduit)}')
-        if conduit:
-            # pybind11 conduit signature: _pybind11_conduit_v1_(type_handle, capsule_name)
-            # Try calling with various args to see what it returns
-            for args in [
-                (),
-                (None,),
-                (b'',),
-            ]:
-                try:
-                    result = conduit(*args)
-                    print(f'  conduit{args} -> {result} (type={type(result).__name__})')
-                except Exception as e:
-                    print(f'  conduit{args} -> ERROR: {e}')
+        # 1. Total symbol counts by type
+        print('--- nm symbol type breakdown ---')
+        r = subprocess.run(['nm', '-g', lib_path], capture_output=True, text=True)
+        lines = r.stdout.splitlines()
+        print(f'  nm -g total lines: {len(lines)}')
+        # Count by symbol type (T=text, U=undefined, D=data, etc)
+        from collections import Counter
+        types = Counter()
+        for l in lines:
+            parts = l.split()
+            if len(parts) >= 2:
+                types[parts[-2] if len(parts) == 3 else parts[0]] += 1
+        for t, c in types.most_common(20):
+            print(f'    {t}: {c}')
         print()
 
-        # 2. Try pybind11 detail: get the type_info for DuckDBPyConnection
-        print('--- pybind11 internals via sys.modules ---')
-        for key in sorted(sys.modules):
-            if 'pybind' in key.lower():
-                print(f'  {key}: {sys.modules[key]}')
+        # 2. All exported symbols (not just duckdb_)
+        print('--- ALL nm -g exported text symbols (T) ---')
+        text_syms = [l for l in lines if ' T ' in l]
+        print(f'  text symbols: {len(text_syms)}')
+        for s in text_syms[:50]:
+            print(f'    {s.strip()}')
         print()
 
-        # 3. Use ctypes to read the pybind11 object's C++ pointer
-        #    pybind11 objects have layout: PyObject_HEAD + value_and_holder
-        #    On 64-bit: [ob_refcnt(8)] [ob_type(8)] [instance data...]
-        #    The C++ pointer is typically at offset 16 or in the holder
-        print('--- Raw memory inspection of DuckDBPyConnection ---')
-        conn_id = id(conn)
-        ptr_size = ctypes.sizeof(ctypes.c_void_p)
-        print(f'  conn id (address): {hex(conn_id)}')
-        print(f'  conn.__sizeof__(): {conn.__sizeof__()}')
-        print(f'  sys.getsizeof(conn): {sys.getsizeof(conn)}')
-
-        # Read memory at conn's address - pybind11 instance layout:
-        # PyObject_HEAD (refcnt + type = 16 bytes on 64-bit)
-        # then pybind11::detail::instance which has:
-        #   PyObject_HEAD already counted
-        #   bool owned : 1
-        #   bool holder_constructed : 1
-        #   ... padding
-        #   value_and_holder: contains the C++ pointer
-        #
-        # Let's dump the first ~128 bytes to see the layout
-        print(f'  first 128 bytes at conn address:')
-        for offset in range(0, 128, 8):
-            val = ctypes.c_uint64.from_address(conn_id + offset).value
-            print(f'    +{offset:3d}: {hex(val)} ({val})')
+        # 3. Search for mangled C++ DuckDB symbols
+        print('--- Mangled C++ duckdb symbols (nm -g) ---')
+        mangled = [l for l in lines if 'duckdb' in l.lower() or 'DuckDB' in l]
+        print(f'  matches: {len(mangled)}')
+        for s in mangled[:30]:
+            print(f'    {s.strip()}')
         print()
 
-        # 4. Try to identify the C++ pointer by comparison
-        #    Create two connections and see which fields differ
-        print('--- Compare two connections to find instance pointer ---')
-        conn2 = duckdb.connect(':memory:')
-        conn2_id = id(conn2)
-        print(f'  conn2 address: {hex(conn2_id)}')
-        diffs = []
-        for offset in range(0, 128, 8):
-            v1 = ctypes.c_uint64.from_address(conn_id + offset).value
-            v2 = ctypes.c_uint64.from_address(conn2_id + offset).value
-            if v1 != v2:
-                diffs.append((offset, v1, v2))
-                print(f'  +{offset:3d}: {hex(v1)} vs {hex(v2)} (DIFFER)')
-            else:
-                print(f'  +{offset:3d}: {hex(v1)} (same)')
+        # 4. nm without -g (all symbols, not just global)
+        print('--- nm (no flags) total ---')
+        r = subprocess.run(['nm', lib_path], capture_output=True, text=True)
+        all_lines = r.stdout.splitlines()
+        print(f'  total lines: {len(all_lines)}')
+        print(f'  stderr: {r.stderr.strip()[:200]}')
+        # Search for duckdb in all symbols
+        all_duckdb = [l for l in all_lines if 'duckdb' in l.lower() or 'DuckDB' in l]
+        print(f'  duckdb matches (all vis): {len(all_duckdb)}')
+        for s in all_duckdb[:30]:
+            print(f'    {s.strip()}')
         print()
 
-        # 5. The differing pointer fields are candidates for the C++ object ptr
-        #    Try using the first non-refcount differing field as duckdb_connection
-        print('--- Candidate C++ pointers ---')
-        for offset, v1, v2 in diffs:
-            if offset == 0:  # skip refcount
-                continue
-            print(f'  offset +{offset}: {hex(v1)}, {hex(v2)}')
-            # Sanity: is this a valid heap pointer? (high bits set on macOS ARM64)
-            if v1 > 0x100000000 and v2 > 0x100000000:
-                print(f'    looks like heap pointers')
+        # 5. nm -a (include debug symbols)
+        print('--- nm -a total ---')
+        r = subprocess.run(['nm', '-a', lib_path], capture_output=True, text=True)
+        a_lines = r.stdout.splitlines()
+        print(f'  total lines: {len(a_lines)}')
+        a_duckdb = [l for l in a_lines if 'duckdb' in l.lower() or 'DuckDB' in l]
+        print(f'  duckdb matches: {len(a_duckdb)}')
+        for s in a_duckdb[:30]:
+            print(f'    {s.strip()}')
         print()
 
-        # 6. Check if DuckDB's Python connection exposes internal handles
-        #    via any property or hidden method
-        print('--- All attributes of conn including private ---')
-        for attr in sorted(dir(conn)):
-            try:
-                val = getattr(conn, attr)
-                tp = type(val).__name__
-                # Show non-method attributes that might be pointers
-                if not callable(val) or 'built' not in tp:
-                    print(f'  {attr}: {tp} = {repr(val)[:100]}')
-            except Exception as e:
-                print(f'  {attr}: ERROR {e}')
+        # 6. objdump -t (full symbol table)
+        print('--- objdump -t (symbol table) ---')
+        r = subprocess.run(['objdump', '-t', lib_path], capture_output=True, text=True)
+        obj_lines = r.stdout.splitlines()
+        print(f'  total lines: {len(obj_lines)}')
+        obj_duckdb = [l for l in obj_lines if 'duckdb' in l.lower() or 'DuckDB' in l]
+        print(f'  duckdb matches: {len(obj_duckdb)}')
+        for s in obj_duckdb[:30]:
+            print(f'    {s.strip()}')
         print()
 
-        # 7. Run a query and inspect the result object too
-        print('--- Query result object ---')
-        result = conn.execute('SELECT 42 as answer')
-        result_id = id(result)
-        print(f'  result type: {type(result)}')
-        print(f'  result address: {hex(result_id)}')
-        print(f'  result.__sizeof__(): {result.__sizeof__()}')
-        # Dump first 128 bytes
-        for offset in range(0, 128, 8):
-            val = ctypes.c_uint64.from_address(result_id + offset).value
-            print(f'    +{offset:3d}: {hex(val)}')
+        # 7. Demangle any C++ symbols we find
+        print('--- Demangled duckdb symbols ---')
+        if mangled or all_duckdb:
+            syms_to_demangle = list(set(mangled + all_duckdb))[:50]
+            # Extract symbol names
+            names = []
+            for l in syms_to_demangle:
+                parts = l.strip().split()
+                if parts:
+                    names.append(parts[-1])
+            if names:
+                input_text = chr(10).join(names)
+                r = subprocess.run(['c++filt'], input=input_text,
+                                   capture_output=True, text=True)
+                for orig, demangled in zip(names, r.stdout.splitlines()):
+                    if orig != demangled:
+                        print(f'    {demangled}')
+                    else:
+                        print(f'    {orig} (not mangled)')
         print()
 
-        conn2.close()
-        conn.close()
-        print('DONE')
+        # 8. Search for PyInit (the module entry point) - this MUST be exported
+        print('--- PyInit symbols ---')
+        pyinit = [l for l in lines if 'PyInit' in l]
+        print(f'  PyInit symbols: {len(pyinit)}')
+        for s in pyinit:
+            print(f'    {s.strip()}')
+        print()
+
+        # 9. Compare: how many symbols does duckdb 1.4.0 have on the same platform?
+        #    (We can't install both, but check what our .so reports)
+        print('--- Binary section sizes ---')
+        r = subprocess.run(['size', '-m', lib_path], capture_output=True, text=True)
+        print(f'  {r.stdout.strip()[:1000]}')
         "
