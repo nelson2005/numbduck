@@ -29,115 +29,162 @@ jobs:
         python -m pip install --upgrade pip
         pip install pytest "numba==0.64.0" "duckdb==1.5.0"
         pip install --no-deps -e .
-    - name: Probe C++ mangled symbols and symbol table
+    - name: Probe ADBC entry point and function pointers
       run: |
         python -c "
-        import subprocess, os
+        import ctypes, ctypes.util, struct
 
         from numbduck.utils import find_duckdb_shared_lib
         lib_path = find_duckdb_shared_lib()
         print(f'=== {lib_path}')
         print()
 
-        # 1. Total symbol counts by type
-        print('--- nm symbol type breakdown ---')
-        r = subprocess.run(['nm', '-g', lib_path], capture_output=True, text=True)
-        lines = r.stdout.splitlines()
-        print(f'  nm -g total lines: {len(lines)}')
-        # Count by symbol type (T=text, U=undefined, D=data, etc)
-        from collections import Counter
-        types = Counter()
-        for l in lines:
-            parts = l.split()
-            if len(parts) >= 2:
-                types[parts[-2] if len(parts) == 3 else parts[0]] += 1
-        for t, c in types.most_common(20):
-            print(f'    {t}: {c}')
+        # Load the .so
+        lib = ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+
+        # Verify duckdb_adbc_init is callable
+        print('--- duckdb_adbc_init ---')
+        print(f'  symbol found: {hasattr(lib, \"duckdb_adbc_init\")}')
+        adbc_init = lib.duckdb_adbc_init
+        print(f'  function: {adbc_init}')
         print()
 
-        # 2. All exported symbols (not just duckdb_)
-        print('--- ALL nm -g exported text symbols (T) ---')
-        text_syms = [l for l in lines if ' T ' in l]
-        print(f'  text symbols: {len(text_syms)}')
-        for s in text_syms[:50]:
-            print(f'    {s.strip()}')
+        # ADBC structs from adbc.h:
+        # AdbcError: { char* message; int32_t vendor_code; char[5] sqlstate;
+        #              void (*release)(AdbcError*); ... }
+        # AdbcDatabase: { void* private_data; AdbcDriver* private_driver; }
+        # AdbcDriver has ~40 function pointers
+
+        # The ADBC init signature is:
+        # AdbcStatusCode duckdb_adbc_init(int version, void* raw_driver, AdbcError* error)
+        # where version = ADBC_VERSION_1_1_0 = 1001000
+        # raw_driver points to an AdbcDriver struct that gets filled in
+
+        ADBC_VERSION_1_1_0 = 1001000
+        ADBC_VERSION_1_0_0 = 1000000
+
+        # AdbcDriver is a large struct of function pointers
+        # From adbc.h, the layout (v1.0.0) is roughly:
+        # void* private_data
+        # void* private_manager
+        # AdbcStatusCode (*release)(AdbcDriver*, AdbcError*)
+        # AdbcStatusCode (*DatabaseInit)(AdbcDatabase*, AdbcError*)
+        # AdbcStatusCode (*DatabaseNew)(AdbcDatabase*, AdbcError*)
+        # AdbcStatusCode (*DatabaseSetOption)(AdbcDatabase*, const char*, const char*, AdbcError*)
+        # AdbcStatusCode (*DatabaseRelease)(AdbcDatabase*, AdbcError*)
+        # AdbcStatusCode (*ConnectionCommit)(AdbcConnection*, AdbcError*)
+        # AdbcStatusCode (*ConnectionGetInfo)(AdbcConnection*, const uint32_t*, size_t, ArrowArrayStream*, AdbcError*)
+        # AdbcStatusCode (*ConnectionGetObjects)(...)
+        # AdbcStatusCode (*ConnectionGetTableSchema)(...)
+        # AdbcStatusCode (*ConnectionGetTableTypes)(...)
+        # AdbcStatusCode (*ConnectionInit)(AdbcConnection*, AdbcError*)
+        # AdbcStatusCode (*ConnectionNew)(AdbcConnection*, AdbcError*)
+        # AdbcStatusCode (*ConnectionSetOption)(AdbcConnection*, const char*, const char*, AdbcError*)
+        # AdbcStatusCode (*ConnectionRelease)(AdbcConnection*, AdbcError*)
+        # AdbcStatusCode (*ConnectionReadPartition)(...)
+        # AdbcStatusCode (*ConnectionRollback)(AdbcConnection*, AdbcError*)
+        # AdbcStatusCode (*StatementBind)(AdbcStatement*, ArrowArray*, ArrowSchema*, AdbcError*)
+        # AdbcStatusCode (*StatementBindStream)(AdbcStatement*, ArrowArrayStream*, AdbcError*)
+        # AdbcStatusCode (*StatementExecuteQuery)(AdbcStatement*, ArrowArrayStream*, int64_t*, AdbcError*)
+        # AdbcStatusCode (*StatementNew)(AdbcConnection*, AdbcStatement*, AdbcError*)
+        # AdbcStatusCode (*StatementPrepare)(AdbcStatement*, AdbcError*)
+        # AdbcStatusCode (*StatementRelease)(AdbcStatement*, AdbcError*)
+        # AdbcStatusCode (*StatementSetOption)(AdbcStatement*, const char*, const char*, AdbcError*)
+        # AdbcStatusCode (*StatementSetSqlQuery)(AdbcStatement*, const char*, AdbcError*)
+        # ... (more in v1.1.0)
+
+        # Allocate a buffer big enough for AdbcDriver (>= 50 function pointers)
+        DRIVER_SIZE = 8 * 60  # 60 pointer-sized fields should be plenty
+        driver_buf = (ctypes.c_uint8 * DRIVER_SIZE)()
+        ctypes.memset(driver_buf, 0, DRIVER_SIZE)
+
+        # AdbcError struct
+        class AdbcError(ctypes.Structure):
+            _fields_ = [
+                ('message', ctypes.c_char_p),
+                ('vendor_code', ctypes.c_int32),
+                ('sqlstate', ctypes.c_char * 5),
+                ('release', ctypes.c_void_p),
+                ('private_data', ctypes.c_void_p),
+                ('private_driver', ctypes.c_void_p),
+            ]
+
+        error = AdbcError()
+
+        # Call duckdb_adbc_init
+        print('--- Calling duckdb_adbc_init ---')
+        adbc_init.restype = ctypes.c_int
+        adbc_init.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(AdbcError)]
+
+        # Try v1.1.0 first, fall back to v1.0.0
+        for version in [ADBC_VERSION_1_1_0, ADBC_VERSION_1_0_0]:
+            ctypes.memset(driver_buf, 0, DRIVER_SIZE)
+            status = adbc_init(version, ctypes.cast(driver_buf, ctypes.c_void_p), ctypes.byref(error))
+            print(f'  version {version}: status={status} (0=OK)')
+            if status == 0:
+                break
+            if error.message:
+                print(f'  error: {error.message.decode()}')
         print()
 
-        # 3. Search for mangled C++ DuckDB symbols
-        print('--- Mangled C++ duckdb symbols (nm -g) ---')
-        mangled = [l for l in lines if 'duckdb' in l.lower() or 'DuckDB' in l]
-        print(f'  matches: {len(mangled)}')
-        for s in mangled[:30]:
-            print(f'    {s.strip()}')
-        print()
+        if status == 0:
+            # Read function pointers from the driver struct
+            print('--- AdbcDriver function pointers ---')
+            ptr_size = ctypes.sizeof(ctypes.c_void_p)
+            driver_addr = ctypes.addressof(driver_buf)
+            non_null = 0
+            null_count = 0
 
-        # 4. nm without -g (all symbols, not just global)
-        print('--- nm (no flags) total ---')
-        r = subprocess.run(['nm', lib_path], capture_output=True, text=True)
-        all_lines = r.stdout.splitlines()
-        print(f'  total lines: {len(all_lines)}')
-        print(f'  stderr: {r.stderr.strip()[:200]}')
-        # Search for duckdb in all symbols
-        all_duckdb = [l for l in all_lines if 'duckdb' in l.lower() or 'DuckDB' in l]
-        print(f'  duckdb matches (all vis): {len(all_duckdb)}')
-        for s in all_duckdb[:30]:
-            print(f'    {s.strip()}')
-        print()
+            # Known field names (approximate order from adbc.h)
+            field_names = [
+                'private_data', 'private_manager',
+                'release',
+                'DatabaseInit', 'DatabaseNew', 'DatabaseSetOption', 'DatabaseRelease',
+                'ConnectionCommit', 'ConnectionGetInfo', 'ConnectionGetObjects',
+                'ConnectionGetTableSchema', 'ConnectionGetTableTypes',
+                'ConnectionInit', 'ConnectionNew', 'ConnectionSetOption',
+                'ConnectionRelease', 'ConnectionReadPartition', 'ConnectionRollback',
+                'StatementBind', 'StatementBindStream',
+                'StatementExecuteQuery', 'StatementNew', 'StatementPrepare',
+                'StatementRelease', 'StatementSetOption', 'StatementSetSqlQuery',
+                'StatementExecutePartitions',
+            ]
 
-        # 5. nm -a (include debug symbols)
-        print('--- nm -a total ---')
-        r = subprocess.run(['nm', '-a', lib_path], capture_output=True, text=True)
-        a_lines = r.stdout.splitlines()
-        print(f'  total lines: {len(a_lines)}')
-        a_duckdb = [l for l in a_lines if 'duckdb' in l.lower() or 'DuckDB' in l]
-        print(f'  duckdb matches: {len(a_duckdb)}')
-        for s in a_duckdb[:30]:
-            print(f'    {s.strip()}')
-        print()
+            for i in range(min(50, DRIVER_SIZE // ptr_size)):
+                ptr = ctypes.c_void_p.from_address(driver_addr + i * ptr_size).value
+                name = field_names[i] if i < len(field_names) else f'field_{i}'
+                if ptr and ptr != 0:
+                    non_null += 1
+                    print(f'  [{i:2d}] {name}: {hex(ptr)}')
+                else:
+                    null_count += 1
 
-        # 6. objdump -t (full symbol table)
-        print('--- objdump -t (symbol table) ---')
-        r = subprocess.run(['objdump', '-t', lib_path], capture_output=True, text=True)
-        obj_lines = r.stdout.splitlines()
-        print(f'  total lines: {len(obj_lines)}')
-        obj_duckdb = [l for l in obj_lines if 'duckdb' in l.lower() or 'DuckDB' in l]
-        print(f'  duckdb matches: {len(obj_duckdb)}')
-        for s in obj_duckdb[:30]:
-            print(f'    {s.strip()}')
-        print()
+            print(f'  non-null pointers: {non_null}')
+            print(f'  null pointers: {null_count}')
+            print()
 
-        # 7. Demangle any C++ symbols we find
-        print('--- Demangled duckdb symbols ---')
-        if mangled or all_duckdb:
-            syms_to_demangle = list(set(mangled + all_duckdb))[:50]
-            # Extract symbol names
-            names = []
-            for l in syms_to_demangle:
-                parts = l.strip().split()
-                if parts:
-                    names.append(parts[-1])
-            if names:
-                input_text = chr(10).join(names)
-                r = subprocess.run(['c++filt'], input=input_text,
-                                   capture_output=True, text=True)
-                for orig, demangled in zip(names, r.stdout.splitlines()):
-                    if orig != demangled:
-                        print(f'    {demangled}')
-                    else:
-                        print(f'    {orig} (not mangled)')
-        print()
+            # Verify a function pointer is callable — try DatabaseNew
+            print('--- Test: call DatabaseNew ---')
+            # AdbcDatabase: { void* private_data; AdbcDriver* private_driver; }
+            class AdbcDatabase(ctypes.Structure):
+                _fields_ = [
+                    ('private_data', ctypes.c_void_p),
+                    ('private_driver', ctypes.c_void_p),
+                ]
 
-        # 8. Search for PyInit (the module entry point) - this MUST be exported
-        print('--- PyInit symbols ---')
-        pyinit = [l for l in lines if 'PyInit' in l]
-        print(f'  PyInit symbols: {len(pyinit)}')
-        for s in pyinit:
-            print(f'    {s.strip()}')
-        print()
+            # Get DatabaseNew function pointer (field index 4)
+            db_new_ptr = ctypes.c_void_p.from_address(driver_addr + 4 * ptr_size).value
+            if db_new_ptr:
+                DB_NEW_FUNC = ctypes.CFUNCTYPE(ctypes.c_int,
+                    ctypes.POINTER(AdbcDatabase), ctypes.POINTER(AdbcError))
+                db_new = DB_NEW_FUNC(db_new_ptr)
+                db = AdbcDatabase()
+                err2 = AdbcError()
+                result = db_new(ctypes.byref(db), ctypes.byref(err2))
+                print(f'  DatabaseNew result: {result} (0=OK)')
+                print(f'  db.private_data: {hex(db.private_data or 0)}')
+                print(f'  db.private_driver: {hex(db.private_driver or 0)}')
+            print()
 
-        # 9. Compare: how many symbols does duckdb 1.4.0 have on the same platform?
-        #    (We can't install both, but check what our .so reports)
-        print('--- Binary section sizes ---')
-        r = subprocess.run(['size', '-m', lib_path], capture_output=True, text=True)
-        print(f'  {r.stdout.strip()[:1000]}')
+        print('DONE')
         "
