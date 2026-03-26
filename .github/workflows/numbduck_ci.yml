@@ -135,18 +135,29 @@ jobs:
         check('duckdb_adbc_init', status, err)
         print()
 
-        # Field indices from previous probe
+        # Field indices from adbc.h struct AdbcDriver
+        # 0=private_data 1=private_manager 2=release
         IDX_DB_INIT = 3
         IDX_DB_NEW = 4
         IDX_DB_SET_OPT = 5
         IDX_DB_RELEASE = 6
+        # 7=ConnCommit 8=ConnGetInfo 9=ConnGetObjects
+        # 10=ConnGetTableSchema 11=ConnGetTableTypes
         IDX_CONN_INIT = 12
         IDX_CONN_NEW = 13
-        IDX_CONN_RELEASE = 15
-        IDX_STMT_NEW = 21
-        IDX_STMT_SET_SQL = 25
+        # 14=ConnSetOption
+        # 15=ConnReadPartition
+        IDX_CONN_RELEASE = 16
+        # 17=ConnRollback
+        # 18=StmtBind 19=StmtBindStream
         IDX_STMT_EXEC = 20
-        IDX_STMT_RELEASE = 23
+        # 21=StmtExecPartitions 22=StmtGetParamSchema
+        IDX_STMT_NEW = 23
+        IDX_STMT_PREPARE = 24
+        IDX_STMT_RELEASE = 25
+        IDX_STMT_SET_OPT = 26
+        IDX_STMT_SET_SQL = 27
+        # 28=StmtSetSubstraitPlan
 
         # --- 1. Create and init database ---
         print('--- Database ---')
