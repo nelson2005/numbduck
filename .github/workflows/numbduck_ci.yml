@@ -32,88 +32,110 @@ jobs:
     - name: Probe hidden symbols
       run: |
         python -c "
-        import subprocess, ctypes, ctypes.util, glob, os, sys
+        import subprocess, ctypes, os
 
-        from numbduck.utils import find_duckdb_shared_lib, load_duckdb
+        from numbduck.utils import find_duckdb_shared_lib
 
         lib_path = find_duckdb_shared_lib()
-        site_pkg = os.path.dirname(lib_path)
-        test_syms = ['duckdb_array_type_array_size', 'duckdb_open', 'duckdb_query']
-
+        test_syms = ['duckdb_open', 'duckdb_query', 'duckdb_array_type_array_size']
         print(f'=== shared lib: {lib_path}')
-        print(f'=== site-packages: {site_pkg}')
         print()
 
-        # 1. Check for other .so/.dylib files in duckdb package
-        print('--- Other libs in duckdb package ---')
-        for pat in ['*.so', '*.dylib', '**/*.so', '**/*.dylib']:
-            for f in glob.glob(os.path.join(site_pkg, pat), recursive=True):
-                if f != lib_path:
-                    print(f'  {f}')
-        # Also check for a duckdb/ subdir
-        duckdb_dir = os.path.join(site_pkg, 'duckdb')
-        if os.path.isdir(duckdb_dir):
-            for f in glob.glob(os.path.join(duckdb_dir, '**/*'), recursive=True):
-                if f.endswith(('.so', '.dylib')):
-                    print(f'  {f}')
+        # 1. Is the binary stripped?
+        print('--- file command ---')
+        r = subprocess.run(['file', lib_path], capture_output=True, text=True)
+        print(f'  {r.stdout.strip()}')
         print()
 
-        # 2. nm -g (exported/global) vs nm (all including local)
-        print('--- nm -g (global only) ---')
-        r = subprocess.run(['nm', '-g', lib_path], capture_output=True, text=True)
-        global_duckdb = [l for l in r.stdout.splitlines() if '_duckdb_' in l]
-        print(f'  duckdb_ global symbols: {len(global_duckdb)}')
-        for s in global_duckdb[:5]:
-            print(f'    {s}')
+        # 2. nm -m (Mach-O visibility flags) for our target symbols
+        print('--- nm -m (Mach-O symbol metadata) ---')
+        r = subprocess.run(['nm', '-m', lib_path], capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f'  nm -m failed: {r.stderr.strip()}')
+        else:
+            all_lines = r.stdout.splitlines()
+            duckdb_lines = [l for l in all_lines if 'duckdb_' in l]
+            print(f'  total duckdb_ symbols in nm -m: {len(duckdb_lines)}')
+            for s in duckdb_lines[:20]:
+                print(f'    {s.strip()}')
+            for sym in test_syms:
+                matches = [l for l in duckdb_lines if sym in l]
+                print(f'  {sym}: {matches[0].strip() if matches else \"NOT FOUND\"}')
+        print()
 
-        print('--- nm (all symbols) ---')
-        r = subprocess.run(['nm', lib_path], capture_output=True, text=True)
-        all_duckdb = [l for l in r.stdout.splitlines() if '_duckdb_' in l]
-        local_only = [l for l in all_duckdb if ' t ' in l.lower()]
-        print(f'  duckdb_ total symbols: {len(all_duckdb)}')
-        print(f'  duckdb_ local (hidden) symbols: {len(local_only)}')
+        # 3. nm -a (debug/all including stabs) — catches symbols stripped from normal table
+        print('--- nm -a (all including debug symbols) ---')
+        r = subprocess.run(['nm', '-a', lib_path], capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f'  nm -a failed: {r.stderr.strip()}')
+        else:
+            duckdb_lines = [l for l in r.stdout.splitlines() if 'duckdb_' in l]
+            print(f'  total duckdb_ symbols in nm -a: {len(duckdb_lines)}')
+            for sym in test_syms:
+                matches = [l for l in duckdb_lines if sym in l]
+                print(f'  {sym}: {matches[0].strip() if matches else \"NOT FOUND\"}')
+        print()
+
+        # 4. strings — are the function names in the binary at all?
+        print('--- strings search for C API names ---')
+        r = subprocess.run(['strings', lib_path], capture_output=True, text=True)
+        string_matches = [s for s in r.stdout.splitlines() if s.startswith('duckdb_') and '(' not in s and ' ' not in s and len(s) < 80]
+        unique = sorted(set(string_matches))
+        print(f'  unique duckdb_* strings: {len(unique)}')
         for sym in test_syms:
-            matches = [l for l in all_duckdb if sym in l]
-            if matches:
-                print(f'  {sym}: {matches[0].strip()}')
-            else:
-                print(f'  {sym}: NOT FOUND in any visibility')
+            found = sym in unique
+            print(f'  {sym}: {\"FOUND in strings\" if found else \"NOT FOUND in strings\"}')
+        if unique:
+            print(f'  first 20:')
+            for s in unique[:20]:
+                print(f'    {s}')
         print()
 
-        # 3. Check Mach-O exports trie via objdump
-        print('--- objdump --macho --exports-trie (first 10 duckdb_) ---')
-        r = subprocess.run(['objdump', '--macho', '--exports-trie', lib_path],
+        # 5. objdump --macho --private-headers — check LC_SYMTAB / stripped status
+        print('--- Mach-O load commands (LC_SYMTAB, strip info) ---')
+        r = subprocess.run(['objdump', '--macho', '--private-headers', lib_path],
                            capture_output=True, text=True)
-        exports = [l for l in r.stdout.splitlines() if 'duckdb_' in l]
-        print(f'  exports trie duckdb_ count: {len(exports)}')
-        for e in exports[:10]:
-            print(f'    {e.strip()}')
+        for line in r.stdout.splitlines():
+            ll = line.strip().lower()
+            if any(k in ll for k in ['symtab', 'dysymtab', 'nlist', 'nsyms', 'strip']):
+                print(f'  {line.strip()}')
         print()
 
-        # 4. Try DYLD_FORCE_FLAT_NAMESPACE
-        print('--- dlopen with RTLD_GLOBAL (current approach) ---')
-        lib = load_duckdb()
-        for sym in test_syms:
-            print(f'  hasattr({sym}): {hasattr(lib, sym)}')
+        # 6. dyld_info — check if macOS has this tool
+        print('--- dyld_info --exports (if available) ---')
+        r = subprocess.run(['dyld_info', '-exports', lib_path],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            # try xcrun
+            r = subprocess.run(['xcrun', 'dyld_info', '-exports', lib_path],
+                               capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f'  dyld_info not available: {r.stderr.strip()[:200]}')
+        else:
+            duckdb_lines = [l for l in r.stdout.splitlines() if 'duckdb_' in l]
+            print(f'  duckdb_ exports: {len(duckdb_lines)}')
+            for l in duckdb_lines[:10]:
+                print(f'    {l.strip()}')
+        print()
 
-        print('--- ctypes.CDLL direct load with RTLD_GLOBAL|RTLD_NOW ---')
-        try:
-            lib2 = ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
-            for sym in test_syms:
-                print(f'  hasattr({sym}): {hasattr(lib2, sym)}')
-        except Exception as e:
-            print(f'  FAILED: {e}')
+        # 7. Compare with duckdb 1.4.0 — check what the Python module actually exposes
+        print('--- Python duckdb module internals ---')
+        import duckdb
+        print(f'  duckdb version: {duckdb.__version__}')
+        print(f'  duckdb file: {duckdb.__file__}')
+        # Check if duckdb has a library_version C function accessible
+        duckdb_so = duckdb.__file__
+        if duckdb_so and duckdb_so.endswith('.so'):
+            print(f'  duckdb.__file__ is .so, trying ctypes on it...')
+            try:
+                lib2 = ctypes.CDLL(duckdb_so, mode=ctypes.RTLD_GLOBAL)
+                for sym in test_syms:
+                    print(f'    hasattr({sym}): {hasattr(lib2, sym)}')
+            except Exception as e:
+                print(f'    failed: {e}')
+        print()
 
-        # 5. Try finding libduckdb via system paths
-        print('--- ctypes.util.find_library(duckdb) ---')
-        found = ctypes.util.find_library('duckdb')
-        print(f'  result: {found}')
-        if found:
-            lib3 = ctypes.CDLL(found, mode=ctypes.RTLD_GLOBAL)
-            for sym in test_syms:
-                print(f'  hasattr({sym}): {hasattr(lib3, sym)}')
-
-        # 6. File size sanity check
+        # 8. File size
         size_mb = os.path.getsize(lib_path) / (1024*1024)
         print(f'--- .so file size: {size_mb:.1f} MB ---')
         "
