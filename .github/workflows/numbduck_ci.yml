@@ -14,49 +14,53 @@ permissions:
 jobs:
   build:
 
-    strategy:
-      matrix:
-        python-version: ["3.12"]
-        arch: ["macos-latest"]
-        numba-version: ["0.64.0"]
-        duckdb-version: ["1.4.0", "1.4.1", "1.5.0", "1.5.1"]
-    runs-on: "${{ matrix.arch }}"
+    runs-on: macos-latest
 
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: "${{ matrix.python-version }}"
-    - name: Determine version
-      shell: bash
-      id: version
-      run: |
-        if [ "${{ github.ref_type }}" == "tag" ]; then
-          echo "VERSION=${{ github.ref_name }}" >> $GITHUB_ENV
-        else
-          BUILD_VERSION="0.1.${{ github.run_number }}"
-          echo "VERSION=${BUILD_VERSION}" >> $GITHUB_ENV
-        fi
+        python-version: "3.12"
     - name: Write version to __init__.py
-      shell: bash
-      run: echo "__version__ = '${{ env.VERSION }}'" > numbduck/__init__.py
+      run: echo "__version__ = '0.0.1'" > numbduck/__init__.py
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install flake8 pytest
-        pip install "numba==${{ matrix.numba-version }}"
-        pip install "duckdb==${{ matrix.duckdb-version }}"
-        pip install -e .
-    - name: Check symbol exports
+        pip install pytest "numba==0.64.0" "duckdb==1.5.0" -e .
+    - name: nm vs ctypes symbol check
       run: |
         python -c "
-        from numbduck.utils import load_duckdb
+        import subprocess, ctypes
+        from numbduck.utils import find_duckdb_shared_lib, load_duckdb
+
+        lib_path = find_duckdb_shared_lib()
+        print(f'shared lib: {lib_path}')
+
+        # nm check (what Goykhman reported)
+        result = subprocess.run(['nm', '-g', lib_path], capture_output=True, text=True)
+        nm_symbols = result.stdout
+        test_sym = 'duckdb_array_type_array_size'
+        nm_found = test_sym in nm_symbols
+        print(f'nm -g finds {test_sym}: {nm_found}')
+
+        nm_exported = [l for l in nm_symbols.splitlines() if ' T _duckdb_' in l]
+        print(f'nm -g exported duckdb_ symbol count: {len(nm_exported)}')
+        if nm_exported:
+            for s in nm_exported[:5]:
+                print(f'  {s}')
+
+        # ctypes check (what numbduck uses at runtime)
         lib = load_duckdb()
-        symbols = ['duckdb_open', 'duckdb_connect', 'duckdb_query', 'duckdb_array_type_array_size']
-        for s in symbols:
-            print(f'{s}: {hasattr(lib, s)}')
+        ctypes_found = hasattr(lib, test_sym)
+        print(f'ctypes/dlsym finds {test_sym}: {ctypes_found}')
+
+        print()
+        print(f'HYPOTHESIS: nm={nm_found}, ctypes={ctypes_found}')
+        if not nm_found and ctypes_found:
+            print('CONFIRMED: nm hides symbol but dlsym resolves it via RTLD_GLOBAL')
+        elif nm_found and ctypes_found:
+            print('BOTH VISIBLE: symbol is exported normally')
+        elif not nm_found and not ctypes_found:
+            print('BOTH HIDDEN: symbol truly unavailable')
         "
-    - name: Test with pytest
-      run: |
-        pytest
