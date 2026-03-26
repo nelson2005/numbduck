@@ -32,110 +32,143 @@ jobs:
     - name: Probe hidden symbols
       run: |
         python -c "
-        import subprocess, ctypes, os
+        import ctypes, ctypes.util, sys, os, types
 
         from numbduck.utils import find_duckdb_shared_lib
-
         lib_path = find_duckdb_shared_lib()
         test_syms = ['duckdb_open', 'duckdb_query', 'duckdb_array_type_array_size']
         print(f'=== shared lib: {lib_path}')
         print()
 
-        # 1. Is the binary stripped?
-        print('--- file command ---')
-        r = subprocess.run(['file', lib_path], capture_output=True, text=True)
-        print(f'  {r.stdout.strip()}')
-        print()
-
-        # 2. nm -m (Mach-O visibility flags) for our target symbols
-        print('--- nm -m (Mach-O symbol metadata) ---')
-        r = subprocess.run(['nm', '-m', lib_path], capture_output=True, text=True)
-        if r.returncode != 0:
-            print(f'  nm -m failed: {r.stderr.strip()}')
-        else:
-            all_lines = r.stdout.splitlines()
-            duckdb_lines = [l for l in all_lines if 'duckdb_' in l]
-            print(f'  total duckdb_ symbols in nm -m: {len(duckdb_lines)}')
-            for s in duckdb_lines[:20]:
-                print(f'    {s.strip()}')
-            for sym in test_syms:
-                matches = [l for l in duckdb_lines if sym in l]
-                print(f'  {sym}: {matches[0].strip() if matches else \"NOT FOUND\"}')
-        print()
-
-        # 3. nm -a (debug/all including stabs) — catches symbols stripped from normal table
-        print('--- nm -a (all including debug symbols) ---')
-        r = subprocess.run(['nm', '-a', lib_path], capture_output=True, text=True)
-        if r.returncode != 0:
-            print(f'  nm -a failed: {r.stderr.strip()}')
-        else:
-            duckdb_lines = [l for l in r.stdout.splitlines() if 'duckdb_' in l]
-            print(f'  total duckdb_ symbols in nm -a: {len(duckdb_lines)}')
-            for sym in test_syms:
-                matches = [l for l in duckdb_lines if sym in l]
-                print(f'  {sym}: {matches[0].strip() if matches else \"NOT FOUND\"}')
-        print()
-
-        # 4. strings — are the function names in the binary at all?
-        print('--- strings search for C API names ---')
-        r = subprocess.run(['strings', lib_path], capture_output=True, text=True)
-        string_matches = [s for s in r.stdout.splitlines() if s.startswith('duckdb_') and '(' not in s and ' ' not in s and len(s) < 80]
-        unique = sorted(set(string_matches))
-        print(f'  unique duckdb_* strings: {len(unique)}')
-        for sym in test_syms:
-            found = sym in unique
-            print(f'  {sym}: {\"FOUND in strings\" if found else \"NOT FOUND in strings\"}')
-        if unique:
-            print(f'  first 20:')
-            for s in unique[:20]:
-                print(f'    {s}')
-        print()
-
-        # 5. objdump --macho --private-headers — check LC_SYMTAB / stripped status
-        print('--- Mach-O load commands (LC_SYMTAB, strip info) ---')
-        r = subprocess.run(['objdump', '--macho', '--private-headers', lib_path],
-                           capture_output=True, text=True)
-        for line in r.stdout.splitlines():
-            ll = line.strip().lower()
-            if any(k in ll for k in ['symtab', 'dysymtab', 'nlist', 'nsyms', 'strip']):
-                print(f'  {line.strip()}')
-        print()
-
-        # 6. dyld_info — check if macOS has this tool
-        print('--- dyld_info --exports (if available) ---')
-        r = subprocess.run(['dyld_info', '-exports', lib_path],
-                           capture_output=True, text=True)
-        if r.returncode != 0:
-            # try xcrun
-            r = subprocess.run(['xcrun', 'dyld_info', '-exports', lib_path],
-                               capture_output=True, text=True)
-        if r.returncode != 0:
-            print(f'  dyld_info not available: {r.stderr.strip()[:200]}')
-        else:
-            duckdb_lines = [l for l in r.stdout.splitlines() if 'duckdb_' in l]
-            print(f'  duckdb_ exports: {len(duckdb_lines)}')
-            for l in duckdb_lines[:10]:
-                print(f'    {l.strip()}')
-        print()
-
-        # 7. Compare with duckdb 1.4.0 — check what the Python module actually exposes
-        print('--- Python duckdb module internals ---')
+        # 1. Import duckdb, then try RTLD_DEFAULT for our symbols
+        #    Loading the .so into the process might make symbols resolvable
         import duckdb
-        print(f'  duckdb version: {duckdb.__version__}')
-        print(f'  duckdb file: {duckdb.__file__}')
-        # Check if duckdb has a library_version C function accessible
-        duckdb_so = duckdb.__file__
-        if duckdb_so and duckdb_so.endswith('.so'):
-            print(f'  duckdb.__file__ is .so, trying ctypes on it...')
-            try:
-                lib2 = ctypes.CDLL(duckdb_so, mode=ctypes.RTLD_GLOBAL)
-                for sym in test_syms:
-                    print(f'    hasattr({sym}): {hasattr(lib2, sym)}')
-            except Exception as e:
-                print(f'    failed: {e}')
+        import _duckdb
+        print(f'duckdb version: {duckdb.__version__}')
+        print(f'duckdb.__file__: {duckdb.__file__}')
+        print(f'_duckdb module: {_duckdb}')
+        print(f'_duckdb.__file__: {getattr(_duckdb, \"__file__\", \"N/A\")}')
         print()
 
-        # 8. File size
-        size_mb = os.path.getsize(lib_path) / (1024*1024)
-        print(f'--- .so file size: {size_mb:.1f} MB ---')
+        print('--- dlsym(RTLD_DEFAULT) after import _duckdb ---')
+        try:
+            default = ctypes.CDLL(None)  # RTLD_DEFAULT
+            for sym in test_syms:
+                print(f'  {sym}: {hasattr(default, sym)}')
+        except Exception as e:
+            print(f'  failed: {e}')
+        print()
+
+        # 2. Check for PyCapsule objects in duckdb / _duckdb
+        print('--- PyCapsule search in duckdb and _duckdb ---')
+        for mod_name, mod in [('duckdb', duckdb), ('_duckdb', _duckdb)]:
+            capsules = []
+            for attr_name in dir(mod):
+                try:
+                    obj = getattr(mod, attr_name)
+                    tp = type(obj).__name__
+                    if 'capsule' in tp.lower() or 'PyCapsule' in tp:
+                        capsules.append(attr_name)
+                except:
+                    pass
+            print(f'  {mod_name} capsules: {capsules if capsules else \"none\"}')
+
+            # Also check for _C, _lib, _handle, ffi patterns
+            interesting = []
+            for attr_name in dir(mod):
+                if any(p in attr_name.lower() for p in ['_c_', 'capi', 'c_api', '_lib', '_handle', 'ffi', 'native', 'capsule', '_dll']):
+                    interesting.append(attr_name)
+            if interesting:
+                print(f'  {mod_name} interesting attrs: {interesting}')
+        print()
+
+        # 3. Inspect _duckdb module attributes exhaustively
+        print('--- _duckdb module dir() ---')
+        for attr_name in sorted(dir(_duckdb)):
+            obj = getattr(_duckdb, attr_name, None)
+            tp = type(obj).__name__
+            print(f'  {attr_name}: {tp}')
+        print()
+
+        # 4. Check if duckdb exposes a connection's internal pointer
+        print('--- duckdb.connect() object internals ---')
+        conn = duckdb.connect(':memory:')
+        print(f'  type: {type(conn)}')
+        print(f'  dir: {[a for a in dir(conn) if not a.startswith(\"__\")]}')
+        # Check for C-level pointer attributes
+        for attr in ['_conn', '_connection', 'c_ptr', '_handle', '_native']:
+            if hasattr(conn, attr):
+                print(f'  {attr}: {getattr(conn, attr)}')
+        conn.close()
+        print()
+
+        # 5. Inspect the C function pointers behind Python builtins
+        #    PyCFunctionObject has ml_meth (the C func pointer)
+        print('--- C function pointer inspection ---')
+        # duckdb.connect is a builtin_function_or_method or similar
+        connect_func = duckdb.connect
+        print(f'  duckdb.connect type: {type(connect_func).__name__}')
+        print(f'  duckdb.connect __module__: {getattr(connect_func, \"__module__\", \"?\")}')
+
+        # Try to get the raw C function pointer via ctypes
+        # PyCFunctionObject layout: ob_refcnt, ob_type, m_ml, m_self, m_module, ...
+        # PyMethodDef layout: ml_name (char*), ml_meth (func ptr), ml_flags (int), ml_doc (char*)
+        ptr_size = ctypes.sizeof(ctypes.c_void_p)
+        print(f'  pointer size: {ptr_size}')
+        print()
+
+        # 6. Check if duckdb has a way to get the library path or handle
+        print('--- duckdb library_version and internal paths ---')
+        if hasattr(duckdb, 'library_version'):
+            print(f'  library_version: {duckdb.library_version()}')
+        # Check for source_id, build info etc
+        for attr in ['source_id', 'library_version', 'platform', '__loader__']:
+            if hasattr(duckdb, attr):
+                val = getattr(duckdb, attr)
+                if callable(val):
+                    try:
+                        val = val()
+                    except:
+                        pass
+                print(f'  duckdb.{attr}: {val}')
+        print()
+
+        # 7. Try loading _duckdb .so with RTLD_GLOBAL and re-check
+        print('--- reload _duckdb.so with RTLD_GLOBAL ---')
+        duckdb_ext_path = getattr(_duckdb, '__file__', None)
+        if duckdb_ext_path:
+            print(f'  _duckdb path: {duckdb_ext_path}')
+            try:
+                lib = ctypes.CDLL(duckdb_ext_path, mode=ctypes.RTLD_GLOBAL)
+                for sym in test_syms:
+                    print(f'  {sym}: {hasattr(lib, sym)}')
+                # Also check what IS available
+                available = []
+                for attr in dir(lib):
+                    if 'duckdb' in attr.lower():
+                        available.append(attr)
+                print(f'  available duckdb attrs on CDLL: {available[:20]}')
+            except Exception as e:
+                print(f'  failed: {e}')
+        print()
+
+        # 8. Look for shared libs loaded in the process
+        print('--- loaded dylibs (from sysctl/dyld) ---')
+        import subprocess
+        # macOS: use vmmap or dyld_info on the process
+        r = subprocess.run(['bash', '-c',
+            'for f in /proc/self/maps; do cat \"$f\" 2>/dev/null; done; '
+            'vmmap $$ 2>/dev/null | grep -i duckdb | head -5; '
+            'echo DYLD_PRINT; '
+            'otool -L \"' + lib_path + '\" | head -20'
+        ], capture_output=True, text=True)
+        print(f'  {r.stdout.strip()[:2000]}')
+        if r.stderr.strip():
+            print(f'  stderr: {r.stderr.strip()[:500]}')
+        print()
+
+        # 9. otool -L to see what the .so links against
+        print('--- otool -L (linked libraries) ---')
+        r = subprocess.run(['otool', '-L', lib_path], capture_output=True, text=True)
+        print(f'  {r.stdout.strip()}')
         "
