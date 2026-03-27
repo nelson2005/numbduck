@@ -92,5 +92,11 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 
 ## Project Status
 
+- **Upstream PR**: Goykhman/numbduck#17 ("Add support for duckdb 1.3.x, 1.4.x, and 1.5.x") — open, discussing macOS dylib fallback approach
+- **DuckDB Python issue**: duckdb/duckdb-python#404 — requesting C API symbols be exported from the Python wheel. Filed 2026-03-26, awaiting response.
+- **macOS C API stripping is intentional**: [duckdb-python PR #81](https://github.com/duckdb/duckdb-python/pull/81) deliberately exports only `PyInit__duckdb` + `duckdb_adbc_init` via [CMakeLists.txt L83-L110](https://github.com/duckdb/duckdb-python/blob/main/CMakeLists.txt#L83-L110). macOS `-exported_symbol` enforces it; Linux `--export-dynamic-symbol` is additive so C API survives by accident.
+- **Agreed direction with Goykhman**: `find_duckdb_shared_lib()` falls back to standalone `libduckdb.dylib` on macOS (homebrew/download). Discussion on mechanism: CLI command (`python -m numbduck setup`) vs first-import probe vs companion package. Awaiting Goykhman's preference.
+- **ADBC not viable as full replacement**: Only covers connect/query/prepare/fetch (~42 functions). Doesn't cover UDFs, type introspection, or value construction (~120 of 160 bindings). No UDF mechanism in ADBC spec. `duckdb_adbc_init` missing from duckdb 1.4.0 only (present in 1.3.x, 1.4.1+, 1.5.x).
+- **Active branch**: `macos-arm64-verify` — diagnostic probes for macOS ARM64 symbol visibility
 - **Branches to clean up**: `abi-reproducer`, `bind-types`, `configuration`, `fork-only-updates`, `jit-prepared-statements`, `logical-types`, `result-metadata`, `upstream-bind-types`, `upstream-configuration`, `upstream-logical-types`, `upstream-result-metadata`, `upstream-value-interface`, `value-interface` — rulesets may prevent CLI deletion, use GitHub UI (https://github.com/nelson2005/numbduck/branches)
 - **Known gap**: Task 17 container value tests (list/map/struct) deferred — segfault in JIT when combining `duckdb_column_logical_type` with container creators; bindings compile correctly
