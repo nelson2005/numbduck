@@ -97,5 +97,7 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 
 ## Project Status
 
-- **Branches to clean up**: `abi-reproducer`, `bind-types`, `configuration`, `fork-only-updates`, `jit-prepared-statements`, `logical-types`, `result-metadata`, `upstream-bind-types`, `upstream-configuration`, `upstream-logical-types`, `upstream-result-metadata`, `upstream-value-interface`, `value-interface` — rulesets may prevent CLI deletion, use GitHub UI (https://github.com/nelson2005/numbduck/branches)
-- **Known gap**: Task 17 container value tests (list/map/struct) deferred — segfault in JIT when combining `duckdb_column_logical_type` with container creators; bindings compile correctly
+- **Goykhman/numbduck#17 merged** (2026-03-27) — duckdb 1.3.x/1.4.x/1.5.x support with macOS libduckdb fallback
+- **DuckDB Python issue**: duckdb/duckdb-python#404 — requesting C API symbols be exported from the Python wheel. Filed 2026-03-26, awaiting response.
+- **macOS C API stripping is intentional**: [duckdb-python PR #81](https://github.com/duckdb/duckdb-python/pull/81) deliberately exports only `PyInit__duckdb` + `duckdb_adbc_init` via [CMakeLists.txt L83-L110](https://github.com/duckdb/duckdb-python/blob/main/CMakeLists.txt#L83-L110). macOS `-exported_symbol` enforces it; Linux `--export-dynamic-symbol` is additive so C API survives by accident.
+- **Known gap**: Container value tests (list/map/struct) deferred — segfault in JIT when combining `duckdb_column_logical_type` with container creators; bindings compile correctly
