@@ -5,7 +5,7 @@ from numba.extending import intrinsic
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
 from numba.core.cgutils import get_or_insert_function
-from numbox.utils.highlevel import cres
+from numbox.utils.highlevel import cres as _cres
 
 import platform
 import sys
@@ -17,6 +17,29 @@ duckdb_lib = load_duckdb()
 
 _is_win = sys.platform == 'win32'
 _is_sysv_x86_64 = platform.machine() == 'x86_64'
+
+
+def _has_symbol(name):
+    return hasattr(duckdb_lib, name)
+
+
+def _unavailable(name):
+    def stub(*args, **kwargs):
+        raise NotImplementedError(f"{name} is not available in this duckdb version")
+    stub.__name__ = name
+    return stub
+
+
+def cres(sig, if_available=False, **kwargs):
+    if not if_available:
+        return _cres(sig, **kwargs)
+
+    def decorator(func):
+        if _has_symbol(func.__name__):
+            return _cres(sig, **kwargs)(func)
+        return _unavailable(func.__name__)
+    return decorator
+
 
 duckdb_state_ty = int32
 
@@ -856,9 +879,9 @@ def _duckdb_create_varint(typingctx, varint_tup_ty):
     return intp(duckdb_varint_ty), codegen
 
 
-@cres(intp(duckdb_varint_ty))
+@cres(intp(duckdb_varint_ty), if_available=True)
 def duckdb_create_varint(val):
-    """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_create_varint """
+    """ https://duckdb.org/docs/1.3/clients/c/api#duckdb_create_varint """
     return _duckdb_create_varint(val)
 
 
@@ -1252,9 +1275,9 @@ def _duckdb_get_varint(typingctx, val_p_ty):
     return duckdb_varint_ty(intp), codegen
 
 
-@cres(duckdb_varint_ty(intp))
+@cres(duckdb_varint_ty(intp), if_available=True)
 def duckdb_get_varint(val_p):
-    """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_get_varint """
+    """ https://duckdb.org/docs/1.3/clients/c/api#duckdb_get_varint """
     return _duckdb_get_varint(val_p)
 
 
