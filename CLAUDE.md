@@ -101,3 +101,28 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 - **DuckDB Python issue**: duckdb/duckdb-python#404 — requesting C API symbols be exported from the Python wheel. Filed 2026-03-26, awaiting response.
 - **macOS C API stripping is intentional**: [duckdb-python PR #81](https://github.com/duckdb/duckdb-python/pull/81) deliberately exports only `PyInit__duckdb` + `duckdb_adbc_init` via [CMakeLists.txt L83-L110](https://github.com/duckdb/duckdb-python/blob/main/CMakeLists.txt#L83-L110). macOS `-exported_symbol` enforces it; Linux `--export-dynamic-symbol` is additive so C API survives by accident.
 - **Known gap**: Container value tests (list/map/struct) deferred — segfault in JIT when combining `duckdb_column_logical_type` with container creators; bindings compile correctly
+
+### UDF/UDAF Bindings — In Progress (2026-03-29)
+
+**Branch**: `udf-udaf-bindings` | **PR**: nelson2005/numbduck#23 (design spec only so far)
+**Spec**: `docs/specs/2026-03-28-udf-udaf-bindings-design.md` | **Plan**: `docs/plans/2026-03-28-udf-udaf-bindings.md`
+
+**What's done (uncommitted changes in ducklib.py + test_ducklib.py):**
+- 33 bindings in ducklib.py — signatures + @cres wrappers (committed as c0420e9)
+- **CRITICAL FIX applied but not yet committed**: 17 signatures changed from `duckdb_state_ty` to `void` — the DuckDB C API `set_*` functions (set_name, add_parameter, set_return_type, set_function, set_bind, set_extra_info, set_varargs, set_volatile, set_special_handling, set_init, and all aggregate equivalents) return `void`, NOT `duckdb_state`. Only `register_*` and `add_*_to_set` return `duckdb_state`.
+- 5 tests written in test_ducklib.py (not committed): `test_scalar_function_round_trip` (PASSES), `test_scalar_function_extra_info` (SEGFAULT), `test_scalar_function_set_error`, `test_scalar_function_set_overloads`, `test_aggregate_function_round_trip`
+
+**Key patterns discovered for @cfunc + @njit UDF callbacks:**
+1. `@cfunc` cannot use `import` inside body → use module-level `@njit` impl + thin `@cfunc` wrapper
+2. `@cfunc` signatures must use `nb_types.intp` (not `nb_types.voidptr`) because numbduck uses `intp` for all pointers
+3. `carray()` inside `@njit` requires `voidptr`, but numbduck returns `intp` → need `_as_voidptr` intrinsic to cast `intp` to `voidptr` via LLVM `inttoptr`
+4. Result reading in Python test bodies: use `(ctypes.c_int32 * N).from_address(data_p)` (not `carray` which only works in JIT)
+5. `duckdb_fetch_chunk(tuple(result))` for result fetching (not `duckdb_result_get_chunk` which doesn't exist in numbduck)
+6. Destroy handles via buffer: `buf = numpy.array([handle_p], dtype=numpy.intp); destroy_func(buf.ctypes.data)`
+
+**Current blocker — `test_scalar_function_extra_info` segfaults:**
+- Segfault at `duckdb_query` when DuckDB invokes the `_extra_info_cb` callback
+- `test_scalar_function_round_trip` with same @cfunc/@njit pattern PASSES — so basic callback wiring works
+- The extra_info test registers a zero-parameter scalar function returning BIGINT, sets extra_info to `0xDEADBEEF`, callback reads it via `duckdb_function_get_extra_info(info)` and writes to output
+- Need to investigate: is `duckdb_function_get_extra_info` being called correctly? Is the zero-parameter case handled differently by DuckDB? Does `get_unicode_data_p` work inside @njit? (used in `_error_impl`)
+- The `_as_voidptr` intrinsic itself is verified working (add_one test passes with it)
