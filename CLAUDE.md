@@ -119,7 +119,7 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 **Key patterns for @cfunc + @njit UDF callbacks:**
 1. `@cfunc` cannot use `import` inside body → use module-level `@njit` impl + thin `@cfunc` wrapper
 2. `@cfunc` signatures must use `nb_types.intp` (not `nb_types.voidptr`) because numbduck uses `intp` for all pointers
-3. `carray()` inside `@njit` requires `voidptr`, but numbduck returns `intp` → need `_as_voidptr` intrinsic to cast `intp` to `voidptr` via LLVM `inttoptr`
+3. `carray()` inside `@njit` requires `voidptr`, but numbduck returns `intp` → use numbox's `_cast_int_to_void_p` intrinsic to bridge the two
 4. Result reading in Python test bodies: use `(ctypes.c_int32 * N).from_address(data_p)` (not `carray` which only works in JIT)
 5. `duckdb_fetch_chunk(tuple(result))` for result fetching (not `duckdb_result_get_chunk` which doesn't exist in numbduck)
 6. Destroy handles via buffer: `buf = numpy.array([handle_p], dtype=numpy.intp); destroy_func(buf.ctypes.data)`
