@@ -113,6 +113,7 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 - Callback-side accessors use scalar-prefixed names (`duckdb_scalar_function_get_extra_info`, `duckdb_scalar_function_set_error`) — the unprefixed versions (`duckdb_function_get_extra_info`, `duckdb_function_set_error`) are for table functions only
 - 5 tests all passing: `test_scalar_function_round_trip`, `test_scalar_function_extra_info`, `test_scalar_function_set_error`, `test_scalar_function_set_overloads`, `test_aggregate_function_round_trip`
 - 117/117 tests pass across full CI matrix (88 jobs)
+- Fix: no-op validity assertion in `test_fetch_chunk_with_null` ([641b8f5](https://github.com/nelson2005/numbduck/commit/641b8f5))
 
 **Key patterns for @cfunc + @njit UDF callbacks:**
 1. `@cfunc` cannot use `import` inside body → use module-level `@njit` impl + thin `@cfunc` wrapper
