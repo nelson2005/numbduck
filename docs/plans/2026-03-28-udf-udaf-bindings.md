@@ -37,16 +37,16 @@
 signatures["duckdb_create_scalar_function"] = intp()
 signatures["duckdb_destroy_scalar_function"] = void(intp)
 signatures["duckdb_register_scalar_function"] = duckdb_state_ty(intp, intp)
-signatures["duckdb_scalar_function_set_name"] = duckdb_state_ty(intp, intp)
-signatures["duckdb_scalar_function_add_parameter"] = duckdb_state_ty(intp, intp)
-signatures["duckdb_scalar_function_set_return_type"] = duckdb_state_ty(intp, intp)
-signatures["duckdb_scalar_function_set_function"] = duckdb_state_ty(intp, intp)
-signatures["duckdb_scalar_function_set_bind"] = duckdb_state_ty(intp, intp)
-signatures["duckdb_scalar_function_set_extra_info"] = duckdb_state_ty(intp, intp, intp)
-signatures["duckdb_scalar_function_set_varargs"] = duckdb_state_ty(intp, intp)
-signatures["duckdb_scalar_function_set_volatile"] = duckdb_state_ty(intp)
-signatures["duckdb_scalar_function_set_special_handling"] = duckdb_state_ty(intp)
-signatures["duckdb_scalar_function_set_init"] = duckdb_state_ty(intp, intp)
+signatures["duckdb_scalar_function_set_name"] = void(intp, intp)
+signatures["duckdb_scalar_function_add_parameter"] = void(intp, intp)
+signatures["duckdb_scalar_function_set_return_type"] = void(intp, intp)
+signatures["duckdb_scalar_function_set_function"] = void(intp, intp)
+signatures["duckdb_scalar_function_set_bind"] = void(intp, intp)
+signatures["duckdb_scalar_function_set_extra_info"] = void(intp, intp, intp)
+signatures["duckdb_scalar_function_set_varargs"] = void(intp, intp)
+signatures["duckdb_scalar_function_set_volatile"] = void(intp)
+signatures["duckdb_scalar_function_set_special_handling"] = void(intp)
+signatures["duckdb_scalar_function_set_init"] = void(intp, intp)
 signatures["duckdb_create_scalar_function_set"] = intp(intp)
 signatures["duckdb_destroy_scalar_function_set"] = void(intp)
 signatures["duckdb_add_scalar_function_to_set"] = duckdb_state_ty(intp, intp)
@@ -71,7 +71,7 @@ signatures["duckdb_register_scalar_function_set"] = duckdb_state_ty(intp, intp)
 - [ ] Add wrapper functions after the existing `duckdb_vector_get_validity` wrapper block (~line 1415 on upstream). Each follows the exact pattern: `@cres` decorator, function with matching name/args, docstring with API link, `_call_lib_func` call. `duckdb_scalar_function_set_init` uses `if_available=True`.
 
 ```python
-# ── Scalar Functions ────────────────────────────────────────��────────
+# ── Scalar Functions ─────────────────────────────────────────────────
 
 @cres(signatures.get("duckdb_create_scalar_function"))
 def duckdb_create_scalar_function():
@@ -220,18 +220,15 @@ def test_scalar_function_round_trip():
     assert func_p != 0
 
     name_p = get_unicode_data_p("add_one")
-    rc = ducklib.duckdb_scalar_function_set_name(func_p, name_p)
-    assert rc == ducklib.DuckDBSuccess
+    ducklib.duckdb_scalar_function_set_name(func_p, name_p)
 
     int_type_p = ducklib.duckdb_create_logical_type(4)  # DUCKDB_TYPE_INTEGER
-    rc = ducklib.duckdb_scalar_function_add_parameter(func_p, int_type_p)
-    assert rc == ducklib.DuckDBSuccess
-    rc = ducklib.duckdb_scalar_function_set_return_type(func_p, int_type_p)
-    assert rc == ducklib.DuckDBSuccess
-    ducklib.duckdb_destroy_logical_type(int_type_p)
+    ducklib.duckdb_scalar_function_add_parameter(func_p, int_type_p)
+    ducklib.duckdb_scalar_function_set_return_type(func_p, int_type_p)
+    type_buf = numpy.array([int_type_p], dtype=numpy.intp)
+    ducklib.duckdb_destroy_logical_type(type_buf.ctypes.data)
 
-    rc = ducklib.duckdb_scalar_function_set_function(func_p, add_one_cb.address)
-    assert rc == ducklib.DuckDBSuccess
+    ducklib.duckdb_scalar_function_set_function(func_p, add_one_cb.address)
 
     rc = ducklib.duckdb_register_scalar_function(conn_p, func_p)
     assert rc == ducklib.DuckDBSuccess
@@ -281,13 +278,13 @@ def test_scalar_function_round_trip():
 signatures["duckdb_create_aggregate_function"] = intp()
 signatures["duckdb_destroy_aggregate_function"] = void(intp)
 signatures["duckdb_register_aggregate_function"] = duckdb_state_ty(intp, intp)
-signatures["duckdb_aggregate_function_set_name"] = duckdb_state_ty(intp, intp)
-signatures["duckdb_aggregate_function_add_parameter"] = duckdb_state_ty(intp, intp)
-signatures["duckdb_aggregate_function_set_return_type"] = duckdb_state_ty(intp, intp)
-signatures["duckdb_aggregate_function_set_functions"] = duckdb_state_ty(intp, intp, intp, intp, intp, intp)
-signatures["duckdb_aggregate_function_set_destructor"] = duckdb_state_ty(intp, intp)
-signatures["duckdb_aggregate_function_set_extra_info"] = duckdb_state_ty(intp, intp, intp)
-signatures["duckdb_aggregate_function_set_special_handling"] = duckdb_state_ty(intp)
+signatures["duckdb_aggregate_function_set_name"] = void(intp, intp)
+signatures["duckdb_aggregate_function_add_parameter"] = void(intp, intp)
+signatures["duckdb_aggregate_function_set_return_type"] = void(intp, intp)
+signatures["duckdb_aggregate_function_set_functions"] = void(intp, intp, intp, intp, intp, intp)
+signatures["duckdb_aggregate_function_set_destructor"] = void(intp, intp)
+signatures["duckdb_aggregate_function_set_extra_info"] = void(intp, intp, intp)
+signatures["duckdb_aggregate_function_set_special_handling"] = void(intp)
 signatures["duckdb_create_aggregate_function_set"] = intp(intp)
 signatures["duckdb_destroy_aggregate_function_set"] = void(intp)
 signatures["duckdb_add_aggregate_function_to_set"] = duckdb_state_ty(intp, intp)
@@ -389,7 +386,7 @@ def duckdb_register_aggregate_function_set(connection_p, set_p):
 
 ### Task 5: Callback-side accessor signatures and wrappers
 
-**Goal:** Add `duckdb_function_get_extra_info` and `duckdb_function_set_error` bindings.
+**Goal:** Add `duckdb_scalar_function_get_extra_info` and `duckdb_scalar_function_set_error` bindings.
 
 **Files:**
 - Modify: `numbduck/ducklib.py`
@@ -400,25 +397,27 @@ def duckdb_register_aggregate_function_set(connection_p, set_p):
 
 ```python
 # ── Callback-Side Accessors ──────────────────────────────────────────
-signatures["duckdb_function_get_extra_info"] = intp(intp)
-signatures["duckdb_function_set_error"] = void(intp, intp)
+signatures["duckdb_scalar_function_get_extra_info"] = intp(intp)
+signatures["duckdb_scalar_function_set_error"] = void(intp, intp)
 ```
+
+Note: The unprefixed `duckdb_function_get_extra_info` and `duckdb_function_set_error` are for table functions. Scalar functions must use the `duckdb_scalar_function_` prefix (see duckdb.h lines 3823 and 3856).
 
 - [ ] Add wrappers after aggregate function wrappers:
 
 ```python
 # ── Callback-Side Accessors ──────────────────────────────────────────
 
-@cres(signatures.get("duckdb_function_get_extra_info"))
-def duckdb_function_get_extra_info(info_p):
-    """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_function_get_extra_info """
-    return _call_lib_func("duckdb_function_get_extra_info", (info_p,))
+@cres(signatures.get("duckdb_scalar_function_get_extra_info"))
+def duckdb_scalar_function_get_extra_info(info_p):
+    """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_scalar_function_get_extra_info """
+    return _call_lib_func("duckdb_scalar_function_get_extra_info", (info_p,))
 
 
-@cres(signatures.get("duckdb_function_set_error"))
-def duckdb_function_set_error(info_p, error_p):
-    """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_function_set_error """
-    return _call_lib_func("duckdb_function_set_error", (info_p, error_p))
+@cres(signatures.get("duckdb_scalar_function_set_error"))
+def duckdb_scalar_function_set_error(info_p, error_p):
+    """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_scalar_function_set_error """
+    return _call_lib_func("duckdb_scalar_function_set_error", (info_p, error_p))
 ```
 
 - [ ] Commit: `git add numbduck/ducklib.py && git commit -m "Add callback-side accessor bindings to ducklib"`

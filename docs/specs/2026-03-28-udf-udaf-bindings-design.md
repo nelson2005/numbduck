@@ -20,16 +20,16 @@ Add 33 C API function bindings to `ducklib.py` (32 baseline + 1 version-conditio
 
 | C API Function | Signature | Notes |
 |---|---|---|
-| `duckdb_scalar_function_set_name` | `duckdb_state_ty(_p, _p)` | function, const char* |
-| `duckdb_scalar_function_add_parameter` | `duckdb_state_ty(_p, _p)` | function, logical_type |
-| `duckdb_scalar_function_set_return_type` | `duckdb_state_ty(_p, _p)` | function, logical_type |
-| `duckdb_scalar_function_set_function` | `duckdb_state_ty(_p, _p)` | function, callback ptr |
-| `duckdb_scalar_function_set_bind` | `duckdb_state_ty(_p, _p)` | function, bind callback ptr |
-| `duckdb_scalar_function_set_extra_info` | `duckdb_state_ty(_p, _p, _p)` | function, data ptr, destroy callback |
-| `duckdb_scalar_function_set_varargs` | `duckdb_state_ty(_p, _p)` | function, logical_type |
-| `duckdb_scalar_function_set_volatile` | `duckdb_state_ty(_p)` | function |
-| `duckdb_scalar_function_set_special_handling` | `duckdb_state_ty(_p)` | function |
-| `duckdb_scalar_function_set_init` | `duckdb_state_ty(_p, _p)` | function, init callback; **v1.5+ only** (`if_available=True`) |
+| `duckdb_scalar_function_set_name` | `void(_p, _p)` | function, const char* |
+| `duckdb_scalar_function_add_parameter` | `void(_p, _p)` | function, logical_type |
+| `duckdb_scalar_function_set_return_type` | `void(_p, _p)` | function, logical_type |
+| `duckdb_scalar_function_set_function` | `void(_p, _p)` | function, callback ptr |
+| `duckdb_scalar_function_set_bind` | `void(_p, _p)` | function, bind callback ptr |
+| `duckdb_scalar_function_set_extra_info` | `void(_p, _p, _p)` | function, data ptr, destroy callback |
+| `duckdb_scalar_function_set_varargs` | `void(_p, _p)` | function, logical_type |
+| `duckdb_scalar_function_set_volatile` | `void(_p)` | function |
+| `duckdb_scalar_function_set_special_handling` | `void(_p)` | function |
+| `duckdb_scalar_function_set_init` | `void(_p, _p)` | function, init callback; **v1.5+ only** (`if_available=True`) |
 
 **Scalar function sets / overloads (4):**
 
@@ -38,7 +38,7 @@ Add 33 C API function bindings to `ducklib.py` (32 baseline + 1 version-conditio
 | `duckdb_create_scalar_function_set` | `_p(_p)` | const char* name |
 | `duckdb_destroy_scalar_function_set` | `void(_pp)` | pointer-to-pointer |
 | `duckdb_add_scalar_function_to_set` | `duckdb_state_ty(_p, _p)` | set, function |
-| `duckdb_register_scalar_function_set` | `uint32(_p, _p)` | connection, set |
+| `duckdb_register_scalar_function_set` | `duckdb_state_ty(_p, _p)` | connection, set |
 
 **Aggregate function lifecycle (3):**
 
@@ -52,13 +52,13 @@ Add 33 C API function bindings to `ducklib.py` (32 baseline + 1 version-conditio
 
 | C API Function | Signature | Notes |
 |---|---|---|
-| `duckdb_aggregate_function_set_name` | `duckdb_state_ty(_p, _p)` | function, const char* |
-| `duckdb_aggregate_function_add_parameter` | `duckdb_state_ty(_p, _p)` | function, logical_type |
-| `duckdb_aggregate_function_set_return_type` | `duckdb_state_ty(_p, _p)` | function, logical_type |
-| `duckdb_aggregate_function_set_functions` | `duckdb_state_ty(_p, _p, _p, _p, _p, _p)` | function, state_size, init, update, combine, finalize |
-| `duckdb_aggregate_function_set_destructor` | `duckdb_state_ty(_p, _p)` | function, destroy callback |
-| `duckdb_aggregate_function_set_extra_info` | `duckdb_state_ty(_p, _p, _p)` | function, data ptr, destroy callback |
-| `duckdb_aggregate_function_set_special_handling` | `duckdb_state_ty(_p)` | function |
+| `duckdb_aggregate_function_set_name` | `void(_p, _p)` | function, const char* |
+| `duckdb_aggregate_function_add_parameter` | `void(_p, _p)` | function, logical_type |
+| `duckdb_aggregate_function_set_return_type` | `void(_p, _p)` | function, logical_type |
+| `duckdb_aggregate_function_set_functions` | `void(_p, _p, _p, _p, _p, _p)` | function, state_size, init, update, combine, finalize |
+| `duckdb_aggregate_function_set_destructor` | `void(_p, _p)` | function, destroy callback |
+| `duckdb_aggregate_function_set_extra_info` | `void(_p, _p, _p)` | function, data ptr, destroy callback |
+| `duckdb_aggregate_function_set_special_handling` | `void(_p)` | function |
 
 **Aggregate function sets / overloads (4):**
 
@@ -67,14 +67,14 @@ Add 33 C API function bindings to `ducklib.py` (32 baseline + 1 version-conditio
 | `duckdb_create_aggregate_function_set` | `_p(_p)` | const char* name |
 | `duckdb_destroy_aggregate_function_set` | `void(_pp)` | pointer-to-pointer |
 | `duckdb_add_aggregate_function_to_set` | `duckdb_state_ty(_p, _p)` | set, function |
-| `duckdb_register_aggregate_function_set` | `uint32(_p, _p)` | connection, set |
+| `duckdb_register_aggregate_function_set` | `duckdb_state_ty(_p, _p)` | connection, set |
 
 **Callback-side accessors (2):**
 
 | C API Function | Signature | Notes |
 |---|---|---|
-| `duckdb_function_get_extra_info` | `_p(_p)` | Returns void* from function_info |
-| `duckdb_function_set_error` | `void(_p, _p)` | function_info, const char* |
+| `duckdb_scalar_function_get_extra_info` | `_p(_p)` | Returns void* from function_info |
+| `duckdb_scalar_function_set_error` | `void(_p, _p)` | function_info, const char* |
 
 **Total: 33 bindings** (32 baseline + 1 version-conditional)
 
