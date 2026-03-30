@@ -105,6 +105,7 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 ### UDF/UDAF Bindings — Complete (2026-03-29)
 
 **Branch**: `udf-udaf-bindings` | **PR**: nelson2005/numbduck#24
+**Upstream PR**: Goykhman/numbduck#19 (branch: `udf-udaf-upstream`)
 **Spec**: `docs/specs/2026-03-28-udf-udaf-bindings-design.md` | **Plan**: `docs/plans/2026-03-28-udf-udaf-bindings.md`
 
 **What's implemented:**
