@@ -102,7 +102,7 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 - **macOS C API stripping is intentional**: [duckdb-python PR #81](https://github.com/duckdb/duckdb-python/pull/81) deliberately exports only `PyInit__duckdb` + `duckdb_adbc_init` via [CMakeLists.txt L83-L110](https://github.com/duckdb/duckdb-python/blob/main/CMakeLists.txt#L83-L110). macOS `-exported_symbol` enforces it; Linux `--export-dynamic-symbol` is additive so C API survives by accident.
 - **Known gap**: Container value tests (list/map/struct) deferred — segfault in JIT when combining `duckdb_column_logical_type` with container creators; bindings compile correctly
 
-### UDF/UDAF Bindings — Complete (2026-03-29)
+### UDF/UDAF Bindings — In Review (upstream PR open)
 
 **Branch**: `udf-udaf-bindings` | **PR**: nelson2005/numbduck#24
 **Upstream PR**: Goykhman/numbduck#19 (branch: `udf-udaf-upstream`)
@@ -113,8 +113,17 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 - 17 setter signatures corrected from `duckdb_state_ty` to `void` (C API `set_*` functions return `void`, only `register_*` and `add_*_to_set` return `duckdb_state`)
 - Callback-side accessors use scalar-prefixed names (`duckdb_scalar_function_get_extra_info`, `duckdb_scalar_function_set_error`) — the unprefixed versions (`duckdb_function_get_extra_info`, `duckdb_function_set_error`) are for table functions only
 - 5 tests all passing: `test_scalar_function_round_trip`, `test_scalar_function_extra_info`, `test_scalar_function_set_error`, `test_scalar_function_set_overloads`, `test_aggregate_function_round_trip`
-- 117/117 tests pass across full CI matrix (88 jobs)
+- 118 passed, 1 skipped across full CI matrix (46 jobs)
 - Fix: no-op validity assertion in `test_fetch_chunk_with_null` ([641b8f5](https://github.com/nelson2005/numbduck/commit/641b8f5))
+
+**Upstream review addressed (2026-03-30):**
+- Replaced custom `as_voidptr` intrinsic with numbox's `_cast_int_to_void_p` (Goykhman suggestion)
+- Removed section delineation comments from ducklib.py (Goykhman request)
+- Reverted unnecessary reformatting of `jit_connect_query_disconnect` call
+
+**Remaining upstream review items:**
+- Goykhman comment (id:3010307862, ducklib.py:353): remove delineations in signatures section — **done**
+- Goykhman comment (id:3010530082, test_ducklib.py:1900): requesting hybrid Python+JIT UDF demo/test — **not yet addressed**, needs discussion/implementation
 
 **Key patterns for @cfunc + @njit UDF callbacks:**
 1. `@cfunc` cannot use `import` inside body → use module-level `@njit` impl + thin `@cfunc` wrapper
