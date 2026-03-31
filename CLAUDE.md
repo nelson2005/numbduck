@@ -123,7 +123,21 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 
 **Remaining upstream review items:**
 - Goykhman comment (id:3010307862, ducklib.py:353): remove delineations in signatures section — **done**
-- Goykhman comment (id:3010530082, test_ducklib.py:1900): requesting hybrid Python+JIT UDF demo/test — **not yet addressed**, needs discussion/implementation
+- Goykhman comment (id:3010530082, test_ducklib.py:1900): hybrid Python+JIT UDF demo — **in progress**
+
+### Hybrid JIT UDF Demo — In Progress (2026-03-30)
+
+**Spec**: `docs/specs/2026-03-30-hybrid-udf-demo-design.md`
+
+**Pointer bridge proven** — extract raw `Connection*` from Python `duckdb.DuckDBPyConnection`:
+- pybind11 layout: `id(conn) + 16` → `DuckDBPyConnection*`, then `+ 32` → `Connection*`
+- Validated on duckdb 1.3.2 / Linux x86-64 / libstdc++
+- Full hybrid flow tested: Python creates table → extract pointer → register JIT UDF via C API → query from Python returns correct results
+
+**What needs implementing:**
+1. `numbduck/pybridge.py` — `extract_connection_ptr(conn)` with runtime validation
+2. `test_hybrid_jit_udf_on_python_connection` — full hybrid demo (Newton's method sqrt)
+3. `test_jit_udf_vs_python_udf` — side-by-side comparison, same connection, assert identical results
 
 **Key patterns for @cfunc + @njit UDF callbacks:**
 1. `@cfunc` cannot use `import` inside body → use module-level `@njit` impl + thin `@cfunc` wrapper
