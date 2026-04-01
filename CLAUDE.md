@@ -134,10 +134,24 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 - Validated on duckdb 1.3.2 / Linux x86-64 / libstdc++
 - Full hybrid flow tested: Python creates table → extract pointer → register JIT UDF via C API → query from Python returns correct results
 
-**What needs implementing:**
+**Completed:**
 1. `numbduck/pybridge.py` — `extract_connection_ptr(conn)` with runtime validation
 2. `test_hybrid_jit_udf_on_python_connection` — full hybrid demo (Newton's method sqrt)
 3. `test_jit_udf_vs_python_udf` — side-by-side comparison, same connection, assert identical results
+4. Upstream branch cleaned: reverted gratuitous reformatting, removed fork-only files (CI, specs), removed banners
+
+**In progress — `test_udf_benchmark` (on feature branch, uncommitted):**
+- Benchmarks Python scalar UDF vs Python Arrow UDF vs numbduck JIT UDF (x*x on 1M rows)
+- Bug: JIT UDF registration returns `DuckDBSuccess` but function not found by Python `conn.execute`
+- Works fine in standalone script, fails only when run via pytest as part of test file
+- Need to debug systematically — don't guess, reproduce minimally first
+- Goykhman comment requesting this: id:3016445175
+
+**Upstream branch cleanup done (2026-03-31):**
+- Restored original test formatting (reverted all gratuitous reformatting)
+- Removed fork-only files: `.github/workflows/numbduck_ci.yml`, `docs/specs/`
+- Removed section banners from test file
+- Upstream diff is now: `ducklib.py`, `pybridge.py`, `test_ducklib.py` only (3 removed lines + new code)
 
 **Key patterns for @cfunc + @njit UDF callbacks:**
 1. `@cfunc` cannot use `import` inside body → use module-level `@njit` impl + thin `@cfunc` wrapper
