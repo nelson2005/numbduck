@@ -13,7 +13,7 @@ numbduck — adapts DuckDB's C API for use inside numba `@njit` code. Built on t
 - Test: `pytest`
 - Lint: `flake8`
 - Python: >=3.10
-- Key dependencies: `duckdb~=1.3.2`, `numbox~=0.2.13`
+- Key dependencies: `duckdb>=1.3.2,<1.6`, `numbox~=0.5.6`
 
 ## Architecture
 
@@ -89,6 +89,7 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 - When told to "address" review feedback, implement your own recommendations — push back on items you assessed as not worth doing
 - Always show PR review comments verbatim — never summarize or paraphrase
 - Always include links to specific changed lines when responding to PR review comments
+- Use Glob instead of `find` for file searches. Bash `find` is only for operations with side effects (e.g., `-exec rm`)
 
 ## Related Projects
 
@@ -101,3 +102,45 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 - **DuckDB Python issue**: duckdb/duckdb-python#404 — requesting C API symbols be exported from the Python wheel. Filed 2026-03-26, awaiting response.
 - **macOS C API stripping is intentional**: [duckdb-python PR #81](https://github.com/duckdb/duckdb-python/pull/81) deliberately exports only `PyInit__duckdb` + `duckdb_adbc_init` via [CMakeLists.txt L83-L110](https://github.com/duckdb/duckdb-python/blob/main/CMakeLists.txt#L83-L110). macOS `-exported_symbol` enforces it; Linux `--export-dynamic-symbol` is additive so C API survives by accident.
 - **Known gap**: Container value tests (list/map/struct) deferred — segfault in JIT when combining `duckdb_column_logical_type` with container creators; bindings compile correctly
+
+### UDF/UDAF Bindings — Merged (2026-04-05)
+
+**Upstream PR**: Goykhman/numbduck#19 — **MERGED** by Goykhman
+**Spec**: `docs/specs/2026-03-28-udf-udaf-bindings-design.md` | **Plan**: `docs/plans/2026-03-28-udf-udaf-bindings.md`
+
+**What was delivered:**
+- 33 bindings in ducklib.py — signatures + @cres wrappers
+- 17 setter signatures corrected from `duckdb_state_ty` to `void` (C API `set_*` functions return `void`, only `register_*` and `add_*_to_set` return `duckdb_state`)
+- Callback-side accessors use scalar-prefixed names (`duckdb_scalar_function_get_extra_info`, `duckdb_scalar_function_set_error`) — the unprefixed versions (`duckdb_function_get_extra_info`, `duckdb_function_set_error`) are for table functions only
+- 5 tests all passing: `test_scalar_function_round_trip`, `test_scalar_function_extra_info`, `test_scalar_function_set_error`, `test_scalar_function_set_overloads`, `test_aggregate_function_round_trip`
+- 118 passed, 1 skipped across full CI matrix (46 jobs)
+
+### Hybrid JIT UDF Demo — Complete (2026-03-30)
+
+**Spec**: `docs/specs/2026-03-30-hybrid-udf-demo-design.md`
+
+**Pointer bridge** — extract raw `Connection*` from Python `duckdb.DuckDBPyConnection`:
+- pybind11 layout: `id(conn) + 16` → `DuckDBPyConnection*`, then `+ 32` → `Connection*`
+- Validated on duckdb 1.3.2–1.5.1 / Linux x86-64+ARM / macOS / Windows
+
+**Implemented:**
+1. `numbduck/pybridge.py` — `extract_connection_ptr(conn)` with runtime validation
+2. `test_hybrid_jit_udf_on_python_connection` — full hybrid demo (Newton's method sqrt)
+3. `test_jit_udf_vs_python_udf` — side-by-side comparison, same connection, assert identical results
+4. `test_udf_benchmark` — Python scalar vs Arrow vs JIT UDF (10K/100K/1M rows), marked `@pytest.mark.benchmark`
+
+### Version-aware libduckdb cache — Complete (2026-04-05)
+
+- `_LIBDUCKDB_CACHE_DIR` now includes `duckdb.__version__` subdirectory: `~/.numbduck/lib/<version>/libduckdb.dylib`
+- Old unversioned cache (`~/.numbduck/lib/libduckdb.dylib`) auto-deleted on first access
+- Requested by Goykhman (comment id:3036889763) after stale 1.5.0 dylib caused failures on 1.5.1
+- Fork CI: 46/46 passed | Upstream CI: 8/8 passed
+
+**Key patterns for @cfunc + @njit UDF callbacks:**
+1. `@cfunc` cannot use `import` inside body → use module-level `@njit` impl + thin `@cfunc` wrapper
+2. `@cfunc` signatures must use `nb_types.intp` (not `nb_types.voidptr`) because numbduck uses `intp` for all pointers
+3. `carray()` inside `@njit` requires `voidptr`, but numbduck returns `intp` → use numbox's `_cast_int_to_void_p` intrinsic to bridge the two
+4. Result reading in Python test bodies: use `(ctypes.c_int32 * N).from_address(data_p)` (not `carray` which only works in JIT)
+5. `duckdb_fetch_chunk(tuple(result))` for result fetching (not `duckdb_result_get_chunk` which doesn't exist in numbduck)
+6. Destroy handles via buffer: `buf = numpy.array([handle_p], dtype=numpy.intp); destroy_func(buf.ctypes.data)`
+7. Each function in a scalar function set must have its name set via `duckdb_scalar_function_set_name` — the name on the set alone is not sufficient
