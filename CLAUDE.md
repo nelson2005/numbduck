@@ -100,7 +100,7 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 
 - **DuckDB Python issue**: duckdb/duckdb-python#404 — requesting C API symbols be exported from the Python wheel. Filed 2026-03-26, awaiting response.
 - **macOS C API stripping is intentional**: [duckdb-python PR #81](https://github.com/duckdb/duckdb-python/pull/81) deliberately exports only `PyInit__duckdb` + `duckdb_adbc_init` via [CMakeLists.txt L83-L110](https://github.com/duckdb/duckdb-python/blob/main/CMakeLists.txt#L83-L110). macOS `-exported_symbol` enforces it; Linux `--export-dynamic-symbol` is additive so C API survives by accident.
-- Container value tests (list/map/struct/array) added — all pass on Python 3.12, duckdb 1.5.1, numba 0.64; original segfault not reproduced on this stack
+- **Container value tests**: list/map/struct/array coverage added — all pass on Python 3.12, duckdb 1.5.1, numba 0.64; original segfault not reproduced on this stack
 
 **Key patterns for @cfunc + @njit UDF callbacks:**
 1. `@cfunc` cannot use `import` inside body → use module-level `@njit` impl + thin `@cfunc` wrapper
