@@ -98,43 +98,9 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 
 ## Project Status
 
-- **Goykhman/numbduck#17 merged** (2026-03-27) — duckdb 1.3.x/1.4.x/1.5.x support with macOS libduckdb fallback
 - **DuckDB Python issue**: duckdb/duckdb-python#404 — requesting C API symbols be exported from the Python wheel. Filed 2026-03-26, awaiting response.
 - **macOS C API stripping is intentional**: [duckdb-python PR #81](https://github.com/duckdb/duckdb-python/pull/81) deliberately exports only `PyInit__duckdb` + `duckdb_adbc_init` via [CMakeLists.txt L83-L110](https://github.com/duckdb/duckdb-python/blob/main/CMakeLists.txt#L83-L110). macOS `-exported_symbol` enforces it; Linux `--export-dynamic-symbol` is additive so C API survives by accident.
 - **Known gap**: Container value tests (list/map/struct) deferred — segfault in JIT when combining `duckdb_column_logical_type` with container creators; bindings compile correctly
-
-### UDF/UDAF Bindings — Merged (2026-04-05)
-
-**Upstream PR**: Goykhman/numbduck#19 — **MERGED** by Goykhman
-**Spec**: `docs/specs/2026-03-28-udf-udaf-bindings-design.md` | **Plan**: `docs/plans/2026-03-28-udf-udaf-bindings.md`
-
-**What was delivered:**
-- 33 bindings in ducklib.py — signatures + @cres wrappers
-- 17 setter signatures corrected from `duckdb_state_ty` to `void` (C API `set_*` functions return `void`, only `register_*` and `add_*_to_set` return `duckdb_state`)
-- Callback-side accessors use scalar-prefixed names (`duckdb_scalar_function_get_extra_info`, `duckdb_scalar_function_set_error`) — the unprefixed versions (`duckdb_function_get_extra_info`, `duckdb_function_set_error`) are for table functions only
-- 5 tests all passing: `test_scalar_function_round_trip`, `test_scalar_function_extra_info`, `test_scalar_function_set_error`, `test_scalar_function_set_overloads`, `test_aggregate_function_round_trip`
-- 118 passed, 1 skipped across full CI matrix (46 jobs)
-
-### Hybrid JIT UDF Demo — Complete (2026-03-30)
-
-**Spec**: `docs/specs/2026-03-30-hybrid-udf-demo-design.md`
-
-**Pointer bridge** — extract raw `Connection*` from Python `duckdb.DuckDBPyConnection`:
-- pybind11 layout: `id(conn) + 16` → `DuckDBPyConnection*`, then `+ 32` → `Connection*`
-- Validated on duckdb 1.3.2–1.5.1 / Linux x86-64+ARM / macOS / Windows
-
-**Implemented:**
-1. `numbduck/pybridge.py` — `extract_connection_ptr(conn)` with runtime validation
-2. `test_hybrid_jit_udf_on_python_connection` — full hybrid demo (Newton's method sqrt)
-3. `test_jit_udf_vs_python_udf` — side-by-side comparison, same connection, assert identical results
-4. `test_udf_benchmark` — Python scalar vs Arrow vs JIT UDF (10K/100K/1M rows), marked `@pytest.mark.benchmark`
-
-### Version-aware libduckdb cache — Complete (2026-04-05)
-
-- `_LIBDUCKDB_CACHE_DIR` now includes `duckdb.__version__` subdirectory: `~/.numbduck/lib/<version>/libduckdb.dylib`
-- Old unversioned cache (`~/.numbduck/lib/libduckdb.dylib`) auto-deleted on first access
-- Requested by Goykhman (comment id:3036889763) after stale 1.5.0 dylib caused failures on 1.5.1
-- Fork CI: 46/46 passed | Upstream CI: 8/8 passed
 
 **Key patterns for @cfunc + @njit UDF callbacks:**
 1. `@cfunc` cannot use `import` inside body → use module-level `@njit` impl + thin `@cfunc` wrapper
