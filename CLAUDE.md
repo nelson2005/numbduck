@@ -65,31 +65,12 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 
 ## Preferences
 
-- Never include "Co-Authored-By" in git commit messages
-- Avoid shell variable substitution in bash — inline actual values directly into commands
-- Prefer simpler approaches
-- Always git pull before making edits
-- Commit messages must not mention AI, Claude, Anthropic, or any AI tooling — only attribute to the user
-- Keep all memories in both MEMORY.md and the project CLAUDE.md (CLAUDE.md is in git and survives OS reinstalls)
-- Environment details go in MEMORY.md only (may change between OS installs)
-- Always exclude CLAUDE.md, .github/workflows/numbduck_ci.yml, and docs/plans/ from upstream PRs (use a dedicated branch based on upstream/main)
-- Always use a feature branch — never commit directly to main
-- Never merge to main locally — only merge via PR on GitHub after all Actions pass
-- Never merge local feature branches into main — main must always match upstream/main (exception: CLAUDE.md)
-- Feature branches: base off origin/main (has CLAUDE.md); upstream PR branches: base off upstream/main (no CLAUDE.md)
+Cross-project preferences live in the user's MEMORY.md. Only numbduck-specific workflow rules are kept here.
+
+- Always exclude CLAUDE.md, `.github/workflows/numbduck_ci.yml`, and `docs/plans/` from upstream PRs (use a dedicated branch based on `upstream/main`)
+- Never merge local feature branches into main — main must always match `upstream/main` (exception: CLAUDE.md and the fork-only CI workflow)
+- Feature branches: base off `origin/main` (has CLAUDE.md); upstream PR branches: base off `upstream/main` (no CLAUDE.md)
 - Do all coding work on the feature branch (has CLAUDE.md + fork CI), then cherry-pick to the upstream PR branch when ready
-- Always enable GitHub Actions on forked repos
-- Never assume a reviewer's comment is wrong — always verify claims against actual runtime before responding
-- Before posting PR comments, check for pending reviews with existing comments (`GET /pulls/{pr}/reviews/{id}/comments`) — never silently delete a pending review, as it destroys all bundled draft comments
-- Preface all AI-authored GitHub comments with "From the fake Slim Shady:"
-- Never guess about things that can be verified — check the source of truth before making claims
-- Always clean `__pycache__` and numba cache (`~/.cache/numba`) before every pytest run — stale JIT artifacts cause false failures
-- Never put implementation planning details (task numbers, phase references, internal tracking) into code comments — comments must be context-independent
-- When checking PR comments, show all comments — only skip nelson2005 comments containing "fake Slim Shady" (AI-authored); any other nelson2005 comment is from the user
-- When told to "address" review feedback, implement your own recommendations — push back on items you assessed as not worth doing
-- Always show PR review comments verbatim — never summarize or paraphrase
-- Always include links to specific changed lines when responding to PR review comments
-- Use Glob instead of `find` for file searches. Bash `find` is only for operations with side effects (e.g., `-exec rm`)
 
 ## Related Projects
 
@@ -100,7 +81,6 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 
 - **DuckDB Python issue**: duckdb/duckdb-python#404 — requesting C API symbols be exported from the Python wheel. Filed 2026-03-26, awaiting response.
 - **macOS C API stripping is intentional**: [duckdb-python PR #81](https://github.com/duckdb/duckdb-python/pull/81) deliberately exports only `PyInit__duckdb` + `duckdb_adbc_init` via [CMakeLists.txt L83-L110](https://github.com/duckdb/duckdb-python/blob/main/CMakeLists.txt#L83-L110). macOS `-exported_symbol` enforces it; Linux `--export-dynamic-symbol` is additive so C API survives by accident.
-- **Known gap**: Container value tests (list/map/struct) deferred — segfault in JIT when combining `duckdb_column_logical_type` with container creators; bindings compile correctly
 
 **Key patterns for @cfunc + @njit UDF callbacks:**
 1. `@cfunc` cannot use `import` inside body → use module-level `@njit` impl + thin `@cfunc` wrapper
