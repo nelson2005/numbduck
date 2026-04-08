@@ -1,0 +1,40 @@
+{
+  "planPath": "docs/superpowers/plans/2026-04-07-numbduck-motivating-examples.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 0: Scaffold examples/ and _common.py",
+      "status": "pending",
+      "description": "**Goal:** Land shared harness module and README stub.\n\n**Files:**\n- Create: examples/_common.py\n- Create: examples/README.md\n\n**Acceptance Criteria:**\n- helpers exposed (print_env, time_median, format_table, assert_results_match)\n- _common.py < 100 lines, no DuckDB-specific imports\n- examples/README.md has stub bullet for each of the three examples\n- `python examples/_common.py` self-test exits 0\n\n**Verify:** `python examples/_common.py`\n\n```json:metadata\n{\"files\": [\"examples/_common.py\", \"examples/README.md\"], \"verifyCommand\": \"python examples/_common.py\", \"acceptanceCriteria\": [\"helpers exposed\", \"<100 lines no duckdb imports\", \"README stub present\", \"self-test exits 0\"]}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 1: examples/haversine.py — throughput axis",
+      "status": "pending",
+      "blockedBy": [0],
+      "description": "**Goal:** Standalone script comparing Python / Arrow / numbduck JIT haversine UDFs over synthetic customer points.\n\n**Files:**\n- Create: examples/haversine.py\n- Modify: examples/README.md\n\n**Acceptance Criteria:**\n- Runs in < 30s at default row counts (100K, 1M)\n- All three variants return identical count(*) cross-checked\n- Output table from real measurements\n- 'Last measured on' docstring + honesty paragraph rewritten from real numbers\n- NUMBDUCK_BENCH_BIG=1 enables 10M tier\n\n**Verify:** `python examples/haversine.py`\n\n**Validation gate:** Confirm math.sin/cos/asin/sqrt lower under @cfunc with a scratch script before writing the full example. If it fails, STOP and report.\n\n```json:metadata\n{\"files\": [\"examples/haversine.py\", \"examples/README.md\"], \"verifyCommand\": \"python examples/haversine.py\", \"acceptanceCriteria\": [\"<30s default\", \"results cross-check\", \"real numbers in docstring\", \"real honesty paragraph\", \"BIG env-var works\"]}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: examples/online_scoring.py — latency + GIL-free axis",
+      "status": "pending",
+      "blockedBy": [0],
+      "description": "**Goal:** Per-event scoring loop with prepared statements, comparing Python loop vs @njit(nogil=True) loop. Reports per-event latency and parallel scaling on 1/2/4/8 threads.\n\n**Files:**\n- Create: examples/online_scoring.py\n- Modify: examples/README.md\n\n**Acceptance Criteria:**\n- Runs in < 30s at default settings\n- Both variants produce identical scores (cross-checked)\n- Latency table (total/eps/p50/p95/p99/max) for both variants\n- Parallel-scaling table at T=1,2,4,8 for both\n- JIT decorated @njit(nogil=True) AND parallel scaling proves GIL release\n- If JIT scaling is flat, STOP and report (do NOT remove the test)\n- NUMBDUCK_BENCH_BIG=1 → 500K events\n\n**Verify:** `python examples/online_scoring.py`\n\n**Validation gates (release-blockers):**\n1. time.monotonic_ns inside @njit returns sane values\n2. @njit(nogil=True) calling _call_lib_func actually releases the GIL (test by holding GIL on main thread, running JIT in worker thread)\n\nIf either fails, STOP and report — do not paper over.\n\n```json:metadata\n{\"files\": [\"examples/online_scoring.py\", \"examples/README.md\"], \"verifyCommand\": \"python examples/online_scoring.py\", \"acceptanceCriteria\": [\"<30s default\", \"scores cross-check\", \"latency table\", \"scaling table\", \"nogil verified by scaling shape\", \"STOP if flat\"]}\n```"
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: examples/fraud_score.py — branchy logic axis",
+      "status": "pending",
+      "blockedBy": [0],
+      "description": "**Goal:** Branchy fraud-score UDF comparing Python / PyArrow if_else / numbduck JIT. Drop the example entirely if measured JIT-vs-Arrow gap < 2×.\n\n**Files:**\n- Create: examples/fraud_score.py (or delete)\n- Modify: examples/README.md\n\n**Acceptance Criteria:**\n- Runs in < 30s at default\n- Three variants produce identical aggregate sum\n- DECISION: if t_arrow/t_jit < 2.0, delete the file and update README to note the choice\n- If kept: docstring + honesty paragraph rewritten from real numbers\n\n**Verify:** `python examples/fraud_score.py` (or file does not exist if dropped)\n\n```json:metadata\n{\"files\": [\"examples/fraud_score.py\", \"examples/README.md\"], \"verifyCommand\": \"python examples/fraud_score.py\", \"acceptanceCriteria\": [\"<30s default\", \"results cross-check\", \"drop if gap < 2x\", \"real numbers if kept\"]}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Polish examples/README.md and link from project README",
+      "status": "pending",
+      "blockedBy": [1, 2, 3],
+      "description": "**Goal:** Final polish — replace stub README with real-numbers summaries and add link from project root README.\n\n**Files:**\n- Modify: examples/README.md\n- Modify: README.md\n\n**Acceptance Criteria:**\n- examples/README.md uses real headline numbers from each landed example\n- No bullet for an example that wasn't landed\n- Project README has clear link to examples/\n\n**Verify:** `cat examples/README.md README.md` shows real numbers and the link.\n\n```json:metadata\n{\"files\": [\"examples/README.md\", \"README.md\"], \"verifyCommand\": \"cat examples/README.md\", \"acceptanceCriteria\": [\"real numbers\", \"no orphan bullets\", \"project README links to examples\"]}\n```"
+    }
+  ],
+  "lastUpdated": "2026-04-07"
+}
