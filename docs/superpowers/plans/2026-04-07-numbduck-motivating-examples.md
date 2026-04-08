@@ -6,9 +6,11 @@
 
 **Architecture:** One file per example, plus a tiny shared `_common.py` (env print, timing helper, table format, result-match assertion). No package, no `__init__.py`, no CI integration. Each example is self-contained: data generation, three (or two) variants, cross-check, timed comparison, honest reporting.
 
-**Tech Stack:** Python 3.10+, numbduck, numba, duckdb-python, pyarrow (where applicable), numpy. Existing reference: `test/test_ducklib.py:2678` (`test_udf_benchmark`) shows the canonical scalar-UDF registration dance.
+**Tech Stack:** Python 3.12.3 (project venv at `venv/bin/python`), numbduck, numba, duckdb-python, pyarrow (where applicable), numpy. Existing reference: `test/test_ducklib.py:2678` (`test_udf_benchmark`) shows the canonical scalar-UDF registration dance.
 
 **Spec:** [`docs/superpowers/specs/2026-04-07-numbduck-motivating-examples-design.md`](../specs/2026-04-07-numbduck-motivating-examples-design.md)
+
+**Interpreter:** all bash commands in this plan must be run with `venv/bin/python`, not bare `python`. The project's venv lives at `numbduck/venv/` and is built on Python 3.12.3. Example: `venv/bin/python examples/_common.py`. The "Run:" instructions inside the example file *docstrings* still say `python examples/...` because they're addressed to a user who has already activated their environment — leave those as written.
 
 **Hard rule (from spec):** every numeric table in the spec is a placeholder. Every example task ends by running on this machine, capturing real numbers, and rewriting the example's "Last measured on" docstring block AND honesty paragraph from those numbers. The story bends to the numbers, not the other way around. If an example's measured story doesn't earn its place (e.g., fraud-score JIT-vs-Arrow gap < 2×), drop the example.
 
@@ -49,7 +51,7 @@ docs/superpowers/
 
 **Verify:**
 ```bash
-cd /home/erik/projects/numbduck && python examples/_common.py
+cd /home/erik/projects/numbduck && venv/bin/python examples/_common.py
 ```
 Expected: prints an environment block and a small demo table, exits 0.
 
@@ -197,7 +199,7 @@ NUMBDUCK_BENCH_REPEATS=5 python examples/haversine.py
 - [ ] **Step 3: Run the self-test**
 
 ```bash
-cd /home/erik/projects/numbduck && python examples/_common.py
+cd /home/erik/projects/numbduck && venv/bin/python examples/_common.py
 ```
 
 Expected output: env line, a small two-row table, and `_common.py self-test OK`. Exits 0.
@@ -235,7 +237,7 @@ scripts."
 
 **Verify:**
 ```bash
-cd /home/erik/projects/numbduck && python examples/haversine.py
+cd /home/erik/projects/numbduck && venv/bin/python examples/haversine.py
 ```
 Expected: env block, a result table with three rows (Python / Arrow / JIT), a one-paragraph honesty section, exits 0. Total runtime < 30 s.
 
@@ -258,7 +260,7 @@ print("OK", hv.address)
 ```
 
 ```bash
-python /tmp/scratch_haversine_math.py
+venv/bin/python /tmp/scratch_haversine_math.py
 ```
 
 Expected: prints `OK <address>`. If this fails, **stop and report** — the example design needs revisiting.
@@ -448,7 +450,7 @@ if __name__ == "__main__":
 - [ ] **Step 3: Run the script and capture real numbers**
 
 ```bash
-cd /home/erik/projects/numbduck && python examples/haversine.py
+cd /home/erik/projects/numbduck && venv/bin/python examples/haversine.py
 ```
 
 Expected: env block, table, placeholder honesty paragraph, exits 0. Verify all three variants returned the same `count(*)` (the script asserts this internally).
@@ -473,7 +475,7 @@ Replace the placeholder bullet with a one-line summary like:
 - [ ] **Step 7: Re-run to confirm clean output**
 
 ```bash
-cd /home/erik/projects/numbduck && python examples/haversine.py
+cd /home/erik/projects/numbduck && venv/bin/python examples/haversine.py
 ```
 
 Expected: same table as captured, exits 0. No tracebacks, no warnings.
@@ -512,7 +514,7 @@ machine."
 
 **Verify:**
 ```bash
-cd /home/erik/projects/numbduck && python examples/online_scoring.py
+cd /home/erik/projects/numbduck && venv/bin/python examples/online_scoring.py
 ```
 Expected: env block, latency table, parallel-scaling table, honesty paragraph, exits 0. Total runtime < 30 s.
 
@@ -538,7 +540,7 @@ def loop(n):
 print(loop(1000))
 ```
 
-Run: `python /tmp/scratch_njit_time.py`. Expected: prints a large integer. If it fails, the example needs an alternative timing strategy — **stop and report**.
+Run: `venv/bin/python /tmp/scratch_njit_time.py`. Expected: prints a large integer. If it fails, the example needs an alternative timing strategy — **stop and report**.
 
 (b) A trivial DuckDB call from inside `@njit(nogil=True)` actually releases the GIL. Use `_call_lib_func` with one of the prepared-statement bindings against a dummy connection. Hold the GIL on the main thread (e.g., `threading.Thread(target=...)` for the JIT call while the main thread spins) and confirm the JIT thread completes. If it deadlocks, the JIT path silently re-acquires the GIL inside `_call_lib_func` or one of the @intrinsic helpers. **Stop and report** — this is the very risk the spec calls out as a release blocker.
 
@@ -616,7 +618,7 @@ Note: this task's code is more involved than Task 1's. The full implementation w
 - [ ] **Step 3: Run the script and capture real numbers**
 
 ```bash
-cd /home/erik/projects/numbduck && python examples/online_scoring.py
+cd /home/erik/projects/numbduck && venv/bin/python examples/online_scoring.py
 ```
 
 Verify: both tables print, scores cross-check passes, parallel scaling shows the expected divergent shape (Python flat-or-worse, JIT scaling down with thread count). If JIT scaling is flat, **STOP**: the GIL is not being released. Investigate the binding helpers in `numbduck/ducklib.py` before continuing.
@@ -662,7 +664,7 @@ on 1/2/4/8 worker threads. Numbers captured from a real run."
 
 **Verify:**
 ```bash
-cd /home/erik/projects/numbduck && python examples/fraud_score.py
+cd /home/erik/projects/numbduck && venv/bin/python examples/fraud_score.py
 ```
 Expected (if kept): env block, table, honesty paragraph, exits 0. (If dropped: file does not exist.)
 
@@ -685,7 +687,7 @@ The JIT registration dance is the same as haversine — six DOUBLE/TINYINT/INTEG
 - [ ] **Step 2: Run the script and capture real numbers**
 
 ```bash
-cd /home/erik/projects/numbduck && python examples/fraud_score.py
+cd /home/erik/projects/numbduck && venv/bin/python examples/fraud_score.py
 ```
 
 Note the JIT-vs-Arrow ratio specifically.
@@ -714,7 +716,7 @@ Per spec: this is the most important honesty section because it's the only examp
 
 - [ ] **Step 6: Re-run (if kept) or verify deletion (if dropped)**
 
-If kept: `python examples/fraud_score.py` succeeds. If dropped: `ls examples/fraud_score.py` reports no such file.
+If kept: `venv/bin/python examples/fraud_score.py` succeeds. If dropped: `ls examples/fraud_score.py` reports no such file.
 
 - [ ] **Step 7: Commit**
 
