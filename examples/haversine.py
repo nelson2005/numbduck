@@ -53,6 +53,10 @@ RADIUS_KM = 50.0
 ROW_COUNTS = [10_000, 100_000, 1_000_000]
 if os.environ.get("NUMBDUCK_BENCH_BIG") == "1":
     ROW_COUNTS.append(10_000_000)
+# Smoke-test mode: a single tiny tier so CI can confirm the benchmark runs
+# end-to-end on every platform in the matrix without spending real minutes.
+if os.environ.get("NUMBDUCK_BENCH_TINY") == "1":
+    ROW_COUNTS = [1_000]
 # Python scalar UDF round-trips through the interpreter per row, so it
 # becomes prohibitively slow at large N. We only run it on the smallest tier.
 PY_MAX_N = 10_000
