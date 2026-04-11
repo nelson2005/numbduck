@@ -79,6 +79,9 @@ Cross-project preferences live in the user's MEMORY.md. Only numbduck-specific w
 
 ## Project Status
 
+- **Motivating examples**: Goykhman/numbduck#21 — upstream PR open, awaiting review. Feature branch: `motivating-examples-spec`, upstream PR branch: `motivating-examples-upstream`. Fork PR: nelson2005/numbduck#28. Fork CI not yet run on final state (last two runs were cancelled); re-trigger before merging.
+- **Cross-platform benchmark CI plan**: `docs/superpowers/plans/2026-04-09-cross-platform-benchmark-ci.md` — CI changes (macOS job, 4-cell benchmarks job, Windows numba 0.60.0 dropped) are committed on `motivating-examples-spec` but are fork-only (not in upstream PR). Plan is complete.
+- **NRT liveness pattern**: `_jit_clock.monotonic_ns` takes `intp` not the array — Numba NRT can free the backing buffer mid-loop. Fixed with a sink reference (`ts[0]`) after the loop. Same pattern applies anywhere a raw pointer outlives the array it came from.
 - **DuckDB Python issue**: duckdb/duckdb-python#404 — requesting C API symbols be exported from the Python wheel. Filed 2026-03-26, awaiting response.
 - **macOS C API stripping is intentional**: [duckdb-python PR #81](https://github.com/duckdb/duckdb-python/pull/81) deliberately exports only `PyInit__duckdb` + `duckdb_adbc_init` via [CMakeLists.txt L83-L110](https://github.com/duckdb/duckdb-python/blob/main/CMakeLists.txt#L83-L110). macOS `-exported_symbol` enforces it; Linux `--export-dynamic-symbol` is additive so C API survives by accident.
 
