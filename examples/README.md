@@ -17,7 +17,7 @@ where it doesn't.
 - **[online_scoring.py](online_scoring.py)** — *latency + GIL-free axis.*
   Per-event feature lookup and dot-product score inside a single
   `@njit(nogil=True)` loop, with timestamps captured via a cross-platform
-  monotonic clock bound inside the JIT loop (see `_jit_clock.py`).
+  monotonic clock bound inside the JIT loop (`numbox.utils.clock.monotonic_ns`).
   Measured: **~2.2× lower median latency** vs a pure-Python `conn.execute`
   loop, and **monotonic parallel scaling to ~2.4× on 8 threads** while the
   Python loop plateaus around 1× under GIL contention.
