@@ -81,10 +81,11 @@ Cross-project preferences live in the user's MEMORY.md. Only numbduck-specific w
 
 - **numbox monotonic_ns**: Goykhman/numbox#8 merged 2026-04-13. numbduck now imports `monotonic_ns` from `numbox.utils.clock` (min numbox 0.5.8).
 - **Recently resolved (2026-04-14):**
-  - Goykhman/numbduck#22 — **MERGED** 2026-04-14. Swap `_jit_clock` for `numbox.utils.clock.monotonic_ns` + enrich examples/README.md with live markdown links. Final tip `fe37fa3` (addressed two Copilot review comments — docstring referencing deleted `_jit_clock.py`; README numbox link pinned `main` → `0.5.8` tag).
-  - **TODO (next session)**: sync fork `main` ← `upstream/main`, rebase fork-only commits (CLAUDE.md, `numbduck_ci.yml`, `haversine_bench.yml`) onto new main, delete merged `upstream-pr/numbox-clock` branch, decide on `sync/upstream-main` and `feat/use-numbox-clock` cleanup.
-  - nelson2005/numbduck#31 — closed 2026-04-13; upstream change (`3c4837f`) was doc-only. Branch `sync/upstream-main` retained.
-  - nelson2005/numbduck#30 — closed; changes belonged upstream. Fork-side mirror branch `feat/use-numbox-clock` will be obsolete once fork main catches up.
+  - Goykhman/numbduck#22 — **MERGED** 2026-04-14. Swap `_jit_clock` for `numbox.utils.clock.monotonic_ns` + enrich examples/README.md with live markdown links. Final tip `fe37fa3` (addressed two Copilot review comments).
+  - nelson2005/numbduck#32 — **OPEN** fork sync PR: merges `upstream/main` (through #22 merge commit `1c6db6b`) into fork main. Branch `sync/post-pr22` tracks `upstream/main`. CI running; merge via GitHub once green. After merge, fork main = upstream/main + merge commit retaining `cf05e90` (fork-only files).
+  - nelson2005/numbduck#31 — closed 2026-04-13 (upstream change was doc-only). Stale remote branch `sync/upstream-main` still exists on origin; protected against direct delete.
+  - nelson2005/numbduck#30 — closed; changes belonged upstream. `feat/use-numbox-clock` becomes obsolete once #32 merges (its upstream-bound commits are already in upstream; its CLAUDE.md status updates need to be reapplied on new main via a regular PR).
+  - Branch protection note: fork `main`, merged `upstream-pr/*` branches, and `sync/*` branches cannot be force-pushed or deleted via `git push`; use fresh branch names for new syncs. `upstream-pr/numbox-clock` remote branch is merged but still present (protected); deletable only via GitHub UI/admin.
 - **DuckDB Python issue**: duckdb/duckdb-python#404 — requesting C API symbols be exported from the Python wheel. Filed 2026-03-26, awaiting response.
 - **macOS C API stripping is intentional**: [duckdb-python PR #81](https://github.com/duckdb/duckdb-python/pull/81) deliberately exports only `PyInit__duckdb` + `duckdb_adbc_init` via [CMakeLists.txt L83-L110](https://github.com/duckdb/duckdb-python/blob/main/CMakeLists.txt#L83-L110). macOS `-exported_symbol` enforces it; Linux `--export-dynamic-symbol` is additive so C API survives by accident.
 
