@@ -80,10 +80,11 @@ Cross-project preferences live in the user's MEMORY.md. Only numbduck-specific w
 ## Project Status
 
 - **numbox monotonic_ns**: Goykhman/numbox#8 merged 2026-04-13. numbduck now imports `monotonic_ns` from `numbox.utils.clock` (min numbox 0.5.8).
-- **In flight (2026-04-13):**
-  - Goykhman/numbduck#22 — upstream PR: swap `_jit_clock` for `numbox.utils.clock.monotonic_ns` + enrich examples/README.md with live markdown links. Branch `upstream-pr/numbox-clock` (based on upstream/main). Tip `fe37fa3` addresses two Copilot review comments (docstring referencing deleted `_jit_clock.py`; README numbox link pinned `main` → `0.5.8` tag). Replies posted in-thread. Prior commit `8af71f8` had 12/12 CI green; awaiting Goykhman maintainer merge.
-  - nelson2005/numbduck#31 — closed 2026-04-13; upstream change (`3c4837f`) was doc-only, not worth a sync PR. Fork main will catch up on the next substantive upstream sync. Branch `sync/upstream-main` retained locally/remotely for now.
-  - nelson2005/numbduck#30 — closed (changes belonged upstream, not on fork main). Branch `feat/use-numbox-clock` is the fork's feature branch with the same changes + fork-only commit (CLAUDE.md, numbduck_ci.yml, haversine_bench.yml) on top. Tip `eed3111` mirrors the upstream review fix, committed with `[skip ci]` (doc-only).
+- **Recently resolved (2026-04-14):**
+  - Goykhman/numbduck#22 — **MERGED** 2026-04-14. Swap `_jit_clock` for `numbox.utils.clock.monotonic_ns` + enrich examples/README.md with live markdown links. Final tip `fe37fa3` (addressed two Copilot review comments — docstring referencing deleted `_jit_clock.py`; README numbox link pinned `main` → `0.5.8` tag).
+  - **TODO (next session)**: sync fork `main` ← `upstream/main`, rebase fork-only commits (CLAUDE.md, `numbduck_ci.yml`, `haversine_bench.yml`) onto new main, delete merged `upstream-pr/numbox-clock` branch, decide on `sync/upstream-main` and `feat/use-numbox-clock` cleanup.
+  - nelson2005/numbduck#31 — closed 2026-04-13; upstream change (`3c4837f`) was doc-only. Branch `sync/upstream-main` retained.
+  - nelson2005/numbduck#30 — closed; changes belonged upstream. Fork-side mirror branch `feat/use-numbox-clock` will be obsolete once fork main catches up.
 - **DuckDB Python issue**: duckdb/duckdb-python#404 — requesting C API symbols be exported from the Python wheel. Filed 2026-03-26, awaiting response.
 - **macOS C API stripping is intentional**: [duckdb-python PR #81](https://github.com/duckdb/duckdb-python/pull/81) deliberately exports only `PyInit__duckdb` + `duckdb_adbc_init` via [CMakeLists.txt L83-L110](https://github.com/duckdb/duckdb-python/blob/main/CMakeLists.txt#L83-L110). macOS `-exported_symbol` enforces it; Linux `--export-dynamic-symbol` is additive so C API survives by accident.
 
