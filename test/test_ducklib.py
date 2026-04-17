@@ -2848,10 +2848,10 @@ def borrow_structref(struct_type, p):
 def _release_meminfo(typingctx, p_ty):
     """Decref MemInfo at intp via NRT_MemInfo_release (C runtime).
 
-    Uses the C runtime function directly instead of the LLVM-generated
-    NRT_decref because numba's refcount pruning pass can remove the
-    LLVM-generated decref when it appears paired with an incref on the
-    same pointer in the same basic block.
+    Can't use context.nrt.decref() here — removerefctpass strips
+    NRT_decref when the function signature has no NRT-tracked types.
+    NRT_MemInfo_release also makes _legalize() bail out, protecting
+    the whole function from the rewrite.
     """
     sig = nb_types.void(p_ty)
 
