@@ -2925,7 +2925,7 @@ def _read_refcount(meminfo_intp):
     MemInfo.refct is the first field (size_t) — stable since numba 0.50.
     See numba/core/runtime/nrt.cpp.
     """
-    return ctypes.c_int64.from_address(meminfo_intp).value
+    return int(ctypes.c_size_t.from_address(meminfo_intp).value)
 
 
 # ---- Heap-owning structref (for nested-dtor test) ----

@@ -39,8 +39,8 @@ DuckDB allocates `state_size()` bytes per aggregation group; we set
 
 All are module-level helpers in `test/test_ducklib.py` (promotion to
 `numbduck/structref_bridge.py` deferred until we have a second use case).
-Four functions: the three listed below plus `refcount_of_meminfo_intp(p)`
-used by tests (see Test 1).
+Three bridge functions are listed below. Refcount inspection in tests is done
+via a Python-only `_read_refcount()` helper rather than a JIT intrinsic.
 
 ```
 export_meminfo(s: <StructRef>) -> intp
