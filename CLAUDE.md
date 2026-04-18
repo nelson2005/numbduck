@@ -58,6 +58,7 @@ Custom `@intrinsic` functions are used for >16-byte structs (decimal 24B, varint
 - `numbduck/duckdb_utils.py` — buffer allocators for DuckDB structs
 - `numbduck/utils.py` — shared library loader
 - `test/test_ducklib.py` — integration tests
+- `test/test_ducklib.md` — structref UDAF bridge design (NRT ↔ DuckDB lifecycle, removerefctpass)
 
 ## Error Handling
 
