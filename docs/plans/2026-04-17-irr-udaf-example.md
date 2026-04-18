@@ -1,4 +1,37 @@
-"""IRR (Internal Rate of Return) UDAF — DuckDB aggregate function example.
+# IRR UDAF Example — Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers-extended-cc:subagent-driven-development (recommended) or superpowers-extended-cc:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Create `examples/irr.py` — a self-contained tutorial demonstrating how to build a DuckDB UDAF using numbduck and numbox's `make_structref`.
+
+**Architecture:** Single-file example script. Defines an IRR aggregate that accumulates `(cashflow, period)` pairs in a structref backed by `typed.List`, then runs bisection in finalize. Uses numbox `make_structref` for state definition and numbduck `ducklib` for DuckDB C API calls.
+
+**Tech Stack:** Python 3.10+, numba (`@njit`, `@cfunc`, `@intrinsic`, structref), numbox (`make_structref`, `_cast_int_to_void_p`, `get_unicode_data_p`), numbduck (`ducklib`), duckdb.
+
+**Spec:** `docs/specs/2026-04-17-irr-udaf-example-design.md`
+
+---
+
+### Task 1: Bridge intrinsics and state structref
+
+**Goal:** Define the NRT↔DuckDB bridge intrinsics and IRR state structref at the top of `examples/irr.py`.
+
+**Files:**
+- Create: `examples/irr.py`
+
+**Acceptance Criteria:**
+- [ ] `export_meminfo`, `borrow_structref`, `release_meminfo` intrinsics defined and callable from `@njit`
+- [ ] `IRRState` structref created via `make_structref` with fields: `cashflows` (ListType(float64)), `periods` (ListType(float64)), `investment` (float64), `target_npv` (float64), `initialized` (int64)
+- [ ] An `IRRState` can be constructed in `@njit` code with empty typed lists and default values
+
+**Verify:** `./venv/bin/python -c "from examples.irr import IRRState, export_meminfo, borrow_structref, release_meminfo; print('imports OK')"` → `imports OK`
+
+**Steps:**
+
+- [ ] **Step 1: Create `examples/irr.py` with module docstring, imports, and bridge intrinsics**
+
+```python
+"""IRR (Internal Rate of Return) UDAF — how to build a DuckDB aggregate function.
 
 Demonstrates the full DuckDB aggregate lifecycle using numbduck:
   1. Define aggregate state as a numba structref (via numbox make_structref)
@@ -15,6 +48,7 @@ SQL usage:
 See test/test_ducklib.md for a detailed explanation of the structref bridge
 intrinsics and the removerefctpass interaction.
 """
+import ctypes
 import math
 import sys
 
@@ -31,12 +65,8 @@ from numba.typed import List as typed_list
 from numbox.utils.highlevel import make_structref
 from numbox.utils.lowlevel import _cast_int_to_void_p, get_unicode_data_p
 
-from numba.core.runtime import nrt as _nrt_mod
-
 from numbduck import ducklib
 from numbduck.pybridge import extract_connection_ptr
-
-_nrt_mod._nrt.memsys_enable_stats()
 
 
 # ---- NRT <-> DuckDB bridge intrinsics ----
@@ -133,8 +163,46 @@ irr_state_type = IRRStateType([
     ("target_npv", nb_types.float64),
     ("initialized", nb_types.int64),
 ])
+```
 
+- [ ] **Step 2: Verify the module imports and structref creation works**
 
+Run: `./venv/bin/python -c "from examples.irr import IRRState, export_meminfo, borrow_structref, release_meminfo; print('imports OK')"`
+
+Expected: `imports OK`
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add examples/irr.py
+git commit -m "Add IRR UDAF example: bridge intrinsics and state structref"
+```
+
+---
+
+### Task 2: Bisection solver and aggregate callbacks
+
+**Goal:** Add the `@njit` bisection solver and all six DuckDB aggregate callbacks (state_size, init, update, combine, finalize, destroy).
+
+**Files:**
+- Modify: `examples/irr.py`
+
+**Acceptance Criteria:**
+- [ ] `irr_bisect` function finds the correct rate for a known test case when called directly from `@njit`
+- [ ] All six callbacks compile as `@cfunc` without errors
+- [ ] Update callback reads four columns from a `duckdb_data_chunk` and accumulates into state
+- [ ] Combine callback concatenates lists and propagates investment/target_npv
+- [ ] Finalize callback sorts by period, runs bisection, writes result
+
+**Verify:** `./venv/bin/python -c "from examples.irr import irr_bisect; print('callbacks OK')"` → `callbacks OK`
+
+**Steps:**
+
+- [ ] **Step 1: Add the bisection solver**
+
+Append to `examples/irr.py`:
+
+```python
 # ---- Bisection solver ----
 
 @njit
@@ -153,12 +221,17 @@ def irr_bisect(cashflows, periods, n, investment, target_npv):
         else:
             r_hi = r_mid
     return math.nan
+```
 
+- [ ] **Step 2: Add the six aggregate callbacks**
 
+Append to `examples/irr.py`:
+
+```python
 # ---- DuckDB aggregate callbacks ----
 #
-# DuckDB calls these in order: state_size -> init -> update (per chunk) ->
-# combine (parallel merge) -> finalize -> destroy.
+# DuckDB calls these in order: state_size → init → update (per chunk) →
+# combine (parallel merge) → finalize → destroy.
 # Each receives raw pointers; we use the bridge intrinsics to
 # reconstruct the structref from the state slot.
 
@@ -303,8 +376,47 @@ def _irr_destroy_impl(states, count):
 @cfunc(nb_types.void(nb_types.intp, nb_types.uint64))
 def _irr_destroy_cb(states, count):
     _irr_destroy_impl(states, count)
+```
 
+- [ ] **Step 3: Verify callbacks compile**
 
+Run: `./venv/bin/python -c "from examples.irr import irr_bisect, _irr_state_size_cb; print('callbacks OK')"`
+
+Expected: `callbacks OK`
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add examples/irr.py
+git commit -m "Add IRR bisection solver and aggregate callbacks"
+```
+
+---
+
+### Task 3: Registration, query runner, and verification
+
+**Goal:** Add the `main()` function that registers the UDAF, creates test data, runs a query, and verifies the result against a known answer.
+
+**Files:**
+- Modify: `examples/irr.py`
+- Modify: `examples/README.md`
+
+**Acceptance Criteria:**
+- [ ] `python examples/irr.py` runs without errors and prints the IRR result
+- [ ] Result matches hand-calculated expected IRR within `rel_tol=1e-6`
+- [ ] Multi-group query works (two projects with different cashflow patterns)
+- [ ] All DuckDB handles and NRT allocations are cleaned up (no leaks)
+- [ ] `examples/README.md` updated with IRR entry
+
+**Verify:** `./venv/bin/python examples/irr.py` → prints IRR results, exits 0
+
+**Steps:**
+
+- [ ] **Step 1: Add the main function with registration and single-group test**
+
+Append to `examples/irr.py`:
+
+```python
 # ---- Registration and query ----
 
 def register_irr(conn):
@@ -344,8 +456,6 @@ def main():
     print("IRR UDAF example")
     print("=" * 40)
 
-    stats_before = _nrt_mod.rtsys.get_allocation_stats()
-
     conn = duckdb.connect()
     register_irr(conn)
 
@@ -373,8 +483,8 @@ def main():
         npv_check += 1000.0 / (1.0 + irr_val) ** t
     assert abs(npv_check) < 1e-6, f"NPV check failed: {npv_check}"
 
-    print("\nTest 1: uniform cashflows")
-    print("  Investment: 10,000 | Cashflows: 12 x 1,000 | Target NPV: 0")
+    print(f"\nTest 1: uniform cashflows")
+    print(f"  Investment: 10,000 | Cashflows: 12 x 1,000 | Target NPV: 0")
     print(f"  IRR (monthly): {irr_val:.6f}")
     print(f"  IRR (annual):  {(1 + irr_val)**12 - 1:.4f}")
     print(f"  NPV check:     {npv_check:.2e}")
@@ -412,7 +522,7 @@ def main():
         ORDER BY project
     """).fetchall()
 
-    print("\nTest 2: multi-group")
+    print(f"\nTest 2: multi-group")
     for project, irr_val in rows:
         print(f"  Project {project}: IRR (monthly) = {irr_val:.6f}, "
               f"IRR (annual) = {(1 + irr_val)**12 - 1:.4f}")
@@ -432,16 +542,86 @@ def main():
     conn.execute("DROP TABLE test_irr")
     conn.close()
 
-    stats_after = _nrt_mod.rtsys.get_allocation_stats()
-    alloc_delta = stats_after.alloc - stats_before.alloc
-    free_delta = stats_after.free - stats_before.free
-    if alloc_delta != free_delta:
-        print(f"  WARNING: NRT leak: alloc={alloc_delta}, "
-              f"free={free_delta}")
-        sys.exit(1)
-
-    print("\nAll checks passed.")
+    print(f"\nAll checks passed.")
 
 
 if __name__ == "__main__":
     main()
+```
+
+- [ ] **Step 2: Run the example end-to-end**
+
+Run: `./venv/bin/python examples/irr.py`
+
+Expected: prints IRR results for both tests, "All checks passed.", exits 0.
+
+- [ ] **Step 3: Update `examples/README.md`**
+
+Add an entry for `irr.py` after the existing examples in the `## Scripts` section:
+
+```markdown
+- **[irr.py](irr.py)** — *aggregate (UDAF) axis.* How to build a DuckDB
+  aggregate function from scratch: define state as a numba structref (via
+  numbox's [`make_structref`](https://github.com/Goykhman/numbox/blob/main/numbox/utils/highlevel.py)),
+  write the six aggregate lifecycle callbacks, register with the C API, and
+  verify against a known answer. Computes the Internal Rate of Return via
+  bisection over accumulated `(cashflow, period)` pairs.
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add examples/irr.py examples/README.md
+git commit -m "Add IRR UDAF example: registration, query, and verification"
+```
+
+---
+
+### Task 4: Final verification and cleanup
+
+**Goal:** Run the full example, check for NRT memory leaks, and ensure the example is self-contained.
+
+**Files:**
+- Modify: `examples/irr.py` (if fixes needed)
+
+**Acceptance Criteria:**
+- [ ] `python examples/irr.py` runs cleanly
+- [ ] `flake8 examples/irr.py` passes
+- [ ] No NRT allocation leaks (alloc delta == free delta)
+- [ ] Example runs independently of `test/test_ducklib.py`
+
+**Verify:** `./venv/bin/python -m flake8 examples/irr.py && ./venv/bin/python examples/irr.py` → both pass
+
+**Steps:**
+
+- [ ] **Step 1: Add NRT leak check to main()**
+
+Add after the `conn.close()` call in `main()`, before the final print:
+
+```python
+    from numba.core.runtime import nrt
+    stats = nrt.rtsys.get_allocation_stats()
+    leaked = stats.alloc - stats.free
+    if leaked != 0:
+        print(f"  WARNING: NRT leak detected: {leaked} allocations")
+        sys.exit(1)
+```
+
+- [ ] **Step 2: Run flake8**
+
+Run: `./venv/bin/python -m flake8 examples/irr.py`
+
+Expected: no output (clean)
+
+- [ ] **Step 3: Run full example**
+
+Run: `./venv/bin/python examples/irr.py`
+
+Expected: prints results, "All checks passed.", exits 0.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add examples/irr.py
+git commit -m "Add NRT leak check to IRR example"
+```

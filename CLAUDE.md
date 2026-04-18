@@ -10,10 +10,11 @@ numbduck — adapts DuckDB's C API for use inside numba `@njit` code. Built on t
 
 - Venv: `python3.10 -m venv venv && venv/bin/pip install -e . flake8 pytest`
 - Install: `pip install -e .`
-- Test: `pytest`
+- Test: `pytest` — always clean `__pycache__` and `~/.cache/numba` before every run
 - Lint: `flake8`
 - Python: >=3.10
 - Key dependencies: `duckdb>=1.3.2,<1.6`, `numbox~=0.5.6`
+- Stale numba caches cause type identity mismatches (e.g., structref types look identical but numba sees them as different). Always clear before testing.
 
 ## Architecture
 
@@ -51,6 +52,18 @@ For C functions that pass or return structs by value, `ducklib.py` provides:
 - **`_build_packed_interval`** — packs `{i32, i32, i64}` interval into `{i64, i64}` (LLVM drops the second i32 on SysV x86-64)
 
 Custom `@intrinsic` functions are used for >16-byte structs (decimal 24B, varint 24B) and interval (16B but needs repacking). These use `byval` + `optnone` on SysV x86-64 to prevent LLVM from optimizing away stack copies. See [llvmlite#300 comment](https://github.com/numba/llvmlite/issues/300#issuecomment-327235846) for the ABI rationale.
+
+### UDAF Type Resolution
+
+The return type of an aggregate function is fixed at registration time via `duckdb_aggregate_function_set_return_type`, independent of the input type set via `duckdb_aggregate_function_add_parameter`. There is no bind-time type inference callback for aggregates (unlike scalar functions which have `duckdb_scalar_function_set_bind`).
+
+To support multiple input types (e.g., `my_min(int)→int` and `my_min(double)→double`), create separate aggregate function objects — each with its own parameter/return type pair — and group them in a function set:
+
+1. `duckdb_create_aggregate_function_set(name)` — create the set
+2. For each (input_type, return_type) pair: create a function, add parameter, set return type, set callbacks, add to set
+3. `duckdb_register_aggregate_function_set(conn, set)` — register all variants
+
+DuckDB resolves the correct overload at query planning time. Same-type aggregates (min, max) use input type = return type. Type-changing aggregates (avg, stddev) typically return `DOUBLE` regardless of input type. No additional numbduck machinery is needed — the existing C API bindings and function set APIs handle it directly.
 
 ## Key Paths
 
