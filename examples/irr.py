@@ -26,13 +26,14 @@ from numba.core import cgutils
 from numba.experimental import structref
 from numba.extending import intrinsic
 import llvmlite.ir as llir
-from numba.typed import List as typed_list
-
 from numbox.utils.highlevel import make_structref
 from numbox.utils.lowlevel import _cast_int_to_void_p, get_unicode_data_p
 
 from numbduck import ducklib
 from numbduck.pybridge import extract_connection_ptr
+from numbduck.vector import make_vector, vector_push, vector_extend
+
+Float64Vector, float64_vec_type = make_vector(nb_types.float64)
 
 
 # ---- NRT <-> DuckDB bridge intrinsics ----
@@ -112,8 +113,8 @@ class IRRStateType(nb_types.StructRef):
 IRRState = make_structref(
     "IRRState",
     {
-        "cashflows": nb_types.ListType(nb_types.float64),
-        "periods": nb_types.ListType(nb_types.float64),
+        "cashflows": float64_vec_type,
+        "periods": float64_vec_type,
         "investment": nb_types.float64,
         "target_npv": nb_types.float64,
         "initialized": nb_types.int64,
@@ -122,8 +123,8 @@ IRRState = make_structref(
 )
 
 irr_state_type = IRRStateType([
-    ("cashflows", nb_types.ListType(nb_types.float64)),
-    ("periods", nb_types.ListType(nb_types.float64)),
+    ("cashflows", float64_vec_type),
+    ("periods", float64_vec_type),
     ("investment", nb_types.float64),
     ("target_npv", nb_types.float64),
     ("initialized", nb_types.int64),
@@ -169,8 +170,8 @@ def _irr_state_size_cb(info):
 
 @njit
 def _irr_init_impl(info, state):
-    cfs = typed_list.empty_list(nb_types.float64)
-    pds = typed_list.empty_list(nb_types.float64)
+    cfs = Float64Vector(numpy.empty(8, dtype=numpy.float64), 0)
+    pds = Float64Vector(numpy.empty(8, dtype=numpy.float64), 0)
     s = IRRState(cfs, pds, 0.0, 0.0, 0)
     p = export_meminfo(s)
     slot = carray(_cast_int_to_void_p(state), (1,), dtype=numpy.intp)
@@ -223,8 +224,8 @@ def _irr_update_impl(info, chunk, states):
         slot = carray(
             _cast_int_to_void_p(state_slots[i]), (1,), dtype=numpy.intp)
         s = borrow_structref(irr_state_type, slot[0])
-        s.cashflows.append(cf_data[i])
-        s.periods.append(pd_data[i])
+        vector_push(s.cashflows, cf_data[i])
+        vector_push(s.periods, pd_data[i])
         if s.initialized == 0:
             s.investment = inv_data[i]
             s.target_npv = npv_data[i]
@@ -249,8 +250,8 @@ def _irr_combine_impl(info, source, target, count):
             _cast_int_to_void_p(tgt_slots[i]), (1,), dtype=numpy.intp)
         src = borrow_structref(irr_state_type, src_slot[0])
         tgt = borrow_structref(irr_state_type, tgt_slot[0])
-        tgt.cashflows.extend(src.cashflows)
-        tgt.periods.extend(src.periods)
+        vector_extend(tgt.cashflows, src.cashflows)
+        vector_extend(tgt.periods, src.periods)
         if tgt.initialized == 0 and src.initialized == 1:
             tgt.investment = src.investment
             tgt.target_npv = src.target_npv
