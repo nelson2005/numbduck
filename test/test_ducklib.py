@@ -2893,22 +2893,22 @@ def release_meminfo(p):
 # Python-side _read_refcount() between separate @njit calls is the only
 # way to verify post-scope-exit refcounts, which is what the ladder test
 # does. This intrinsic is preserved as a cautionary example.
-@intrinsic
-def _refcount_of_meminfo(typingctx, p_ty):
-    """Read MemInfo refcount from JIT code. MemInfo.refct is the first field."""
-    sig = nb_types.intp(p_ty)
-
-    def codegen(context, builder, signature, args):
-        ptr_ty = llir.IntType(8).as_pointer()
-        meminfo = builder.inttoptr(args[0], ptr_ty)
-        rc_ptr = builder.bitcast(meminfo, cgutils.intp_t.as_pointer())
-        return builder.load(rc_ptr)
-    return sig, codegen
-
-
-@njit
-def refcount_of_meminfo(p):
-    return _refcount_of_meminfo(p)
+# @intrinsic
+# def _refcount_of_meminfo(typingctx, p_ty):
+#     """Read MemInfo refcount from JIT code. MemInfo.refct is the first field."""
+#     sig = nb_types.intp(p_ty)
+#
+#     def codegen(context, builder, signature, args):
+#         ptr_ty = llir.IntType(8).as_pointer()
+#         meminfo = builder.inttoptr(args[0], ptr_ty)
+#         rc_ptr = builder.bitcast(meminfo, cgutils.intp_t.as_pointer())
+#         return builder.load(rc_ptr)
+#     return sig, codegen
+#
+#
+# @njit
+# def refcount_of_meminfo(p):
+#     return _refcount_of_meminfo(p)
 
 
 # ---- Welford state structref ----
