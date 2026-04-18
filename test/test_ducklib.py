@@ -2802,6 +2802,7 @@ def test_udf_benchmark(capsys):
 #                        balances it. Net zero for the external owner.
 #   release_meminfo(p):  -1 decref; triggers dtor at refcount 0.
 
+# Numba type for MemInfo pointer, used in incref/decref codegen calls.
 _MI_TY = nb_types.MemInfoPointer(nb_types.voidptr)
 
 
@@ -2868,6 +2869,24 @@ def _release_meminfo(typingctx, p_ty):
 @njit
 def release_meminfo(p):
     _release_meminfo(p)
+
+
+@intrinsic
+def _refcount_of_meminfo(typingctx, p_ty):
+    """Read MemInfo refcount from JIT code. MemInfo.refct is the first field."""
+    sig = nb_types.intp(p_ty)
+
+    def codegen(context, builder, signature, args):
+        ptr_ty = llir.IntType(8).as_pointer()
+        meminfo = builder.inttoptr(args[0], ptr_ty)
+        rc_ptr = builder.bitcast(meminfo, cgutils.intp_t.as_pointer())
+        return builder.load(rc_ptr)
+    return sig, codegen
+
+
+@njit
+def refcount_of_meminfo(p):
+    return _refcount_of_meminfo(p)
 
 
 # ---- Welford state structref ----
@@ -2969,15 +2988,18 @@ def test_structref_meminfo_bridge_refcount_ladder():
     def _do_release(p):
         release_meminfo(p)
 
-    # Step 1: allocate + export. After return, local `s` is decreffed.
-    # Only the export-owned reference survives.
+    # In-scope refcount==2 cannot be observed: these functions return
+    # non-NRT types, so removerefctpass strips all NRT_incref/decref.
+    # The net effect is correct (stripped ops cancel), but intermediate
+    # refcounts are invisible. We verify via Python-side reads between calls.
+
+    # Step 1: allocate + export. After return, refcount == 1.
     p = _allocate_and_export()
     assert p != 0, "export_meminfo returned null"
     rc = _read_refcount(p)
     assert rc == 1, f"expected refcount 1 after export+local-drop, got {rc}"
 
-    # Step 2: borrow. During borrow, refcount == 2 (slot + borrow).
-    # After return, borrow's decref fires, back to 1.
+    # Step 2: borrow + read. After return, refcount still 1.
     mean, count, m2 = _borrow_and_read(p)
     assert mean == 1.5, f"mean={mean}"
     assert count == 2, f"count={count}"
@@ -3050,6 +3072,8 @@ def _welford_init_cb(info, state):
     _welford_init_impl(info, state)
 
 
+# NOTE: skips NULL validity checks — test data has no NULLs.
+# Production use must call duckdb_vector_get_validity() and check bits.
 @njit
 def _welford_update_impl(info, chunk, states):
     n = ducklib.duckdb_data_chunk_get_size(chunk)
@@ -3160,6 +3184,9 @@ def test_welford_numba_only():
     combined = _compute_combined(xs[:3], xs[3:])
     assert abs(combined - expected) < 1e-10, (
         f"combined: got {combined}, expected {expected}")
+
+    single = _compute_serial(numpy.array([42.0]))
+    assert math.isnan(single), f"expected NaN for count<2, got {single}"
 
 
 def test_structref_meminfo_bridge_nested_heap():
