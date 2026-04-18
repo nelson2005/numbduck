@@ -45,8 +45,6 @@ The IRR UDAF finds the monthly discount rate r such that:
 SQL usage:
     SELECT irr(cashflow, period, investment, target_npv) FROM monthly_data;
 
-See test/test_ducklib.md for a detailed explanation of the structref bridge
-intrinsics and the removerefctpass interaction.
 """
 import ctypes
 import math
@@ -73,7 +71,6 @@ from numbduck.pybridge import extract_connection_ptr
 #
 # These let an NRT-managed structref round-trip through DuckDB's
 # aggregate state slot (a raw void*) without breaking reference counts.
-# See test/test_ducklib.md for the full explanation.
 
 _MI_TY = nb_types.MemInfoPointer(nb_types.voidptr)
 

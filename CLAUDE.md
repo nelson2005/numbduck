@@ -13,7 +13,7 @@ numbduck — adapts DuckDB's C API for use inside numba `@njit` code. Built on t
 - Test: `pytest` — always clean `__pycache__` and `~/.cache/numba` before every run
 - Lint: `flake8`
 - Python: >=3.10
-- Key dependencies: `duckdb>=1.3.2,<1.6`, `numbox~=0.5.6`
+- Key dependencies: `duckdb>=1.3.2,<1.6`, `numbox~=0.5.8`
 - Stale numba caches cause type identity mismatches (e.g., structref types look identical but numba sees them as different). Always clear before testing.
 
 ## Architecture

@@ -12,8 +12,8 @@ The IRR UDAF finds the monthly discount rate r such that:
 SQL usage:
     SELECT irr(cashflow, period, investment, target_npv) FROM monthly_data;
 
-See test/test_ducklib.md for a detailed explanation of the structref bridge
-intrinsics and the removerefctpass interaction.
+NULL handling: rows where any of the four input columns is NULL are
+skipped. If all rows are skipped, the result is NaN.
 """
 import math
 import sys
@@ -31,19 +31,14 @@ from numba.typed import List as typed_list
 from numbox.utils.highlevel import make_structref
 from numbox.utils.lowlevel import _cast_int_to_void_p, get_unicode_data_p
 
-from numba.core.runtime import nrt as _nrt_mod
-
 from numbduck import ducklib
 from numbduck.pybridge import extract_connection_ptr
-
-_nrt_mod._nrt.memsys_enable_stats()
 
 
 # ---- NRT <-> DuckDB bridge intrinsics ----
 #
 # These let an NRT-managed structref round-trip through DuckDB's
 # aggregate state slot (a raw void*) without breaking reference counts.
-# See test/test_ducklib.md for the full explanation.
 
 _MI_TY = nb_types.MemInfoPointer(nb_types.voidptr)
 
@@ -206,9 +201,25 @@ def _irr_update_impl(info, chunk, states):
     npv_data = carray(
         _cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_npv)),
         (n,), dtype=numpy.float64)
+    val_cf = numpy.intp(ducklib.duckdb_vector_get_validity(vec_cf))
+    val_pd = numpy.intp(ducklib.duckdb_vector_get_validity(vec_pd))
+    val_inv = numpy.intp(ducklib.duckdb_vector_get_validity(vec_inv))
+    val_npv = numpy.intp(ducklib.duckdb_vector_get_validity(vec_npv))
     state_slots = carray(
         _cast_int_to_void_p(states), (n,), dtype=numpy.intp)
     for i in range(n):
+        if val_cf != 0 and not ducklib.duckdb_validity_row_is_valid(
+                val_cf, i):
+            continue
+        if val_pd != 0 and not ducklib.duckdb_validity_row_is_valid(
+                val_pd, i):
+            continue
+        if val_inv != 0 and not ducklib.duckdb_validity_row_is_valid(
+                val_inv, i):
+            continue
+        if val_npv != 0 and not ducklib.duckdb_validity_row_is_valid(
+                val_npv, i):
+            continue
         slot = carray(
             _cast_int_to_void_p(state_slots[i]), (1,), dtype=numpy.intp)
         s = borrow_structref(irr_state_type, slot[0])
@@ -238,9 +249,8 @@ def _irr_combine_impl(info, source, target, count):
             _cast_int_to_void_p(tgt_slots[i]), (1,), dtype=numpy.intp)
         src = borrow_structref(irr_state_type, src_slot[0])
         tgt = borrow_structref(irr_state_type, tgt_slot[0])
-        for j in range(len(src.cashflows)):
-            tgt.cashflows.append(src.cashflows[j])
-            tgt.periods.append(src.periods[j])
+        tgt.cashflows.extend(src.cashflows)
+        tgt.periods.extend(src.periods)
         if tgt.initialized == 0 and src.initialized == 1:
             tgt.investment = src.investment
             tgt.target_npv = src.target_npv
@@ -344,7 +354,9 @@ def main():
     print("IRR UDAF example")
     print("=" * 40)
 
-    stats_before = _nrt_mod.rtsys.get_allocation_stats()
+    from numba.core.runtime import nrt
+    nrt._nrt.memsys_enable_stats()
+    stats_before = nrt.rtsys.get_allocation_stats()
 
     conn = duckdb.connect()
     register_irr(conn)
@@ -432,7 +444,7 @@ def main():
     conn.execute("DROP TABLE test_irr")
     conn.close()
 
-    stats_after = _nrt_mod.rtsys.get_allocation_stats()
+    stats_after = nrt.rtsys.get_allocation_stats()
     alloc_delta = stats_after.alloc - stats_before.alloc
     free_delta = stats_after.free - stats_before.free
     if alloc_delta != free_delta:

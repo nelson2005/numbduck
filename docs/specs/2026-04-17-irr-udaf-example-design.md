@@ -19,7 +19,7 @@ Four parameters, all registered as `DOUBLE` in the DuckDB C API:
 | Parameter    | Meaning                                      |
 |-------------|----------------------------------------------|
 | `cashflow`  | Monthly cashflow amount (one per row)         |
-| `period`    | 1-based month index (cast to int internally)  |
+| `period`    | 1-based month index                            |
 | `investment`| Upfront cost at t=0 (constant across group)   |
 | `target_npv`| Desired NPV to solve for (constant across group) |
 
@@ -62,7 +62,7 @@ The `IRRStateType` class must be defined at module level (not inside `make_struc
 
 ## Aggregate Callbacks
 
-Six callbacks following the pattern established in `test/test_ducklib.py` (see `test/test_ducklib.md` for the full lifecycle explanation):
+Six callbacks following the pattern established in `test/test_ducklib.py`:
 
 ### state_size
 Returns 8 (one `intp`-sized pointer per group).
@@ -92,7 +92,7 @@ Call `release_meminfo` to decref the NRT-managed structref.
 
 ## Bridge Intrinsics
 
-The example defines its own copies of `export_meminfo`, `borrow_structref`, and `release_meminfo` locally — the example must be self-contained, not import from the test suite. The implementation is identical to `test/test_ducklib.py` L2813–2875.
+The example defines its own copies of `export_meminfo`, `borrow_structref`, and `release_meminfo` locally — the example must be self-contained, not import from the test suite.
 
 ## Bisection Solver
 
@@ -158,7 +158,7 @@ FROM range(12);
 SELECT irr(cashflow, period, investment, target_npv) FROM test_irr;
 ```
 
-Cross-check against `numpy_financial.irr` (or a hand calculation) with an assertion using `math.isclose(result, expected, rel_tol=1e-6)`.
+Cross-check via a hand calculation with an assertion using `math.isclose(result, expected, rel_tol=1e-6)`.
 
 ## Narrative Structure
 
@@ -166,7 +166,7 @@ The script is written as a pedagogical walkthrough with print statements explain
 
 1. **Intro** — what IRR is, why it's a good UDAF candidate (per-group variable-length accumulation + numerical solve)
 2. **State definition** — `make_structref` usage, contrast with manual boilerplate
-3. **Bridge intrinsics** — brief explanation pointing to `test/test_ducklib.md` for the full story
+3. **Bridge intrinsics** — brief explanation of the NRT↔DuckDB round-trip
 4. **Bisection solver** — the `@njit` function
 5. **Callbacks** — the six DuckDB aggregate lifecycle functions
 6. **Registration** — wiring it up via the C API
@@ -183,7 +183,7 @@ No changes to `examples/_common.py` (no benchmarking needed). Update `examples/R
 
 ## Dependencies
 
-Same as existing examples: `numbduck`, `numbox`, `duckdb`, `numba`, `numpy`. Optional: `numpy_financial` for cross-validation (graceful skip if not installed).
+Same as existing examples: `numbduck`, `numbox`, `duckdb`, `numba`, `numpy`.
 
 ## Not In Scope
 
