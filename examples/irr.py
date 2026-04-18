@@ -300,3 +300,135 @@ def _irr_destroy_impl(states, count):
 @cfunc(nb_types.void(nb_types.intp, nb_types.uint64))
 def _irr_destroy_cb(states, count):
     _irr_destroy_impl(states, count)
+
+
+# ---- Registration and query ----
+
+def register_irr(conn):
+    conn_p = extract_connection_ptr(conn)
+
+    func_p = ducklib.duckdb_create_aggregate_function()
+    name_p = get_unicode_data_p("irr")
+    ducklib.duckdb_aggregate_function_set_name(func_p, name_p)
+
+    dbl_type_p = ducklib.duckdb_create_logical_type(
+        ducklib.DUCKDB_TYPE_DOUBLE)
+    for _ in range(4):
+        ducklib.duckdb_aggregate_function_add_parameter(func_p, dbl_type_p)
+    ducklib.duckdb_aggregate_function_set_return_type(func_p, dbl_type_p)
+    tp_buf = numpy.array([dbl_type_p], dtype=numpy.intp)
+    ducklib.duckdb_destroy_logical_type(tp_buf.ctypes.data)
+
+    ducklib.duckdb_aggregate_function_set_functions(
+        func_p,
+        _irr_state_size_cb.address,
+        _irr_init_cb.address,
+        _irr_update_cb.address,
+        _irr_combine_cb.address,
+        _irr_finalize_cb.address,
+    )
+    ducklib.duckdb_aggregate_function_set_destructor(
+        func_p, _irr_destroy_cb.address)
+
+    rc = ducklib.duckdb_register_aggregate_function(conn_p, func_p)
+    assert rc == ducklib.DuckDBSuccess, f"Registration failed, rc={rc}"
+
+    func_buf = numpy.array([func_p], dtype=numpy.intp)
+    ducklib.duckdb_destroy_aggregate_function(func_buf.ctypes.data)
+
+
+def main():
+    print("IRR UDAF example")
+    print("=" * 40)
+
+    conn = duckdb.connect()
+    register_irr(conn)
+
+    # Test 1: uniform cashflows, target NPV = 0
+    #   10,000 investment, 12 months of 1,000 each
+    #   Expected: monthly rate where NPV = 0
+    conn.execute("""
+        CREATE TABLE test_irr AS
+        SELECT
+            (range + 1)::DOUBLE AS period,
+            1000.0 AS cashflow,
+            10000.0 AS investment,
+            0.0 AS target_npv
+        FROM range(12)
+    """)
+
+    result = conn.execute(
+        "SELECT irr(cashflow, period, investment, target_npv) FROM test_irr"
+    ).fetchone()
+    irr_val = result[0]
+
+    # Verify: at the found rate, NPV should be ~0
+    npv_check = -10000.0
+    for t in range(1, 13):
+        npv_check += 1000.0 / (1.0 + irr_val) ** t
+    assert abs(npv_check) < 1e-6, f"NPV check failed: {npv_check}"
+
+    print(f"\nTest 1: uniform cashflows")
+    print(f"  Investment: 10,000 | Cashflows: 12 x 1,000 | Target NPV: 0")
+    print(f"  IRR (monthly): {irr_val:.6f}")
+    print(f"  IRR (annual):  {(1 + irr_val)**12 - 1:.4f}")
+    print(f"  NPV check:     {npv_check:.2e}")
+
+    # Test 2: multi-group — two projects with different patterns
+    conn.execute("DROP TABLE test_irr")
+    conn.execute("""
+        CREATE TABLE test_irr AS
+        SELECT * FROM (VALUES
+            ('A', 1.0,  500.0, 5000.0, 0.0),
+            ('A', 2.0,  500.0, 5000.0, 0.0),
+            ('A', 3.0,  500.0, 5000.0, 0.0),
+            ('A', 4.0,  500.0, 5000.0, 0.0),
+            ('A', 5.0,  500.0, 5000.0, 0.0),
+            ('A', 6.0,  500.0, 5000.0, 0.0),
+            ('A', 7.0,  500.0, 5000.0, 0.0),
+            ('A', 8.0,  500.0, 5000.0, 0.0),
+            ('A', 9.0,  500.0, 5000.0, 0.0),
+            ('A', 10.0, 500.0, 5000.0, 0.0),
+            ('A', 11.0, 500.0, 5000.0, 0.0),
+            ('A', 12.0, 500.0, 5000.0, 0.0),
+            ('B', 1.0,  200.0, 1000.0, 0.0),
+            ('B', 2.0,  200.0, 1000.0, 0.0),
+            ('B', 3.0,  200.0, 1000.0, 0.0),
+            ('B', 4.0,  200.0, 1000.0, 0.0),
+            ('B', 5.0,  200.0, 1000.0, 0.0),
+            ('B', 6.0,  200.0, 1000.0, 0.0)
+        ) AS t(project, period, cashflow, investment, target_npv)
+    """)
+
+    rows = conn.execute("""
+        SELECT project, irr(cashflow, period, investment, target_npv)
+        FROM test_irr
+        GROUP BY project
+        ORDER BY project
+    """).fetchall()
+
+    print(f"\nTest 2: multi-group")
+    for project, irr_val in rows:
+        print(f"  Project {project}: IRR (monthly) = {irr_val:.6f}, "
+              f"IRR (annual) = {(1 + irr_val)**12 - 1:.4f}")
+
+    # Verify each group's NPV
+    for project, irr_val in rows:
+        if project == "A":
+            inv, cf, n = 5000.0, 500.0, 12
+        else:
+            inv, cf, n = 1000.0, 200.0, 6
+        npv_check = -inv
+        for t in range(1, n + 1):
+            npv_check += cf / (1.0 + irr_val) ** t
+        assert abs(npv_check) < 1e-6, (
+            f"Project {project} NPV check failed: {npv_check}")
+
+    conn.execute("DROP TABLE test_irr")
+    conn.close()
+
+    print(f"\nAll checks passed.")
+
+
+if __name__ == "__main__":
+    main()
