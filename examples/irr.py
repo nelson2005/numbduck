@@ -1,4 +1,4 @@
-"""IRR (Internal Rate of Return) UDAF — how to build a DuckDB aggregate function.
+"""IRR (Internal Rate of Return) UDAF — DuckDB aggregate function example.
 
 Demonstrates the full DuckDB aggregate lifecycle using numbduck:
   1. Define aggregate state as a numba structref (via numbox make_structref)
@@ -15,7 +15,6 @@ SQL usage:
 See test/test_ducklib.md for a detailed explanation of the structref bridge
 intrinsics and the removerefctpass interaction.
 """
-import ctypes
 import math
 import sys
 
@@ -341,6 +340,10 @@ def main():
     print("IRR UDAF example")
     print("=" * 40)
 
+    from numba.core.runtime import nrt
+    nrt._nrt.memsys_enable_stats()
+    stats_before = nrt.rtsys.get_allocation_stats()
+
     conn = duckdb.connect()
     register_irr(conn)
 
@@ -368,8 +371,8 @@ def main():
         npv_check += 1000.0 / (1.0 + irr_val) ** t
     assert abs(npv_check) < 1e-6, f"NPV check failed: {npv_check}"
 
-    print(f"\nTest 1: uniform cashflows")
-    print(f"  Investment: 10,000 | Cashflows: 12 x 1,000 | Target NPV: 0")
+    print("\nTest 1: uniform cashflows")
+    print("  Investment: 10,000 | Cashflows: 12 x 1,000 | Target NPV: 0")
     print(f"  IRR (monthly): {irr_val:.6f}")
     print(f"  IRR (annual):  {(1 + irr_val)**12 - 1:.4f}")
     print(f"  NPV check:     {npv_check:.2e}")
@@ -407,7 +410,7 @@ def main():
         ORDER BY project
     """).fetchall()
 
-    print(f"\nTest 2: multi-group")
+    print("\nTest 2: multi-group")
     for project, irr_val in rows:
         print(f"  Project {project}: IRR (monthly) = {irr_val:.6f}, "
               f"IRR (annual) = {(1 + irr_val)**12 - 1:.4f}")
@@ -427,7 +430,15 @@ def main():
     conn.execute("DROP TABLE test_irr")
     conn.close()
 
-    print(f"\nAll checks passed.")
+    stats_after = nrt.rtsys.get_allocation_stats()
+    alloc_delta = stats_after.alloc - stats_before.alloc
+    free_delta = stats_after.free - stats_before.free
+    if alloc_delta != free_delta:
+        print(f"  WARNING: NRT leak: alloc={alloc_delta}, "
+              f"free={free_delta}")
+        sys.exit(1)
+
+    print("\nAll checks passed.")
 
 
 if __name__ == "__main__":
