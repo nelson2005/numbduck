@@ -2871,6 +2871,28 @@ def release_meminfo(p):
     _release_meminfo(p)
 
 
+# WARNING: This intrinsic does not work as intended. It was written to
+# observe intermediate refcount states (e.g. refcount==2 while both a
+# local structref and an exported MemInfo pointer are live in the same
+# @njit scope). The idea was that reading refcount from JIT code would
+# let the test assert the full 1→2→1→2→1→0 ladder at each step.
+#
+# It fails because of removerefctpass (numba/core/lowering.py L207-210).
+# That pass checks whether the function's args and return type involve
+# NRT-tracked types. If they don't — and our bridge functions return
+# plain intp, not structrefs — it strips ALL NRT_incref/NRT_decref calls
+# from the function. So by the time this intrinsic reads the refcount,
+# the incref from export_meminfo has already been removed by the pass.
+# The refcount reads 1 (initial allocation), not 2.
+#
+# The test still works because the stripping is symmetric: the export's
+# incref AND the local variable's scope-exit decref are both removed,
+# so the net refcount change is zero and the object survives correctly.
+# But the intermediate refcount==2 state never actually exists at runtime.
+#
+# Python-side _read_refcount() between separate @njit calls is the only
+# way to verify post-scope-exit refcounts, which is what the ladder test
+# does. This intrinsic is preserved as a cautionary example.
 @intrinsic
 def _refcount_of_meminfo(typingctx, p_ty):
     """Read MemInfo refcount from JIT code. MemInfo.refct is the first field."""
@@ -2988,10 +3010,8 @@ def test_structref_meminfo_bridge_refcount_ladder():
     def _do_release(p):
         release_meminfo(p)
 
-    # In-scope refcount==2 cannot be observed: these functions return
-    # non-NRT types, so removerefctpass strips all NRT_incref/decref.
-    # The net effect is correct (stripped ops cancel), but intermediate
-    # refcounts are invisible. We verify via Python-side reads between calls.
+    # See refcount_of_meminfo above for why in-scope refcount==2 checks
+    # don't work. We verify via Python-side _read_refcount between calls.
 
     # Step 1: allocate + export. After return, refcount == 1.
     p = _allocate_and_export()
