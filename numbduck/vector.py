@@ -1,7 +1,7 @@
 import operator
 
 import numpy
-from numba import types as nb_types
+from numba import njit, types as nb_types
 from numba.experimental import structref
 from numba.extending import overload
 from numbox.utils.highlevel import make_structref
@@ -71,3 +71,27 @@ def _vector_setitem(v, i, val):
         def impl(v, i, val):
             v.buf[i] = val
         return impl
+
+
+@njit
+def vector_push(v, val):
+    if v.size == v.buf.shape[0]:
+        new_buf = numpy.empty(v.buf.shape[0] * 2, v.buf.dtype)
+        new_buf[:v.size] = v.buf[:v.size]
+        v.buf = new_buf
+    v.buf[v.size] = val
+    v.size += 1
+
+
+@njit
+def vector_extend(dst, src):
+    needed = dst.size + src.size
+    cap = dst.buf.shape[0]
+    if needed > cap:
+        while cap < needed:
+            cap *= 2
+        new_buf = numpy.empty(cap, dst.buf.dtype)
+        new_buf[:dst.size] = dst.buf[:dst.size]
+        dst.buf = new_buf
+    dst.buf[dst.size:dst.size + src.size] = src.buf[:src.size]
+    dst.size += src.size
