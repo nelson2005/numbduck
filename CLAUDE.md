@@ -10,11 +10,12 @@ numbduck — adapts DuckDB's C API for use inside numba `@njit` code. Built on t
 
 - Venv: `python3.10 -m venv venv && venv/bin/pip install -e . flake8 pytest`
 - Install: `pip install -e .`
-- Test: `pytest` — always clean `__pycache__` and `~/.cache/numba` before every run
+- Test: `pytest` — always clean `__pycache__`, `~/.cache/numba`, AND numba cache in numbox (`find venv -name '*.nbi' -delete -o -name '*.nbc' -delete`) before every run. `make_structref` caches compiled code in numbox's `__pycache__` (not the project's), and stale entries cause type identity mismatches.
 - Lint: `flake8`
+- Line width: 120 characters
 - Python: >=3.10
 - Key dependencies: `duckdb>=1.3.2,<1.6`, `numbox~=0.5.8`
-- Stale numba caches cause type identity mismatches (e.g., structref types look identical but numba sees them as different). Always clear before testing.
+- Stale numba caches cause type identity mismatches (e.g., structref types look identical but numba sees them as different). `make_structref` uses `highlevel.py` as the source filename for `exec`'d code, so numba caches in numbox's `__pycache__/` — clearing only the project's `__pycache__` is insufficient.
 
 ## Architecture
 

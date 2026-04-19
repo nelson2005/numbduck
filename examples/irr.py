@@ -50,8 +50,7 @@ def _export_meminfo(typingctx, struct_ty):
 
     def codegen(context, builder, signature, args):
         struct_val = args[0]
-        _, meminfo_p = context.nrt.get_meminfos(
-            builder, struct_ty, struct_val)[0]
+        _, meminfo_p = context.nrt.get_meminfos(builder, struct_ty, struct_val)[0]
         context.nrt.incref(builder, _MI_TY, meminfo_p)
         return builder.ptrtoint(meminfo_p, cgutils.intp_t)
     return sig, codegen
@@ -90,8 +89,7 @@ def _release_meminfo(typingctx, p_ty):
     def codegen(context, builder, signature, args):
         ptr_ty = llir.IntType(8).as_pointer()
         fnty = llir.FunctionType(llir.VoidType(), [ptr_ty])
-        fn = cgutils.get_or_insert_function(
-            builder.module, fnty, "NRT_MemInfo_release")
+        fn = cgutils.get_or_insert_function(builder.module, fnty, "NRT_MemInfo_release")
         meminfo = builder.inttoptr(args[0], ptr_ty)
         builder.call(fn, [meminfo])
     return sig, codegen
@@ -134,14 +132,15 @@ irr_state_type = IRRStateType([
 # ---- Bisection solver ----
 
 @njit
-def irr_bisect(cashflows, periods, n, investment, target_npv):
+def irr_bisect(cashflows, n, investment, target_npv):
     r_lo = -0.99
     r_hi = 10.0
     for _ in range(100):
         r_mid = (r_lo + r_hi) / 2.0
         npv = -investment - target_npv
         for i in range(n):
-            npv += cashflows[i] / (1.0 + r_mid) ** periods[i]
+            i = numpy.uint64(i)
+            npv += cashflows[i] / (1.0 + r_mid) ** (i + 1)
         if abs(npv) < 1e-9:
             return r_mid
         if npv > 0.0:
@@ -170,8 +169,8 @@ def _irr_state_size_cb(info):
 
 @njit
 def _irr_init_impl(info, state):
-    cfs = Float64Vector(numpy.empty(8, dtype=numpy.float64), 0)
-    pds = Float64Vector(numpy.empty(8, dtype=numpy.float64), 0)
+    cfs = Float64Vector(64)
+    pds = Float64Vector(64)
     s = IRRState(cfs, pds, 0.0, 0.0, 0)
     p = export_meminfo(s)
     slot = carray(_cast_int_to_void_p(state), (1,), dtype=numpy.intp)
@@ -190,43 +189,30 @@ def _irr_update_impl(info, chunk, states):
     vec_pd = ducklib.duckdb_data_chunk_get_vector(chunk, 1)
     vec_inv = ducklib.duckdb_data_chunk_get_vector(chunk, 2)
     vec_npv = ducklib.duckdb_data_chunk_get_vector(chunk, 3)
-    cf_data = carray(
-        _cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_cf)),
-        (n,), dtype=numpy.float64)
-    pd_data = carray(
-        _cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_pd)),
-        (n,), dtype=numpy.float64)
-    inv_data = carray(
-        _cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_inv)),
-        (n,), dtype=numpy.float64)
-    npv_data = carray(
-        _cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_npv)),
-        (n,), dtype=numpy.float64)
+    cf_data = carray(_cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_cf)), (n,), dtype=numpy.float64)
+    pd_data = carray(_cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_pd)), (n,), dtype=numpy.float64)
     val_cf = numpy.intp(ducklib.duckdb_vector_get_validity(vec_cf))
     val_pd = numpy.intp(ducklib.duckdb_vector_get_validity(vec_pd))
     val_inv = numpy.intp(ducklib.duckdb_vector_get_validity(vec_inv))
     val_npv = numpy.intp(ducklib.duckdb_vector_get_validity(vec_npv))
-    state_slots = carray(
-        _cast_int_to_void_p(states), (n,), dtype=numpy.intp)
+    state_slots = carray(_cast_int_to_void_p(states), (n,), dtype=numpy.intp)
     for i in range(n):
-        if val_cf != 0 and not ducklib.duckdb_validity_row_is_valid(
-                val_cf, i):
+        if val_cf != 0 and not ducklib.duckdb_validity_row_is_valid(val_cf, i):
             continue
-        if val_pd != 0 and not ducklib.duckdb_validity_row_is_valid(
-                val_pd, i):
+        if val_pd != 0 and not ducklib.duckdb_validity_row_is_valid(val_pd, i):
             continue
-        if val_inv != 0 and not ducklib.duckdb_validity_row_is_valid(
-                val_inv, i):
+        if val_inv != 0 and not ducklib.duckdb_validity_row_is_valid(val_inv, i):
             continue
-        if val_npv != 0 and not ducklib.duckdb_validity_row_is_valid(
-                val_npv, i):
+        if val_npv != 0 and not ducklib.duckdb_validity_row_is_valid(val_npv, i):
             continue
-        slot = carray(
-            _cast_int_to_void_p(state_slots[i]), (1,), dtype=numpy.intp)
+        i = numpy.uint64(i)
+        slot = carray(_cast_int_to_void_p(state_slots[i]), (1,), dtype=numpy.intp)
         s = borrow_structref(irr_state_type, slot[0])
         vector_push(s.cashflows, cf_data[i])
         vector_push(s.periods, pd_data[i])
         if s.initialized == 0:
+            inv_data = carray(_cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_inv)), (n,), dtype=numpy.float64)
+            npv_data = carray(_cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_npv)), (n,), dtype=numpy.float64)
             s.investment = inv_data[i]
             s.target_npv = npv_data[i]
             s.initialized = 1
@@ -239,27 +225,23 @@ def _irr_update_cb(info, chunk, states):
 
 @njit
 def _irr_combine_impl(info, source, target, count):
-    src_slots = carray(
-        _cast_int_to_void_p(source), (count,), dtype=numpy.intp)
-    tgt_slots = carray(
-        _cast_int_to_void_p(target), (count,), dtype=numpy.intp)
+    src_slots = carray(_cast_int_to_void_p(source), (count,), dtype=numpy.intp)
+    tgt_slots = carray(_cast_int_to_void_p(target), (count,), dtype=numpy.intp)
     for i in range(count):
-        src_slot = carray(
-            _cast_int_to_void_p(src_slots[i]), (1,), dtype=numpy.intp)
-        tgt_slot = carray(
-            _cast_int_to_void_p(tgt_slots[i]), (1,), dtype=numpy.intp)
+        i = numpy.uint64(i)
+        src_slot = carray(_cast_int_to_void_p(src_slots[i]), (1,), dtype=numpy.intp)
+        tgt_slot = carray(_cast_int_to_void_p(tgt_slots[i]), (1,), dtype=numpy.intp)
         src = borrow_structref(irr_state_type, src_slot[0])
         tgt = borrow_structref(irr_state_type, tgt_slot[0])
         vector_extend(tgt.cashflows, src.cashflows)
         vector_extend(tgt.periods, src.periods)
-        if tgt.initialized == 0 and src.initialized == 1:
+        if tgt.initialized == 0:
             tgt.investment = src.investment
             tgt.target_npv = src.target_npv
-            tgt.initialized = 1
+            tgt.initialized = src.initialized
 
 
-@cfunc(nb_types.void(nb_types.intp, nb_types.intp,
-                     nb_types.intp, nb_types.uint64))
+@cfunc(nb_types.void(nb_types.intp, nb_types.intp, nb_types.intp, nb_types.uint64))
 def _irr_combine_cb(info, source, target, count):
     _irr_combine_impl(info, source, target, count)
 
@@ -267,47 +249,41 @@ def _irr_combine_cb(info, source, target, count):
 @njit
 def _irr_finalize_impl(info, source, result, count, offset):
     out_data = ducklib.duckdb_vector_get_data(result)
-    src_slots = carray(
-        _cast_int_to_void_p(source), (count,), dtype=numpy.intp)
-    out_vals = carray(
-        _cast_int_to_void_p(out_data), (offset + count,),
-        dtype=numpy.float64)
+    src_slots = carray(_cast_int_to_void_p(source), (count,), dtype=numpy.intp)
+    out_vals = carray(_cast_int_to_void_p(out_data), (offset + count,), dtype=numpy.float64)
     for i in range(count):
-        src_slot = carray(
-            _cast_int_to_void_p(src_slots[i]), (1,), dtype=numpy.intp)
+        i = numpy.uint64(i)
+        src_slot = carray(_cast_int_to_void_p(src_slots[i]), (1,), dtype=numpy.intp)
         s = borrow_structref(irr_state_type, src_slot[0])
         n = len(s.cashflows)
         if n == 0:
-            out_vals[offset + i] = math.nan
+            out_vals[numpy.uint64(offset + i)] = math.nan
             continue
-        # sort by period (simple insertion sort — N is small)
         for j in range(1, n):
+            j = numpy.uint64(j)
             key_cf = s.cashflows[j]
             key_pd = s.periods[j]
-            k = j - 1
-            while k >= 0 and s.periods[k] > key_pd:
-                s.cashflows[k + 1] = s.cashflows[k]
-                s.periods[k + 1] = s.periods[k]
-                k -= 1
-            s.cashflows[k + 1] = key_cf
-            s.periods[k + 1] = key_pd
-        out_vals[offset + i] = irr_bisect(
-            s.cashflows, s.periods, n, s.investment, s.target_npv)
+            k = j
+            while k > 0 and s.periods[numpy.uint64(k - 1)] > key_pd:
+                s.cashflows[k] = s.cashflows[numpy.uint64(k - 1)]
+                s.periods[k] = s.periods[numpy.uint64(k - 1)]
+                k = numpy.uint64(k - 1)
+            s.cashflows[k] = key_cf
+            s.periods[k] = key_pd
+        out_vals[numpy.uint64(offset + i)] = irr_bisect(s.cashflows, n, s.investment, s.target_npv)
 
 
-@cfunc(nb_types.void(nb_types.intp, nb_types.intp, nb_types.intp,
-                     nb_types.uint64, nb_types.uint64))
+@cfunc(nb_types.void(nb_types.intp, nb_types.intp, nb_types.intp, nb_types.uint64, nb_types.uint64))
 def _irr_finalize_cb(info, source, result, count, offset):
     _irr_finalize_impl(info, source, result, count, offset)
 
 
 @njit
 def _irr_destroy_impl(states, count):
-    state_slots = carray(
-        _cast_int_to_void_p(states), (count,), dtype=numpy.intp)
+    state_slots = carray(_cast_int_to_void_p(states), (count,), dtype=numpy.intp)
     for i in range(count):
-        slot = carray(
-            _cast_int_to_void_p(state_slots[i]), (1,), dtype=numpy.intp)
+        i = numpy.uint64(i)
+        slot = carray(_cast_int_to_void_p(state_slots[i]), (1,), dtype=numpy.intp)
         release_meminfo(slot[0])
 
 
@@ -325,8 +301,7 @@ def register_irr(conn):
     name_p = get_unicode_data_p("irr")
     ducklib.duckdb_aggregate_function_set_name(func_p, name_p)
 
-    dbl_type_p = ducklib.duckdb_create_logical_type(
-        ducklib.DUCKDB_TYPE_DOUBLE)
+    dbl_type_p = ducklib.duckdb_create_logical_type(ducklib.DUCKDB_TYPE_DOUBLE)
     for _ in range(4):
         ducklib.duckdb_aggregate_function_add_parameter(func_p, dbl_type_p)
     ducklib.duckdb_aggregate_function_set_return_type(func_p, dbl_type_p)
@@ -341,8 +316,7 @@ def register_irr(conn):
         _irr_combine_cb.address,
         _irr_finalize_cb.address,
     )
-    ducklib.duckdb_aggregate_function_set_destructor(
-        func_p, _irr_destroy_cb.address)
+    ducklib.duckdb_aggregate_function_set_destructor(func_p, _irr_destroy_cb.address)
 
     rc = ducklib.duckdb_register_aggregate_function(conn_p, func_p)
     assert rc == ducklib.DuckDBSuccess, f"Registration failed, rc={rc}"
@@ -375,9 +349,7 @@ def main():
         FROM range(12)
     """)
 
-    result = conn.execute(
-        "SELECT irr(cashflow, period, investment, target_npv) FROM test_irr"
-    ).fetchone()
+    result = conn.execute("SELECT irr(cashflow, period, investment, target_npv) FROM test_irr").fetchone()
     irr_val = result[0]
 
     # Verify: at the found rate, NPV should be ~0
@@ -427,8 +399,7 @@ def main():
 
     print("\nTest 2: multi-group")
     for project, irr_val in rows:
-        print(f"  Project {project}: IRR (monthly) = {irr_val:.6f}, "
-              f"IRR (annual) = {(1 + irr_val)**12 - 1:.4f}")
+        print(f"  Project {project}: IRR (monthly) = {irr_val:.6f}, IRR (annual) = {(1 + irr_val)**12 - 1:.4f}")
 
     # Verify each group's NPV
     for project, irr_val in rows:
@@ -439,8 +410,7 @@ def main():
         npv_check = -inv
         for t in range(1, n + 1):
             npv_check += cf / (1.0 + irr_val) ** t
-        assert abs(npv_check) < 1e-6, (
-            f"Project {project} NPV check failed: {npv_check}")
+        assert abs(npv_check) < 1e-6, f"Project {project} NPV check failed: {npv_check}"
 
     conn.execute("DROP TABLE test_irr")
     conn.close()
@@ -449,8 +419,7 @@ def main():
     alloc_delta = stats_after.alloc - stats_before.alloc
     free_delta = stats_after.free - stats_before.free
     if alloc_delta != free_delta:
-        print(f"  WARNING: NRT leak: alloc={alloc_delta}, "
-              f"free={free_delta}")
+        print(f"  WARNING: NRT leak: alloc={alloc_delta}, free={free_delta}")
         sys.exit(1)
 
     print("\nAll checks passed.")

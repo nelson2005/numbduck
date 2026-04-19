@@ -9,7 +9,7 @@ def test_construction_and_len():
 
     @njit
     def go():
-        v = Float64Vec(numpy.empty(8, dtype=numpy.float64), 0)
+        v = Float64Vec(8)
         return len(v), v.buf.shape[0]
 
     size, cap = go()
@@ -22,7 +22,7 @@ def test_getitem_setitem():
 
     @njit
     def go():
-        v = Float64Vec(numpy.empty(4, dtype=numpy.float64), 0)
+        v = Float64Vec(4)
         v.buf[0] = 10.0
         v.buf[1] = 20.0
         v.size = 2
@@ -50,7 +50,7 @@ def test_vector_push():
 
     @njit
     def go():
-        v = Float64Vec(numpy.empty(4, dtype=numpy.float64), 0)
+        v = Float64Vec(4)
         vector_push(v, 1.0)
         vector_push(v, 2.0)
         vector_push(v, 3.0)
@@ -67,7 +67,7 @@ def test_vector_push_growth():
 
     @njit
     def go():
-        v = Float64Vec(numpy.empty(2, dtype=numpy.float64), 0)
+        v = Float64Vec(2)
         for i in range(5):
             vector_push(v, float(i * 10))
         return v[0], v[1], v[2], v[3], v[4], len(v), v.buf.shape[0]
@@ -83,8 +83,8 @@ def test_vector_extend():
 
     @njit
     def go():
-        a = Float64Vec(numpy.empty(4, dtype=numpy.float64), 0)
-        b = Float64Vec(numpy.empty(4, dtype=numpy.float64), 0)
+        a = Float64Vec(4)
+        b = Float64Vec(4)
         vector_push(a, 1.0)
         vector_push(a, 2.0)
         vector_push(b, 3.0)
@@ -104,8 +104,8 @@ def test_vector_extend_no_growth():
 
     @njit
     def go():
-        a = Float64Vec(numpy.empty(8, dtype=numpy.float64), 0)
-        b = Float64Vec(numpy.empty(4, dtype=numpy.float64), 0)
+        a = Float64Vec(8)
+        b = Float64Vec(4)
         vector_push(a, 1.0)
         vector_push(b, 2.0)
         vector_push(b, 3.0)
@@ -118,12 +118,121 @@ def test_vector_extend_no_growth():
     assert vals[4] == 8
 
 
+def test_vector_push_exact_capacity():
+    Float64Vec, _ = make_vector(nb_types.float64)
+
+    @njit
+    def go():
+        v = Float64Vec(4)
+        vector_push(v, 1.0)
+        vector_push(v, 2.0)
+        vector_push(v, 3.0)
+        vector_push(v, 4.0)
+        return v[0], v[1], v[2], v[3], len(v), v.buf.shape[0]
+
+    vals = go()
+    assert vals[:4] == (1.0, 2.0, 3.0, 4.0)
+    assert vals[4] == 4
+    assert vals[5] == 4
+
+
+def test_vector_extend_empty_src():
+    Float64Vec, _ = make_vector(nb_types.float64)
+
+    @njit
+    def go():
+        a = Float64Vec(4)
+        b = Float64Vec(4)
+        vector_push(a, 1.0)
+        vector_push(a, 2.0)
+        vector_extend(a, b)
+        return a[0], a[1], len(a), a.buf.shape[0]
+
+    vals = go()
+    assert vals[:2] == (1.0, 2.0)
+    assert vals[2] == 2
+    assert vals[3] == 4
+
+
+def test_vector_extend_empty_dst():
+    Float64Vec, _ = make_vector(nb_types.float64)
+
+    @njit
+    def go():
+        a = Float64Vec(4)
+        b = Float64Vec(4)
+        vector_push(b, 1.0)
+        vector_push(b, 2.0)
+        vector_push(b, 3.0)
+        vector_extend(a, b)
+        return a[0], a[1], a[2], len(a), a.buf.shape[0]
+
+    vals = go()
+    assert vals[:3] == (1.0, 2.0, 3.0)
+    assert vals[3] == 3
+    assert vals[4] == 4
+
+
+def test_vector_extend_both_empty():
+    Float64Vec, _ = make_vector(nb_types.float64)
+
+    @njit
+    def go():
+        a = Float64Vec(4)
+        b = Float64Vec(4)
+        vector_extend(a, b)
+        return len(a), a.buf.shape[0]
+
+    n, cap = go()
+    assert n == 0
+    assert cap == 4
+
+
+def test_vector_extend_multiple_doublings():
+    Float64Vec, _ = make_vector(nb_types.float64)
+
+    @njit
+    def go():
+        a = Float64Vec(2)
+        b = Float64Vec(16)
+        vector_push(a, 0.0)
+        for i in range(10):
+            vector_push(b, float(i + 1))
+        vector_extend(a, b)
+        return a[0], a[1], a[10], len(a), a.buf.shape[0]
+
+    first, second, last, n, cap = go()
+    assert first == 0.0
+    assert second == 1.0
+    assert last == 10.0
+    assert n == 11
+    assert cap == 16
+
+
+def test_vector_push_special_floats():
+    Float64Vec, _ = make_vector(nb_types.float64)
+
+    @njit
+    def go():
+        v = Float64Vec(4)
+        vector_push(v, numpy.nan)
+        vector_push(v, numpy.inf)
+        vector_push(v, -numpy.inf)
+        return v[0], v[1], v[2], len(v)
+
+    a, b, c, n = go()
+    assert numpy.isnan(a)
+    assert b == numpy.inf
+    assert c == -numpy.inf
+    assert n == 3
+
+
 def test_multi_dtype_int64():
     Int64Vec, _ = make_vector(nb_types.int64)
 
     @njit
     def go():
-        v = Int64Vec(numpy.empty(2, dtype=numpy.int64), 0)
+        v = Int64Vec(2)
         vector_push(v, 100)
         vector_push(v, 200)
         vector_push(v, 300)

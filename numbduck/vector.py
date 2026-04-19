@@ -8,8 +8,7 @@ from numbox.utils.highlevel import make_structref
 
 
 class VectorType(nb_types.StructRef):
-    def preprocess_fields(self, fields):
-        return tuple((n, nb_types.unliteral(t)) for n, t in fields)
+    pass
 
 
 _vector_cache = {}
@@ -36,15 +35,20 @@ def make_vector(elem_type):
         f"Vector_{elem_type.name}",
         fields,
         type_cls,
-        jit_options={"cache": False},
     )
+
+    np_dtype = numpy.dtype(str(elem_type))
+
+    @njit
+    def create(capacity):
+        return proxy_cls(numpy.empty(capacity, dtype=np_dtype), 0)
 
     type_inst = type_cls([
         ("buf", nb_types.Array(elem_type, 1, 'C')),
         ("size", nb_types.int64),
     ])
 
-    result = (proxy_cls, type_inst)
+    result = (create, type_inst)
     _vector_cache[key] = result
     return result
 
