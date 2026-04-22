@@ -85,7 +85,7 @@ Bindings must mirror the DuckDB C API error-handling protocol exactly — return
 
 Cross-project preferences live in the user's MEMORY.md. Only numbduck-specific workflow rules are kept here.
 
-- Always exclude CLAUDE.md, `.github/workflows/numbduck_ci.yml`, and `docs/plans/` from upstream PRs (use a dedicated branch based on `upstream/main`)
+- Always exclude CLAUDE.md, `.github/workflows/numbduck_ci.yml`, and the entire `docs/` directory (both `docs/plans/` and `docs/specs/`) from upstream PRs (use a dedicated branch based on `upstream/main`)
 - Never merge local feature branches into main — main must always match `upstream/main` (exception: CLAUDE.md and the fork-only CI workflow)
 - Feature branches: base off `origin/main` (has CLAUDE.md); upstream PR branches: base off `upstream/main` (no CLAUDE.md)
 - Do all coding work on the feature branch (has CLAUDE.md + fork CI), then cherry-pick to the upstream PR branch when ready
