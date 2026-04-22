@@ -41,6 +41,12 @@ def make_vector(elem_type):
     The numpy dtype is derived from ``str(elem_type)`` at build time. Works
     for standard scalar numba types (float64, int64, etc.). Exotic types
     where ``str()`` does not match a numpy dtype name are unsupported.
+
+    Initial ``capacity`` must be ``>= 1``. The ``create`` factory asserts
+    this. Zero-capacity construction is rejected because the geometric
+    growth in ``vector_push`` / ``vector_extend`` would produce ``0 * 2 = 0``
+    and either OOB or infinite-loop. Vectors only grow, never shrink, so a
+    positive initial capacity guarantees a positive capacity for all time.
     """
     key = elem_type.key
     if key in _vector_cache:
@@ -68,6 +74,7 @@ def make_vector(elem_type):
 
     @njit
     def create(capacity):
+        assert capacity >= 1
         return proxy_cls(numpy.empty(capacity, dtype=np_dtype), 0)
 
     type_inst = type_cls([

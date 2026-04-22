@@ -242,3 +242,15 @@ def test_multi_dtype_int64():
     assert vals[:3] == (100, 200, 300)
     assert vals[3] == 3
     assert vals[4] == 4
+
+
+def test_zero_capacity_rejected():
+    import pytest
+    Float64Vec, _ = make_vector(nb_types.float64)
+
+    @njit
+    def go():
+        return Float64Vec(0)
+
+    with pytest.raises(AssertionError):
+        go()
