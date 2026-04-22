@@ -12,19 +12,22 @@ from numbduck.vector import make_vector
 Float64Vector, float64_vec_type = make_vector(nb_types.float64)
 ```
 
-`make_vector(elem_type)` returns a `(ProxyClass, type_instance)` pair — same convention used throughout numbduck for structrefs:
+`make_vector(elem_type)` returns a `(create, type_instance)` pair:
 
-- **`ProxyClass`** — the `StructRefProxy` subclass, used to construct instances inside `@njit` code.
+- **`create`** — an `@njit` factory function that takes a single `capacity` argument and returns a freshly-allocated vector of that element type. The factory embeds the correct numpy dtype via closure, so callers don't pass dtypes at call time. Usage: `v = Float64Vector(8)` — allocate `buf=numpy.empty(8, dtype=float64)` and `size=0`.
 - **`type_instance`** — the concrete `VectorType` instance with resolved field types, used as a field type in other structrefs and as the first arg to `borrow_structref`.
+
+The factory shape (not a `StructRefProxy` subclass) means `Float64Vector` is callable from `@njit` code directly and the dtype is locked by the type — callers can't pass a mismatched buffer dtype.
 
 Internally, `make_vector` does:
 
 1. Create a concrete subclass of `VectorType` (the shared base) via `type()`.
 2. Register it with `structref.register`.
-3. Call numbox's `make_structref` to produce the proxy class.
-4. Instantiate the type class with resolved fields to produce the type instance.
+3. Call numbox's `make_structref` to produce the underlying proxy class (used only by `create`).
+4. Build the `@njit` factory `create(capacity)` that allocates the buffer with the correct dtype and invokes the proxy constructor.
+5. Instantiate the type class with resolved fields to produce the type instance.
 
-Multiple calls with the same `elem_type` should return the same classes (cache by `elem_type.key`).
+Multiple calls with the same `elem_type` return the cached `(create, type_instance)` tuple (cache key: `elem_type.key`).
 
 ## Structref Fields
 
@@ -40,10 +43,10 @@ Capacity is `buf.shape[0]`. No separate capacity field — it's always derivable
 Inside `@njit`:
 
 ```python
-v = Float64Vector(numpy.empty(8, dtype=numpy.float64), 0)
+v = Float64Vector(8)
 ```
 
-The two arguments are the initial buffer and the initial size (0 for an empty vector). Default initial capacity of 8 is a convention, not enforced — callers choose the buffer size.
+Single `capacity` argument — the dtype is locked by the type. Callers choose the initial capacity (convention: 8).
 
 ## API
 
@@ -126,28 +129,28 @@ No new risks compared to the current `typed.List` approach.
 ```python
 Float64Vector, float64_vec_type = make_vector(nb_types.float64)
 
-IRRState = make_structref(
-    "IRRState",
-    {
-        "cashflows": float64_vec_type,
-        "periods": float64_vec_type,
-        "investment": nb_types.float64,
-        "target_npv": nb_types.float64,
-        "initialized": nb_types.int64,
-    },
-    IRRStateType,
-)
+_irr_state_fields = [
+    ("cashflows", float64_vec_type),
+    ("periods", float64_vec_type),
+    ("investment", nb_types.float64),
+    ("target_npv", nb_types.float64),
+    ("initialized", nb_types.int64),
+]
+IRRState = make_structref("IRRState", dict(_irr_state_fields), IRRStateType)
+irr_state_type = IRRStateType(_irr_state_fields)
 ```
+
+The field list is named once and reused for both the proxy (via `dict(...)` for `make_structref`) and the type instance (list-of-tuples form). Keeping a single source of truth avoids the cryptic type-identity mismatch when the two field lists drift.
 
 ### Callback changes
 
-| Callback   | Before                                        | After                                                   |
-|-----------|-----------------------------------------------|--------------------------------------------------------|
-| init      | `typed_list.empty_list(nb_types.float64)`     | `Float64Vector(numpy.empty(8, dtype=numpy.float64), 0)` |
-| update    | `s.cashflows.append(val)`                     | `vector_push(s.cashflows, val)`                         |
-| combine   | `tgt.cashflows.extend(src.cashflows)`         | `vector_extend(tgt.cashflows, src.cashflows)`           |
-| finalize  | `s.cashflows[j]`, `len(s.cashflows)`          | unchanged (operator overloads)                          |
-| destroy   | unchanged                                     | unchanged                                               |
+| Callback   | Before                                        | After                                              |
+|-----------|-----------------------------------------------|----------------------------------------------------|
+| init      | `typed_list.empty_list(nb_types.float64)`     | `Float64Vector(64)`                                |
+| update    | `s.cashflows.append(val)`                     | `vector_push(s.cashflows, val)`                    |
+| combine   | `tgt.cashflows.extend(src.cashflows)`         | `vector_extend(tgt.cashflows, src.cashflows)`      |
+| finalize  | `s.cashflows[j]`, `len(s.cashflows)`          | unchanged (operator overloads)                     |
+| destroy   | unchanged                                     | unchanged                                          |
 
 ### Removed imports
 

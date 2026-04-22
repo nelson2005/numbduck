@@ -2,6 +2,8 @@ import numpy
 from numba import njit, types as nb_types
 
 from numbduck.vector import make_vector
+from numbduck.vector import _vector_cache
+from numbduck.vector import vector_push, vector_extend  # noqa: E402
 
 
 def test_construction_and_len():
@@ -40,9 +42,7 @@ def test_factory_caching():
     r2 = make_vector(nb_types.float64)
     assert r1[0] is r2[0]
     assert r1[1] is r2[1]
-
-
-from numbduck.vector import vector_push, vector_extend
+    assert nb_types.float64.key in _vector_cache
 
 
 def test_vector_push():

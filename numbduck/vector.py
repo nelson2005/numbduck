@@ -8,7 +8,8 @@ from numbox.utils.highlevel import make_structref
 
 
 class VectorType(nb_types.StructRef):
-    pass
+    def preprocess_fields(self, fields):
+        return tuple((n, nb_types.unliteral(t)) for n, t in fields)
 
 
 _vector_cache = {}
