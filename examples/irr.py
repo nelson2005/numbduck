@@ -124,39 +124,29 @@ class IRRStateType(nb_types.StructRef):
         return tuple((n, nb_types.unliteral(t)) for n, t in fields)
 
 
-IRRState = make_structref(
-    "IRRState",
-    {
-        "cashflows": float64_vec_type,
-        "periods": float64_vec_type,
-        "investment": nb_types.float64,
-        "target_npv": nb_types.float64,
-        "initialized": nb_types.int64,
-    },
-    IRRStateType,
-)
-
-irr_state_type = IRRStateType([
+_irr_state_fields = [
     ("cashflows", float64_vec_type),
     ("periods", float64_vec_type),
     ("investment", nb_types.float64),
     ("target_npv", nb_types.float64),
     ("initialized", nb_types.int64),
-])
+]
+IRRState = make_structref("IRRState", dict(_irr_state_fields), IRRStateType)
+irr_state_type = IRRStateType(_irr_state_fields)
 
 
 # ---- Bisection solver ----
 
 @njit
-def irr_bisect(cashflows, n, investment, target_npv):
+def irr_bisect(cashflows, periods, n, investment, target_npv):
     r_lo = -0.99
     r_hi = 10.0
     for _ in range(100):
         r_mid = (r_lo + r_hi) / 2.0
         npv = -investment - target_npv
         for i in range(n):
-            i = numpy.uint64(i)
-            npv += cashflows[i] / (1.0 + r_mid) ** (i + 1)
+            iu = numpy.uint64(i)
+            npv += cashflows[iu] / (1.0 + r_mid) ** periods[iu]
         if abs(npv) < 1e-9:
             return r_mid
         if npv > 0.0:
@@ -221,16 +211,16 @@ def _irr_update_impl(info, chunk, states):
             continue
         if val_npv != 0 and not ducklib.duckdb_validity_row_is_valid(val_npv, i):
             continue
-        i = numpy.uint64(i)
-        slot = carray(_cast_int_to_void_p(state_slots[i]), (1,), dtype=numpy.intp)
+        iu = numpy.uint64(i)
+        slot = carray(_cast_int_to_void_p(state_slots[iu]), (1,), dtype=numpy.intp)
         s = borrow_structref(irr_state_type, slot[0])
-        vector_push(s.cashflows, cf_data[i])
-        vector_push(s.periods, pd_data[i])
+        vector_push(s.cashflows, cf_data[iu])
+        vector_push(s.periods, pd_data[iu])
         if s.initialized == 0:
             inv_data = carray(_cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_inv)), (n,), dtype=numpy.float64)
             npv_data = carray(_cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_npv)), (n,), dtype=numpy.float64)
-            s.investment = inv_data[i]
-            s.target_npv = npv_data[i]
+            s.investment = inv_data[iu]
+            s.target_npv = npv_data[iu]
             s.initialized = 1
 
 
@@ -244,9 +234,9 @@ def _irr_combine_impl(info, source, target, count):
     src_slots = carray(_cast_int_to_void_p(source), (count,), dtype=numpy.intp)
     tgt_slots = carray(_cast_int_to_void_p(target), (count,), dtype=numpy.intp)
     for i in range(count):
-        i = numpy.uint64(i)
-        src_slot = carray(_cast_int_to_void_p(src_slots[i]), (1,), dtype=numpy.intp)
-        tgt_slot = carray(_cast_int_to_void_p(tgt_slots[i]), (1,), dtype=numpy.intp)
+        iu = numpy.uint64(i)
+        src_slot = carray(_cast_int_to_void_p(src_slots[iu]), (1,), dtype=numpy.intp)
+        tgt_slot = carray(_cast_int_to_void_p(tgt_slots[iu]), (1,), dtype=numpy.intp)
         src = borrow_structref(irr_state_type, src_slot[0])
         tgt = borrow_structref(irr_state_type, tgt_slot[0])
         vector_extend(tgt.cashflows, src.cashflows)
@@ -268,25 +258,25 @@ def _irr_finalize_impl(info, source, result, count, offset):
     src_slots = carray(_cast_int_to_void_p(source), (count,), dtype=numpy.intp)
     out_vals = carray(_cast_int_to_void_p(out_data), (offset + count,), dtype=numpy.float64)
     for i in range(count):
-        i = numpy.uint64(i)
-        src_slot = carray(_cast_int_to_void_p(src_slots[i]), (1,), dtype=numpy.intp)
+        iu = numpy.uint64(i)
+        src_slot = carray(_cast_int_to_void_p(src_slots[iu]), (1,), dtype=numpy.intp)
         s = borrow_structref(irr_state_type, src_slot[0])
         n = len(s.cashflows)
         if n == 0:
-            out_vals[numpy.uint64(offset + i)] = math.nan
+            out_vals[numpy.uint64(offset + iu)] = math.nan
             continue
         for j in range(1, n):
-            j = numpy.uint64(j)
-            key_cf = s.cashflows[j]
-            key_pd = s.periods[j]
-            k = j
+            ju = numpy.uint64(j)
+            key_cf = s.cashflows[ju]
+            key_pd = s.periods[ju]
+            k = ju
             while k > 0 and s.periods[numpy.uint64(k - 1)] > key_pd:
                 s.cashflows[k] = s.cashflows[numpy.uint64(k - 1)]
                 s.periods[k] = s.periods[numpy.uint64(k - 1)]
                 k = numpy.uint64(k - 1)
             s.cashflows[k] = key_cf
             s.periods[k] = key_pd
-        out_vals[numpy.uint64(offset + i)] = irr_bisect(s.cashflows, n, s.investment, s.target_npv)
+        out_vals[numpy.uint64(offset + iu)] = irr_bisect(s.cashflows, s.periods, n, s.investment, s.target_npv)
 
 
 @cfunc(nb_types.void(nb_types.intp, nb_types.intp, nb_types.intp, nb_types.uint64, nb_types.uint64))
@@ -298,8 +288,8 @@ def _irr_finalize_cb(info, source, result, count, offset):
 def _irr_destroy_impl(states, count):
     state_slots = carray(_cast_int_to_void_p(states), (count,), dtype=numpy.intp)
     for i in range(count):
-        i = numpy.uint64(i)
-        slot = carray(_cast_int_to_void_p(state_slots[i]), (1,), dtype=numpy.intp)
+        iu = numpy.uint64(i)
+        slot = carray(_cast_int_to_void_p(state_slots[iu]), (1,), dtype=numpy.intp)
         release_meminfo(slot[0])
 
 
@@ -427,6 +417,27 @@ def main():
         for t in range(1, n + 1):
             npv_check += cf / (1.0 + irr_val) ** t
         assert abs(npv_check) < 1e-6, f"Project {project} NPV check failed: {npv_check}"
+
+    # Test 3: sparse periods — catches the "exponent = i+1" trap
+    #   One cashflow at period 12, investment 10,000
+    #   Analytic IRR: (13000/10000)^(1/12) - 1
+    conn.execute("DROP TABLE test_irr")
+    conn.execute("""
+        CREATE TABLE test_irr AS
+        SELECT
+            12.0::DOUBLE AS period,
+            13000.0 AS cashflow,
+            10000.0 AS investment,
+            0.0 AS target_npv
+    """)
+    result = conn.execute(
+        "SELECT irr(cashflow, period, investment, target_npv) FROM test_irr"
+    ).fetchone()
+    irr_val = result[0]
+    expected = (13000.0 / 10000.0) ** (1.0 / 12.0) - 1.0
+    assert abs(irr_val - expected) < 1e-6, f"Sparse-period IRR mismatch: {irr_val} vs {expected}"
+    print("\nTest 3: sparse periods (single cashflow at period 12)")
+    print(f"  IRR (monthly): {irr_val:.6f} (expected {expected:.6f})")
 
     conn.execute("DROP TABLE test_irr")
     conn.close()
