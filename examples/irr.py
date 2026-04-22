@@ -28,6 +28,7 @@ from numba.extending import intrinsic
 import llvmlite.ir as llir
 from numbox.utils.highlevel import make_structref
 from numbox.utils.lowlevel import _cast_int_to_void_p, get_unicode_data_p
+from numbox.utils.meminfo import structref_meminfo
 
 from numbduck import ducklib
 from numbduck.pybridge import extract_connection_ptr
@@ -36,33 +37,41 @@ from numbduck.vector import make_vector, vector_push, vector_extend
 Float64Vector, float64_vec_type = make_vector(nb_types.float64)
 
 
-# ---- NRT <-> DuckDB bridge intrinsics ----
+# ---- structref <-> raw MemInfo pointer bridge intrinsics ----
 #
-# These let an NRT-managed structref round-trip through DuckDB's
-# aggregate state slot (a raw void*) without breaking reference counts.
+# Full lifecycle explanation, removerefctpass interaction, and rationale
+# for using NRT_MemInfo_release (instead of context.nrt.decref) live in
+# test/test_ducklib.md. Reference impl: test/test_ducklib.py.
+#
+# Reference counting contract:
+#   export_meminfo(s):   +1 incref; returned intp keeps the allocation alive.
+#   borrow_structref():  +1 incref on entry; local decref on scope exit
+#                        balances it. Net zero for the external owner.
+#   release_meminfo(p):  -1 decref; triggers dtor at refcount 0.
 
 _MI_TY = nb_types.MemInfoPointer(nb_types.voidptr)
 
 
 @intrinsic
-def _export_meminfo(typingctx, struct_ty):
-    sig = nb_types.intp(struct_ty)
+def _incref_meminfo(typingctx, p_ty):
+    sig = nb_types.void(p_ty)
 
     def codegen(context, builder, signature, args):
-        struct_val = args[0]
-        _, meminfo_p = context.nrt.get_meminfos(builder, struct_ty, struct_val)[0]
-        context.nrt.incref(builder, _MI_TY, meminfo_p)
-        return builder.ptrtoint(meminfo_p, cgutils.intp_t)
+        mi_ll_ty = context.get_value_type(_MI_TY)
+        meminfo = builder.inttoptr(args[0], mi_ll_ty)
+        context.nrt.incref(builder, _MI_TY, meminfo)
     return sig, codegen
 
 
 @njit
 def export_meminfo(s):
-    return _export_meminfo(s)
+    meminfo_p, _ = structref_meminfo(s)
+    _incref_meminfo(meminfo_p)
+    return meminfo_p
 
 
 @intrinsic
-def _borrow_structref(typingctx, struct_type_ref, p_ty):
+def _deref_structref_raw_ptr(typingctx, struct_type_ref, p_ty):
     inst_type = struct_type_ref.instance_type
     sig = inst_type(struct_type_ref, p_ty)
 
@@ -70,7 +79,6 @@ def _borrow_structref(typingctx, struct_type_ref, p_ty):
         p_val = args[1]
         mi_ll_ty = context.get_value_type(_MI_TY)
         meminfo = builder.inttoptr(p_val, mi_ll_ty)
-        context.nrt.incref(builder, _MI_TY, meminfo)
         st = cgutils.create_struct_proxy(inst_type)(context, builder)
         st.meminfo = meminfo
         return st._getvalue()
@@ -79,11 +87,19 @@ def _borrow_structref(typingctx, struct_type_ref, p_ty):
 
 @njit
 def borrow_structref(struct_type, p):
-    return _borrow_structref(struct_type, p)
+    _incref_meminfo(p)
+    return _deref_structref_raw_ptr(struct_type, p)
 
 
 @intrinsic
 def _release_meminfo(typingctx, p_ty):
+    """Decref MemInfo at intp via NRT_MemInfo_release (C runtime).
+
+    Can't use context.nrt.decref() here — removerefctpass strips
+    NRT_decref when the function signature has no NRT-tracked types.
+    NRT_MemInfo_release also makes _legalize() bail out, protecting
+    the whole function from the rewrite.
+    """
     sig = nb_types.void(p_ty)
 
     def codegen(context, builder, signature, args):
