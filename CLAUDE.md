@@ -81,6 +81,7 @@ Cross-project preferences live in the user's MEMORY.md. Only numbduck-specific w
 
 - **DuckDB Python issue**: duckdb/duckdb-python#404 — requesting C API symbols be exported from the Python wheel. Filed 2026-03-26; maintainer @evertlammerts responded 2026-04-12 committing to land the fix before 1.5.3. Still open.
 - **macOS C API stripping is intentional**: [duckdb-python PR #81](https://github.com/duckdb/duckdb-python/pull/81) deliberately exports only `PyInit__duckdb` + `duckdb_adbc_init` via [CMakeLists.txt L83-L110](https://github.com/duckdb/duckdb-python/blob/main/CMakeLists.txt#L83-L110). macOS `-exported_symbol` enforces it; Linux `--export-dynamic-symbol` is additive so C API survives by accident.
+- **Structref-backed UDAF pattern (merged upstream 2026-04-22)**: [Goykhman/numbduck#24](https://github.com/Goykhman/numbduck/pull/24) merged as [`0ff1aee`](https://github.com/Goykhman/numbduck/commit/0ff1aee68c1a91256beaab141bf8be247d8c25e7). Bridges DuckDB aggregate lifecycle to numba structref state via `borrow_structref` (incref + raw deref) and `_deref_structref_raw_ptr` intrinsic. Design doc: [`test/test_ducklib.md`](test/test_ducklib.md) covers aggregate lifecycle, bridge intrinsics, removerefctpass interaction, and the `@cfunc`/`@njit` callback pattern. Reference impl: [`test/test_ducklib.py`](test/test_ducklib.py) (Welford stddev + array UDAF).
 
 **Key patterns for @cfunc + @njit UDF callbacks:**
 1. `@cfunc` cannot use `import` inside body → use module-level `@njit` impl + thin `@cfunc` wrapper
