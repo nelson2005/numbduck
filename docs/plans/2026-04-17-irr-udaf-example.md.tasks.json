@@ -4,30 +4,36 @@
     {
       "id": 1,
       "subject": "Task 1: Bridge intrinsics and state structref",
-      "status": "pending",
+      "status": "done",
       "description": "**Goal:** Define the NRT\u2194DuckDB bridge intrinsics and IRR state structref at the top of `examples/irr.py`.\n\n**Files:**\n- Create: `examples/irr.py`\n\n**Acceptance Criteria:**\n- [ ] `export_meminfo`, `borrow_structref`, `release_meminfo` intrinsics defined\n- [ ] `IRRState` structref created via `make_structref`\n- [ ] Module imports successfully\n\n**Verify:** `./venv/bin/python -c \"from examples.irr import IRRState; print('OK')\"` \u2192 `OK`\n\n```json:metadata\n{\"files\": [\"examples/irr.py\"], \"verifyCommand\": \"./venv/bin/python -c \\\"from examples.irr import IRRState; print('OK')\\\"\", \"acceptanceCriteria\": [\"bridge intrinsics defined\", \"IRRState via make_structref\", \"module imports\"], \"model\": \"opus\"}\n```"
     },
     {
       "id": 2,
       "subject": "Task 2: Bisection solver and aggregate callbacks",
-      "status": "pending",
-      "blockedBy": [1],
+      "status": "done",
+      "blockedBy": [
+        1
+      ],
       "description": "**Goal:** Add the `@njit` bisection solver and all six DuckDB aggregate callbacks.\n\n**Files:**\n- Modify: `examples/irr.py`\n\n**Acceptance Criteria:**\n- [ ] `irr_bisect` finds correct rate for known test case\n- [ ] All six callbacks compile as `@cfunc`\n- [ ] Update reads four columns from data chunk\n- [ ] Combine concatenates lists\n- [ ] Finalize sorts by period and runs bisection\n\n**Verify:** `./venv/bin/python -c \"from examples.irr import _irr_state_size_cb; print('OK')\"` \u2192 `OK`\n\n```json:metadata\n{\"files\": [\"examples/irr.py\"], \"verifyCommand\": \"./venv/bin/python -c \\\"from examples.irr import _irr_state_size_cb; print('OK')\\\"\", \"acceptanceCriteria\": [\"bisection solver correct\", \"six callbacks compile\", \"update reads 4 columns\", \"combine concatenates\", \"finalize sorts and bisects\"], \"model\": \"opus\"}\n```"
     },
     {
       "id": 3,
       "subject": "Task 3: Registration, query runner, and verification",
-      "status": "pending",
-      "blockedBy": [2],
+      "status": "done",
+      "blockedBy": [
+        2
+      ],
       "description": "**Goal:** Add `main()` that registers the UDAF, creates test data, runs queries, and verifies results.\n\n**Files:**\n- Modify: `examples/irr.py`\n- Modify: `examples/README.md`\n\n**Acceptance Criteria:**\n- [ ] `python examples/irr.py` runs without errors\n- [ ] Result matches expected IRR within rel_tol=1e-6\n- [ ] Multi-group query works\n- [ ] README updated\n\n**Verify:** `./venv/bin/python examples/irr.py` \u2192 prints results, exits 0\n\n```json:metadata\n{\"files\": [\"examples/irr.py\", \"examples/README.md\"], \"verifyCommand\": \"./venv/bin/python examples/irr.py\", \"acceptanceCriteria\": [\"runs without errors\", \"result matches expected\", \"multi-group works\", \"README updated\"], \"model\": \"opus\"}\n```"
     },
     {
       "id": 4,
       "subject": "Task 4: Final verification and cleanup",
-      "status": "pending",
-      "blockedBy": [3],
+      "status": "done",
+      "blockedBy": [
+        3
+      ],
       "description": "**Goal:** Add NRT leak check, run flake8, verify everything end-to-end.\n\n**Files:**\n- Modify: `examples/irr.py` (if fixes needed)\n\n**Acceptance Criteria:**\n- [ ] flake8 passes\n- [ ] NRT alloc delta == free delta\n- [ ] Example runs independently\n\n**Verify:** `./venv/bin/python -m flake8 examples/irr.py && ./venv/bin/python examples/irr.py` \u2192 both pass\n\n```json:metadata\n{\"files\": [\"examples/irr.py\"], \"verifyCommand\": \"./venv/bin/python -m flake8 examples/irr.py && ./venv/bin/python examples/irr.py\", \"acceptanceCriteria\": [\"flake8 passes\", \"no NRT leaks\", \"runs independently\"], \"model\": \"opus\"}\n```"
     }
   ],
-  "lastUpdated": "2026-04-17T00:00:00Z"
+  "lastUpdated": "2026-04-22T14:00:00Z"
 }
