@@ -270,12 +270,6 @@ def _irr_update_impl(info, chunk, states):
     pd_data = carray(
         _cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_pd)),
         (n,), dtype=numpy.float64)
-    inv_data = carray(
-        _cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_inv)),
-        (n,), dtype=numpy.float64)
-    npv_data = carray(
-        _cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_npv)),
-        (n,), dtype=numpy.float64)
     state_slots = carray(
         _cast_int_to_void_p(states), (n,), dtype=numpy.intp)
     for i in range(n):
@@ -285,6 +279,12 @@ def _irr_update_impl(info, chunk, states):
         s.cashflows.append(cf_data[i])
         s.periods.append(pd_data[i])
         if s.initialized == 0:
+            inv_data = carray(
+                _cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_inv)),
+                (n,), dtype=numpy.float64)
+            npv_data = carray(
+                _cast_int_to_void_p(ducklib.duckdb_vector_get_data(vec_npv)),
+                (n,), dtype=numpy.float64)
             s.investment = inv_data[i]
             s.target_npv = npv_data[i]
             s.initialized = 1

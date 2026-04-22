@@ -8,6 +8,12 @@ from numbox.utils.highlevel import make_structref
 
 
 class VectorType(nb_types.StructRef):
+    # Abstract base for all Vector[T] structrefs. Must NOT be registered with
+    # structref.register — only the dynamic concrete subclasses are.
+    # `preprocess_fields` defends against literal-type callers; resolved-type
+    # callers are unaffected. Placement on the base (inherited by concrete
+    # subclasses) is intentional — moving the override into the concrete
+    # subclass directly works the same.
     def preprocess_fields(self, fields):
         return tuple((n, nb_types.unliteral(t)) for n, t in fields)
 
@@ -16,6 +22,26 @@ _vector_cache = {}
 
 
 def make_vector(elem_type):
+    """Return ``(create, type_instance)`` for ``Vector[elem_type]``.
+
+    - ``create``: an ``@njit`` factory taking a single ``capacity`` argument.
+      Dtype is locked by the type — callers cannot pass a mismatched buffer.
+    - ``type_instance``: the concrete ``VectorType`` instance with resolved
+      field types. Use as a field type in other structrefs and as the first
+      arg to ``borrow_structref``.
+
+    Results are memoized in ``_vector_cache`` keyed by ``elem_type.key``.
+
+    Single-shot per element type: once registered with numba, the concrete
+    ``Vector_{name}_Type`` class cannot be re-created. Popping the cache and
+    re-running ``make_vector(t)`` registers a second class with the same name
+    and produces "No conversion from X to X" type-identity errors at compile
+    time. Tests must not flush the cache.
+
+    The numpy dtype is derived from ``str(elem_type)`` at build time. Works
+    for standard scalar numba types (float64, int64, etc.). Exotic types
+    where ``str()`` does not match a numpy dtype name are unsupported.
+    """
     key = elem_type.key
     if key in _vector_cache:
         return _vector_cache[key]
