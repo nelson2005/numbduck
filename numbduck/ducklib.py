@@ -5,40 +5,27 @@ from numba.extending import intrinsic
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
 from numba.core.cgutils import get_or_insert_function
-from numbox.utils.highlevel import cres as _cres
-
-import platform
-import sys
+from numbox.core.bindings.abi import (
+    _call_lib_func_byval, _call_lib_func_struct_in, _call_lib_func_struct_out,
+    _is_win, _is_sysv_x86_64,
+)
+from numbox.utils.highlevel import cres as _cres, cres_if_available
 
 from numbduck.utils import load_duckdb
 
 
 duckdb_lib = load_duckdb()
 
-_is_win = sys.platform == 'win32'
-_is_sysv_x86_64 = platform.machine() == 'x86_64'
+
+def cres(sig, if_available=False, **kwargs):
+    """Route if_available=True through numbox's cres_if_available against duckdb_lib."""
+    if if_available:
+        return cres_if_available(duckdb_lib, sig, **kwargs)
+    return _cres(sig, **kwargs)
 
 
 def _has_symbol(name):
     return hasattr(duckdb_lib, name)
-
-
-def _unavailable(name):
-    def stub(*args, **kwargs):
-        raise NotImplementedError(f"{name} is not available in this duckdb version")
-    stub.__name__ = name
-    return stub
-
-
-def cres(sig, if_available=False, **kwargs):
-    if not if_available:
-        return _cres(sig, **kwargs)
-
-    def decorator(func):
-        if _has_symbol(func.__name__):
-            return _cres(sig, **kwargs)(func)
-        return _unavailable(func.__name__)
-    return decorator
 
 
 duckdb_state_ty = int32
@@ -105,14 +92,6 @@ _i64 = ir.IntType(64)
 _i32 = ir.IntType(32)
 
 
-def _resolve_sig(func_name):
-    """Look up a function's signature in the signatures dict."""
-    func_sig = signatures.get(func_name, None)
-    if func_sig is None:
-        raise ValueError(f"Undefined signature for {func_name}")
-    return func_sig
-
-
 def _build_packed_interval(builder, interval_tup):
     """Pack (months:i32, days:i32, micros:i64) into {i64, i64}.
 
@@ -134,115 +113,6 @@ def _build_packed_interval(builder, interval_tup):
     val = builder.insert_value(val, packed, 0)
     val = builder.insert_value(val, micros, 1)
     return val
-
-
-def _emit_byval_call(builder, context, arg, arg_ll_ty, ret_type, func_name):
-    """Emit IR to pass a struct by pointer: alloca, store, call via pointer."""
-    stack_p = builder.alloca(arg_ll_ty)
-    builder.store(arg, stack_p)
-    func_ty_ll = FunctionType(ret_type, [arg_ll_ty.as_pointer()])
-    func_p = get_or_insert_function(builder.module, func_ty_ll, func_name)
-    return builder.call(func_p, [stack_p])
-
-
-@intrinsic(prefer_literal=True)
-def _call_lib_func_byval(typingctx, func_name_ty, arg_ty):
-    """Like _call_lib_func, but allocates the arg on the stack
-    and passes a pointer to that stack slot.
-
-    Used for C functions whose parameter is a pointer to a struct
-    (e.g. ``duckdb_result *``), when the caller has the struct as
-    a value.
-    """
-    func_name = func_name_ty.literal_value
-    func_sig = _resolve_sig(func_name)
-
-    def codegen(context, builder, signature, arguments):
-        _, arg = arguments
-        arg_ll_ty = context.get_value_type(arg_ty)
-        ret_type = context.get_value_type(signature.return_type)
-        return _emit_byval_call(
-            builder, context, arg, arg_ll_ty, ret_type, func_name)
-
-    sig = func_sig.return_type(func_name_ty, arg_ty)
-    return sig, codegen
-
-
-@intrinsic(prefer_literal=True)
-def _call_lib_func_struct_in(typingctx, func_name_ty, arg_ty):
-    """Like _call_lib_func, but the arg is a small struct.
-
-    Struct must be ≤16 bytes for System V x86-64 by-value passing.
-    On Windows: passes via stack pointer (degrades to byval).
-    On other platforms: passes the struct directly by value.
-
-    LLVM's JIT treats ABI lowering as a frontend responsibility — it
-    won't insert the right calling convention for struct args/returns.
-    See: https://github.com/numba/llvmlite/issues/300#issuecomment-327235846
-         https://github.com/llvm/llvm-project/issues/85417
-    """
-    func_name = func_name_ty.literal_value
-    func_sig = _resolve_sig(func_name)
-    struct_bytes = sum(t.bitwidth for t in arg_ty) / 8
-    assert struct_bytes <= 16, (
-        f"struct too large for by-value passing ({struct_bytes} bytes > 16)"
-    )
-
-    def codegen(context, builder, signature, arguments):
-        _, arg = arguments
-        arg_ll_ty = context.get_value_type(arg_ty)
-        ret_type = context.get_value_type(signature.return_type)
-        if _is_win:
-            return _emit_byval_call(
-                builder, context, arg, arg_ll_ty, ret_type, func_name)
-        func_ty_ll = FunctionType(ret_type, [arg_ll_ty])
-        func_p = get_or_insert_function(
-            builder.module, func_ty_ll, func_name)
-        return builder.call(func_p, [arg])
-
-    sig = func_sig.return_type(func_name_ty, arg_ty)
-    return sig, codegen
-
-
-@intrinsic(prefer_literal=True)
-def _call_lib_func_struct_out(typingctx, func_name_ty, arg_ty):
-    """Like _call_lib_func, but the return value is a struct.
-
-    Return struct must be ≤16 bytes for System V x86-64 by-value return.
-    On Windows: uses sret (hidden first pointer arg, void return).
-    On other platforms: returns the struct directly by value.
-
-    See _call_lib_func_struct_in docstring for ABI references.
-    """
-    func_name = func_name_ty.literal_value
-    func_sig = _resolve_sig(func_name)
-    ret_ty = func_sig.return_type
-    struct_bytes = sum(t.bitwidth for t in ret_ty) / 8
-    assert struct_bytes <= 16, (
-        f"return struct too large for by-value return ({struct_bytes} bytes > 16)"
-    )
-
-    def codegen(context, builder, signature, arguments):
-        _, arg = arguments
-        ret_ll_ty = context.get_value_type(signature.return_type)
-        if _is_win:
-            sret_p = builder.alloca(ret_ll_ty)
-            func_ty_ll = FunctionType(
-                ir.VoidType(),
-                [ret_ll_ty.as_pointer(), arg.type]
-            )
-            func_p = get_or_insert_function(
-                builder.module, func_ty_ll, func_name)
-            func_p.args[0].add_attribute('sret')
-            builder.call(func_p, [sret_p, arg])
-            return builder.load(sret_p)
-        func_ty_ll = FunctionType(ret_ll_ty, [arg.type])
-        func_p = get_or_insert_function(
-            builder.module, func_ty_ll, func_name)
-        return builder.call(func_p, [arg])
-
-    sig = func_sig.return_type(func_name_ty, arg_ty)
-    return sig, codegen
 
 
 signatures["duckdb_array_type_array_size"] = uint64(intp)
