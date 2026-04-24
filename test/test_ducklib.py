@@ -12,8 +12,8 @@ from numba.extending import intrinsic
 from llvmlite import ir as llir
 from numbox.utils.lowlevel import get_unicode_data_p
 from numbox.utils.meminfo import (
-    _deref_structref_raw_ptr, _incref_meminfo, _release_meminfo,
-    borrow_structref, export_meminfo, release_meminfo, structref_meminfo,
+    _incref_meminfo, borrow_structref, export_meminfo, release_meminfo,
+    structref_meminfo,
 )
 
 from numba.core.types import intp
