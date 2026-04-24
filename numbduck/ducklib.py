@@ -1,3 +1,5 @@
+import platform
+
 from llvmlite import ir
 from llvmlite.ir import IRBuilder, FunctionType
 from numba.core.types import float32, float64, int8, int16, int32, int64, intp, Tuple, uint8, uint16, uint32, uint64, UniTuple, void
@@ -7,11 +9,29 @@ from numbox.core.bindings.signatures import signatures
 from numba.core.cgutils import get_or_insert_function
 from numbox.core.bindings.abi import (
     _call_lib_func_byval, _call_lib_func_struct_in, _call_lib_func_struct_out,
-    _is_win, _is_sysv_x86_64,
+    _emit_byval_call, _is_win,
 )
 from numbox.utils.highlevel import cres as _cres, cres_if_available
 
 from numbduck.utils import load_duckdb
+
+# SysV x86-64 byval attribute gate for >16-byte structs (decimal 24B, varint
+# 24B). AAPCS64 (M1 Mac, ARM64 Linux) and Windows x64 pass these by caller-
+# allocated pointer at the ABI level, so no attribute is needed; only SysV
+# x86-64 requires the ``byval`` attribute + ``optnone``/``noinline`` to stop
+# LLVM from optimizing away the stack copy before the callee reads it
+# (https://github.com/numba/llvmlite/issues/300#issuecomment-327235846).
+#
+# numbox's ABI helpers in ``numbox.core.bindings.abi`` currently cover only the
+# ≤16-byte register-passing case (``_call_lib_func_struct_in``/``_struct_out``
+# raise ``TypingError`` above 16 bytes) and the attribute-free by-pointer case
+# (``_call_lib_func_byval``). Neither wraps the SysV byval+optnone idiom needed
+# for >16-byte aggregates. This local flag is intended as a bridge until that
+# pattern lands as a numbox helper (e.g. ``_call_lib_func_byval_large``); at
+# that point the three call sites below (``_duckdb_create_decimal``,
+# ``_duckdb_create_varint``, ``_duckdb_bind_decimal``) should switch to the
+# helper and this flag can be deleted.
+_is_sysv_x86_64 = not _is_win and platform.machine() in ("x86_64", "AMD64")
 
 
 duckdb_lib = load_duckdb()
