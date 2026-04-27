@@ -52,6 +52,10 @@ For C functions that pass or return structs by value, `ducklib.py` provides:
 
 Custom `@intrinsic` functions are used for >16-byte structs (decimal 24B, varint 24B) and interval (16B but needs repacking). These use `byval` + `optnone` on SysV x86-64 to prevent LLVM from optimizing away stack copies. See [llvmlite#300 comment](https://github.com/numba/llvmlite/issues/300#issuecomment-327235846) for the ABI rationale.
 
+### Numba runtime (NRT) caveats
+
+NRT can free objects while raw pointers to their data are still in use — keep parent arrays referenced until after C calls complete. If NRT frees prematurely, use a "sink" function to enforce liveness. See [numba#5853](https://github.com/numba/numba/issues/5853#issuecomment-893275330) and [pysemantics](https://numba.readthedocs.io/en/stable/reference/pysemantics.html#zero-initialization-of-variables).
+
 ## Key Paths
 
 - `numbduck/ducklib.py` — all DuckDB C API bindings
