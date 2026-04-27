@@ -54,7 +54,7 @@ Custom `@intrinsic` functions are used for >16-byte structs (decimal 24B, varint
 
 ### Numba runtime (NRT) caveats
 
-NRT can free objects while raw pointers to their data are still in use — keep parent arrays referenced until after C calls complete. If NRT frees prematurely, use a "sink" function to enforce liveness. See [numba#5853](https://github.com/numba/numba/issues/5853#issuecomment-893275330) and [pysemantics](https://numba.readthedocs.io/en/stable/reference/pysemantics.html#zero-initialization-of-variables).
+NRT can free objects while raw pointers to their data are still in use — keep parent arrays referenced until after C calls complete. If NRT frees prematurely, use a "sink" function to enforce liveness. See [numba#5853](https://github.com/numba/numba/issues/5853#issuecomment-893275330) and [pysemantics](https://numba.readthedocs.io/en/stable/reference/pysemantics.html#lifetime-of-variables).
 
 ## Key Paths
 
