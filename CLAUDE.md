@@ -40,15 +40,16 @@ def duckdb_func(arg):
 6. If a function returns a handle (e.g. `duckdb_logical_type`), also bind the corresponding destroy function (e.g. `duckdb_destroy_logical_type`)
 7. **Before submitting an upstream PR**, re-verify all signatures, parameter types, naming conventions (`_p`/`_pp`), and docstring links against `duckdb.h` — this is a second check; step 1 is the first
 
-### Struct-by-value helpers (ducklib.py)
+### Struct-by-value helpers
 
-For C functions that pass or return structs by value, `ducklib.py` provides:
+For C functions that pass or return structs by value, `ducklib.py` uses numbox's unified ABI dispatcher (numbox 0.5.10+):
 
-- **`_call_lib_func_struct_in`** — ≤16-byte struct passed by value (SysV x86-64) or by pointer (Windows)
-- **`_call_lib_func_struct_out`** — ≤16-byte struct returned by value (SysV x86-64) or via sret (Windows)
-- **`_call_lib_func_byval`** — arg passed by pointer regardless of platform (e.g. `duckdb_result *`)
-- **`_emit_byval_call`** — shared codegen helper for alloca+store+call-via-pointer
-- **`_build_packed_interval`** — packs `{i32, i32, i64}` interval into `{i64, i64}` (LLVM drops the second i32 on SysV x86-64)
+- **[`_call_lib_func`](https://github.com/Goykhman/numbox/blob/main/numbox/core/bindings/call.py)** — single platform-aware dispatcher that classifies args + return as scalar / ≤16-byte struct / >16-byte struct and lowers per host ABI (SysV x86-64, AAPCS64, Windows x64). Subsumes the old `_call_lib_func_struct_in` / `_call_lib_func_struct_out` helpers.
+- **[`_call_lib_func_byval`](https://github.com/Goykhman/numbox/blob/main/numbox/core/bindings/call.py)** — arg passed by pointer regardless of platform (e.g. `duckdb_result *` where the C signature takes a pointer to the struct).
+- **[`_emit_byval_call`](https://github.com/Goykhman/numbox/blob/main/numbox/core/bindings/call.py)** — codegen helper for alloca+store+call-via-pointer; reused in custom intrinsics like `_duckdb_create_interval` for the Windows path.
+- **`_build_packed_interval`** (still local to `ducklib.py`) — packs `{i32, i32, i64}` interval into `{i64, i64}` (LLVM drops the second i32 on SysV x86-64).
+
+For symbols that may be absent in older DuckDB versions, use **[`cres_if_available(duckdb_lib, sig)`](https://github.com/Goykhman/numbox/blob/main/numbox/utils/highlevel.py)** from numbox in place of `@cres(sig, if_available=True)` — it stubs the wrapper with `NotImplementedError` when the symbol isn't loaded.
 
 Custom `@intrinsic` functions are used for >16-byte structs (decimal 24B, varint 24B) and interval (16B but needs repacking). These use `byval` + `optnone` on SysV x86-64 to prevent LLVM from optimizing away stack copies. See [llvmlite#300 comment](https://github.com/numba/llvmlite/issues/300#issuecomment-327235846) for the ABI rationale.
 
