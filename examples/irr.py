@@ -20,25 +20,57 @@ per-group constants. The aggregate captures the value from the first
 non-NULL row of each group (update) or partial state (combine) and
 ignores subsequent values; callers are expected to pass the same
 investment / target_npv for every row of a given GROUP BY key.
+
+Run via ``python examples/run_irr.py``. This module must be imported
+(not executed as ``__main__``) so ``IRRStateType`` has a stable
+``__module__`` across processes; otherwise numba's warm cache fails
+type inference with ``No conversion from numba.IRRStateType(...) to
+numba.IRRStateType(...)``.
 """
 import math
-import os
 import sys
+
+if __name__ == "__main__":
+    sys.stderr.write(
+        "examples/irr.py is the importable example module; run examples/run_irr.py instead.\n"
+        "Running irr.py as __main__ gives IRRStateType a fresh class identity each process,\n"
+        "which fails type inference on a warm numba cache.\n"
+    )
+    sys.exit(1)
 
 import duckdb
 import numpy
 from numba import cfunc, carray, njit
 from numba import types as nb_types
-from numbox.core.vector.vector import vector_push, vector_extend
+from numba.experimental import structref
+from numbox.core.vector.vector import make_vector, vector_push, vector_extend
+from numbox.utils.highlevel import make_structref
 from numbox.utils.lowlevel import _cast_int_to_void_p, get_unicode_data_p
 from numbox.utils.meminfo import borrow_structref, export_meminfo, release_meminfo
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from numbduck import ducklib
+from numbduck.pybridge import extract_connection_ptr
 
-from _irr_state import Float64Vector, IRRState, irr_state_type  # noqa: E402
 
-from numbduck import ducklib  # noqa: E402
-from numbduck.pybridge import extract_connection_ptr  # noqa: E402
+Float64Vector, float64_vec_type = make_vector(nb_types.float64)
+
+
+# ---- IRR state structref ----
+
+@structref.register
+class IRRStateType(nb_types.StructRef):
+    pass
+
+
+_irr_state_fields = [
+    ("cashflows", float64_vec_type),
+    ("periods", float64_vec_type),
+    ("investment", nb_types.float64),
+    ("target_npv", nb_types.float64),
+    ("initialized", nb_types.int64),
+]
+IRRState = make_structref("IRRState", dict(_irr_state_fields), IRRStateType)
+irr_state_type = IRRStateType(_irr_state_fields)
 
 
 # ---- Bisection solver ----
@@ -345,7 +377,3 @@ def main():
         sys.exit(1)
 
     print("\nAll checks passed.")
-
-
-if __name__ == "__main__":
-    main()
