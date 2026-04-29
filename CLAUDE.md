@@ -52,6 +52,15 @@ For C functions that pass or return structs by value, `ducklib.py` provides:
 
 Custom `@intrinsic` functions are used for >16-byte structs (decimal 24B, varint 24B) and interval (16B but needs repacking). These use `byval` + `optnone` on SysV x86-64 to prevent LLVM from optimizing away stack copies. See [llvmlite#300 comment](https://github.com/numba/llvmlite/issues/300#issuecomment-327235846) for the ABI rationale.
 
+## Follow-ups
+
+- **Migrate `_duckdb_bind_hugeint`/`_uhugeint`/`_interval` to [`_call_lib_func`](https://github.com/Goykhman/numbox/blob/main/numbox/core/bindings/call.py).** Three hand-rolled intrinsics at [`ducklib.py:1525-1640`](numbduck/ducklib.py) (~116 lines) duplicate ABI lowering that `_call_lib_func` already does for the 18 sibling bind wrappers at [`ducklib.py:298-433`](numbduck/ducklib.py). All three are 16B by-value structs:
+  - `duckdb_hugeint_ty = Tuple((uint64, int64))` → `{i64, i64}` — already canonical, mechanical migration.
+  - `duckdb_uhugeint_ty = UniTuple(uint64, 2)` → `{i64, i64}` — already canonical, mechanical migration.
+  - `duckdb_interval_ty = Tuple((int32, int32, int64))` → `{i32, i32, i64}` — needs the SysV x86-64 eightbyte repack (LLVM drops the second `i32` when this is passed by-value; current `_build_packed_interval` repacks to `{i64, i64}` to work around). Gated on the corresponding numbox follow-up adding a generic INT/INT eightbyte repack to `_call_lib_func`. Once that lands, interval becomes mechanical too.
+
+  Estimated diff after numbox repack lands: ~−116 lines / +12 lines / +0 sigs.
+
 ## Key Paths
 
 - `numbduck/ducklib.py` — all DuckDB C API bindings
