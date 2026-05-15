@@ -8,7 +8,7 @@ numbduck — adapts DuckDB's C API for use inside numba `@njit` code. Built on t
 
 ## Build & Dev
 
-- Venv: `python3.10 -m venv venv && venv/bin/pip install -e . flake8 pytest`
+- Venv: `python3.12 -m venv venv && venv/bin/pip install -e . flake8 pytest`
 - Install: `pip install -e .`
 - Test: `pytest`
 - Lint: `flake8`
