@@ -31,7 +31,7 @@ Optimize for **traction over completeness**: a reader who only reads the first t
 | [YeSQL VLDB 2022 paper](https://www.vldb.org/pvldb/vol15/p2270-foufoulas.pdf) | Optional academic credibility citation. |
 | [duckdb/duckdb-python#404](https://github.com/duckdb/duckdb-python/issues/404) | nelson2005's open issue requesting C API symbol export from the Python wheel. Cited as caveat ("on macOS today, numbduck needs the system DuckDB library; #404 will fix this in 1.5.3"). |
 
-All external URLs must be `curl -sIL`-verified before each article publishes, per [`feedback_verify_external_links`](../../../config/claude/memory/feedback_verify_external_links.md).
+All external URLs must be `curl -sIL`-verified before each article publishes, per [`feedback_verify_external_links`](https://github.com/nelson2005/config/blob/main/claude/memory/feedback_verify_external_links.md).
 
 ## Architecture decisions
 
