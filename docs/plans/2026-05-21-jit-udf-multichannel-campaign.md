@@ -8,6 +8,8 @@
 
 **Tech Stack:** Markdown, the existing [`examples/*.py`](https://github.com/Goykhman/numbduck/tree/main/examples) scripts, `lychee` for link verification, the numbduck venv at `/home/erik/projects/numbduck/venv`.
 
+**Model for every task:** **Opus 4.7** (`claude-opus-4-7`, Agent-tool enum `"opus"`) with **maximum reasoning effort**. Per [`feedback_model_per_task`](https://github.com/nelson2005/config/blob/main/claude/memory/feedback_model_per_task.md), each task's `json:metadata` includes `"model": "opus"` + `"effort": "max"`. Dispatching subagents must (a) pass `model: "opus"` to the Agent tool, and (b) include in the implementer prompt: *"Take maximum care. Think deeply before implementing. Do not rush. Re-read the spec and acceptance criteria slowly. Verify every claim before stating it."*
+
 ---
 
 ## File Structure
