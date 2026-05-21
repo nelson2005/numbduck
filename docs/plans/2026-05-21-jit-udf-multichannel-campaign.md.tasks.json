@@ -1,0 +1,68 @@
+{
+  "planPath": "docs/plans/2026-05-21-jit-udf-multichannel-campaign.md",
+  "lastUpdated": "2026-05-21",
+  "tasks": [
+    {
+      "id": 7,
+      "subject": "Task 0: Snapshot fresh benchmark numbers",
+      "status": "pending",
+      "description": "**Goal:** Run all four examples/*.py scripts in a clean state and capture printed numbers as source-of-truth for article citations.\n\n**Files:**\n- Create: docs/plans/articles/benchmarks-snapshot.md\n\n**Acceptance Criteria:**\n- All 4 example scripts run cleanly; outputs captured verbatim\n- Snapshot file includes timestamp, machine spec, Python/numba/numbox/duckdb versions, numbduck commit SHA\n- Headline numbers section present\n- Committed\n\n**Verify:** test -s docs/plans/articles/benchmarks-snapshot.md && grep -c '^## ' docs/plans/articles/benchmarks-snapshot.md\n\n```json:metadata\n{\"files\": [\"docs/plans/articles/benchmarks-snapshot.md\"], \"verifyCommand\": \"test -s /home/erik/projects/numbduck/docs/plans/articles/benchmarks-snapshot.md && grep -c '^## ' /home/erik/projects/numbduck/docs/plans/articles/benchmarks-snapshot.md\", \"acceptanceCriteria\": [\"all 4 examples ran cleanly\", \"outputs captured verbatim\", \"headline numbers section present\", \"snapshot committed\"]}\n```"
+    },
+    {
+      "id": 8,
+      "subject": "Task 1: Draft Article 1 — Numba discourse reply",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** Write ~800-1200w reply matching spec Article 1 spine, in numbduck dev team voice, citing fresh numbers from Task 0.\n\n**Files:**\n- Create: docs/plans/articles/article-1-numba-discourse-reply.md\n\n**Acceptance Criteria:**\n- 5 sections per spec\n- Word count 800-1200\n- Numbers match snapshot exactly\n- Team voice (no I/my/Milton/Goykhman)\n- Goykhman-only numbduck links\n- numba.readthedocs.io/en/stable (not pydata.org)\n- UDAF section: one-sentence create_aggregate gap aside + duckdb#5116 link\n- No placeholders; closes with invitation\n\n**Verify:** wc -w returns 800-1200; grep -nE 'nelson2005|Milton|TBD|TODO|pydata\\.org' returns nothing\n\n```json:metadata\n{\"files\": [\"docs/plans/articles/article-1-numba-discourse-reply.md\"], \"verifyCommand\": \"wc -w /home/erik/projects/numbduck/docs/plans/articles/article-1-numba-discourse-reply.md\", \"acceptanceCriteria\": [\"800-1200 words\", \"5 spec sections present\", \"team voice\", \"Goykhman-only numbduck links\", \"readthedocs numba link\", \"no placeholders\"]}\n```"
+    },
+    {
+      "id": 9,
+      "subject": "Task 2: Draft Article 2 — DuckDB news / discourse",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** Write ~1500-2000w post matching spec Article 2 spine, opening with Hannes's 2022 framing, leading UDAF section with impossible→possible.\n\n**Files:**\n- Create: docs/plans/articles/article-2-duckdb-news.md\n\n**Acceptance Criteria:**\n- 6 sections per spec\n- Word count 1500-2000\n- Hannes's 3 problems named in §1 with #4797 link\n- bnmoch3 cited respectfully with 23.4s/26.7s\n- NumbSQL + PyData NYC 2018 talk cited\n- §3 has ~15-line haversine @cfunc code sample\n- §5 leads with Olivier Grisel #5116\n- §6 mentions duckdb-python#404\n- Team voice, Goykhman-only links, no placeholders\n\n**Verify:** wc -w in range; voice/link audit clean; code sample syntactically valid\n\n```json:metadata\n{\"files\": [\"docs/plans/articles/article-2-duckdb-news.md\"], \"verifyCommand\": \"wc -w /home/erik/projects/numbduck/docs/plans/articles/article-2-duckdb-news.md\", \"acceptanceCriteria\": [\"1500-2000 words\", \"6 spec sections\", \"Hannes 3 problems + #4797\", \"bnmoch3 respectful\", \"NumbSQL cited\", \"15-line code sample\", \"Grisel #5116 in §5\", \"duckdb-python#404 in §6\", \"team voice\"]}\n```"
+    },
+    {
+      "id": 10,
+      "subject": "Task 3: Draft Article 3 — HN essay",
+      "status": "pending",
+      "blockedBy": [7],
+      "description": "**Goal:** Write ~1500-2000w standalone HN essay. Opens with concrete boundary-cost numbers; builds to UDAF couldn't-do-that-before reveal.\n\n**Files:**\n- Create: docs/plans/articles/article-3-hn-essay.md\n\n**Acceptance Criteria:**\n- 6 sections per spec\n- Word count 1500-2000\n- §1 has measured per-row Python-boundary timing + ASCII flow diagram\n- §2 cites bnmoch3 respectfully\n- §3 has inline 15-line @cfunc code sample (copy-paste-runnable)\n- §5 frames UDAFs as couldn't-do-that-before + Grisel #5116\n- §6 follow-along link list\n- HN title candidate at top as comment\n- Team voice (we, not I), Goykhman-only links\n\n**Verify:** wc in range; voice/link audit clean; code sample passes py_compile after extraction\n\n```json:metadata\n{\"files\": [\"docs/plans/articles/article-3-hn-essay.md\"], \"verifyCommand\": \"wc -w /home/erik/projects/numbduck/docs/plans/articles/article-3-hn-essay.md\", \"acceptanceCriteria\": [\"1500-2000 words\", \"6 spec sections\", \"boundary-cost measured\", \"bnmoch3 respectful\", \"15-line code sample\", \"UDAF impossible framing\", \"team voice\"]}\n```"
+    },
+    {
+      "id": 11,
+      "subject": "Task 4: Verify all URLs in all three drafts",
+      "status": "pending",
+      "blockedBy": [8, 9, 10],
+      "description": "**Goal:** curl -sIL every external URL in the three drafts; replace dead URLs; commit verification report.\n\n**Files:**\n- Create: docs/plans/articles/url-check-report.md\n- Modify (if dead URLs found): docs/plans/articles/article-{1,2,3}-*.md\n\n**Acceptance Criteria:**\n- Every URL returns 200 or 301\n- Any dead URL replaced with stable upstream\n- Report lists every URL + final status\n\n**Verify:** Re-run curl loop on three drafts; report shows zero errors\n\n```json:metadata\n{\"files\": [\"docs/plans/articles/url-check-report.md\"], \"verifyCommand\": \"test -s /home/erik/projects/numbduck/docs/plans/articles/url-check-report.md\", \"acceptanceCriteria\": [\"all URLs 200/301\", \"report file exists\", \"replacements documented\"]}\n```"
+    },
+    {
+      "id": 12,
+      "subject": "Task 5: Cross-article consistency review",
+      "status": "pending",
+      "blockedBy": [11],
+      "description": "**Goal:** Read all three drafts as a set; fix consistency issues (voice, numbers, term usage, framing of shared facts).\n\n**Files:**\n- Modify (if issues found): any of article-{1,2,3}-*.md\n\n**Acceptance Criteria:**\n- Numbers consistent across drafts (match snapshot)\n- bnmoch3 framing respectful in all three\n- UDAF impossible→possible in Articles 2+3; aside in Article 1\n- Team voice: grep -nE '\\bI\\b|\\bmy\\b' returns empty across all drafts\n- Cross-article links correct\n- No duplicated language\n\n**Verify:** Manual re-read back-to-back; final voice grep empty\n\n```json:metadata\n{\"files\": [\"docs/plans/articles/article-1-numba-discourse-reply.md\", \"docs/plans/articles/article-2-duckdb-news.md\", \"docs/plans/articles/article-3-hn-essay.md\"], \"verifyCommand\": \"grep -cnE '\\\\bI\\\\b|\\\\bmy\\\\b|\\\\bme\\\\b' /home/erik/projects/numbduck/docs/plans/articles/article-*.md || echo voice_clean\", \"acceptanceCriteria\": [\"numbers consistent\", \"bnmoch3 respectful\", \"UDAF framing per spec\", \"team voice\", \"no duplicates\"]}\n```"
+    },
+    {
+      "id": 13,
+      "subject": "Task 6: Publish Article 1 — Numba discourse reply (user action)",
+      "status": "pending",
+      "blockedBy": [12],
+      "description": "**Goal:** User posts reply to https://numba.discourse.group/t/fully-jited-duckdb/3060.\n\n**Files:**\n- Modify: docs/plans/articles/article-1-numba-discourse-reply.md (record URL after posting)\n\n**Acceptance Criteria:**\n- Reply text matches draft exactly\n- Posted in existing thread\n- URL captured as top comment in draft\n- Post publicly visible\n\n**Verify:** Visit thread URL; reply is most recent post\n\n**AGENT MUST WAIT — only user has numba discourse credentials.**\n\n```json:metadata\n{\"files\": [\"docs/plans/articles/article-1-numba-discourse-reply.md\"], \"verifyCommand\": \"grep -c 'Posted at' /home/erik/projects/numbduck/docs/plans/articles/article-1-numba-discourse-reply.md\", \"acceptanceCriteria\": [\"reply posted in existing thread\", \"URL captured\", \"publicly visible\"], \"userAction\": true}\n```"
+    },
+    {
+      "id": 14,
+      "subject": "Task 7: Publish Article 2 — DuckDB news / discourse (user action)",
+      "status": "pending",
+      "blockedBy": [13],
+      "description": "**Goal:** Pitch Article 2 to DuckDB Labs for duckdb.org/news/ publication. Fallback to DuckDB Discourse if declined/silent after 2 weeks.\n\n**Files:**\n- Modify: docs/plans/articles/article-2-duckdb-news.md (record URL; possibly modify for editor feedback)\n\n**Acceptance Criteria:**\n- Pitch sent\n- Response received or 2 weeks elapsed\n- Either published on duckdb.org/news OR fallback Discourse post made\n- URL captured\n\n**Verify:** Final URL publicly accessible\n\n**AGENT MUST WAIT — user handles pitch + editor correspondence.**\n\n```json:metadata\n{\"files\": [\"docs/plans/articles/article-2-duckdb-news.md\"], \"verifyCommand\": \"grep -c 'Published at' /home/erik/projects/numbduck/docs/plans/articles/article-2-duckdb-news.md\", \"acceptanceCriteria\": [\"pitch sent\", \"response or timeout\", \"published or fallback\", \"URL captured\"], \"userAction\": true}\n```"
+    },
+    {
+      "id": 15,
+      "subject": "Task 8: Publish Article 3 — HN essay (user action)",
+      "status": "pending",
+      "blockedBy": [14],
+      "description": "**Goal:** Host Article 3 at stable URL; submit to Hacker News.\n\n**Files:**\n- Modify: docs/plans/articles/article-3-hn-essay.md (record host + HN URLs)\n\n**Acceptance Criteria:**\n- Hosted at stable public URL (location per spec deferred-decision)\n- HN submission with final title\n- Submission URL captured\n\n**Verify:** Hosted URL returns 200; HN submission URL accessible\n\n**AGENT MUST WAIT — user decides host, publishes, submits, engages.**\n\n```json:metadata\n{\"files\": [\"docs/plans/articles/article-3-hn-essay.md\"], \"verifyCommand\": \"grep -c -E 'Hosted at|Submitted to HN' /home/erik/projects/numbduck/docs/plans/articles/article-3-hn-essay.md\", \"acceptanceCriteria\": [\"hosted at stable URL\", \"submitted to HN\", \"both URLs captured\"], \"userAction\": true}\n```"
+    }
+  ]
+}
