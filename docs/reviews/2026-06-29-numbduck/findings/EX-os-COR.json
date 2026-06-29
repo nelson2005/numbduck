@@ -1,0 +1,32 @@
+{
+  "unit": "EX-os-COR",
+  "target": "examples/online_scoring.py",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "EX-os-COR-1",
+      "severity": "low",
+      "title": "JIT loop ignores all DuckDB return codes (bind/execute), violating the C-style return-code contract",
+      "file": "examples/online_scoring.py",
+      "line": "117-123",
+      "category": "return-code-check",
+      "description": "Inside _score_jit_loop the calls to ducklib.duckdb_bind_int64 (line 117) and ducklib.duckdb_execute_prepared (line 118) discard their duckdb_state return values; only duckdb_prepare is checked, in score_jit (line 156). The numbduck error-handling contract (CLAUDE.md 'Error Handling': bindings return DuckDBSuccess/DuckDBError and 'Callers do C-style return code checks') is therefore not upheld inside the loop. result_buf is zeroed only once before the loop (line 109); on an execute failure duckdb_execute_prepared can leave out_result partially written/indeterminate, and the immediately-following duckdb_fetch_chunk(result_tup) (line 123) would then operate on a garbage result struct rather than aborting. It cannot trigger under the example's data (a valid prepared SELECT with an always-matching int64 bind), which is why severity is low, but it is a real deviation from the stated caller contract for a file that is the de-facto reference for 'how to drive a prepared-statement loop correctly.'",
+      "impact": "A failed bind/execute is silently ignored and propagates into fetch_chunk on an uninitialized result, risking a crash or garbage score instead of a clean error; as a copied reference pattern it teaches callers to skip return-code checks the C API requires.",
+      "recommendation": "Capture and check the duckdb_state from duckdb_bind_int64 and duckdb_execute_prepared (e.g. assert/branch on == ducklib.DuckDBSuccess) before fetching, matching the duckdb_prepare check already present at line 156.",
+      "confidence": "high"
+    },
+    {
+      "id": "EX-os-COR-2",
+      "severity": "low",
+      "title": "No null/empty-chunk or chunk-size guard before dereferencing the fetched vector",
+      "file": "examples/online_scoring.py",
+      "line": "123-136",
+      "category": "pointer-dereference",
+      "description": "After duckdb_fetch_chunk (line 123) the loop unconditionally calls duckdb_data_chunk_get_vector(chunk_p, 0..3) (lines 125-128) and reads carray(..., (1,), float64)[0] (lines 133-138) with no check that chunk_p != 0 and no check on the chunk row count. duckdb_fetch_chunk returns a null handle when a result has no (more) chunks, i.e. when the bound id matches zero rows. The code is correct only by construction: setup_features creates id = range(N_FEATURES) (lines 74-79) and setup_events draws ids via rng.integers(0, k_features) (line 84), guaranteeing exactly one matching row per probe. Any change to the data relationship (a sparse/joined feature table, an id outside range) would make chunk_p null and the duckdb_data_chunk_get_vector(0, ...) call dereference a null pointer / read garbage.",
+      "impact": "Under the shipped data this never triggers; under any modification that allows a zero-row probe it is an unchecked null-pointer dereference (segfault) inside nogil JIT code. As reference material it omits the null-chunk guard a robust prepared-statement loop needs.",
+      "recommendation": "Guard with `if chunk_p == 0: continue/skip` (and optionally check duckdb_data_chunk_get_size) before reading vectors, and document the exactly-one-row precondition at the loop.",
+      "confidence": "high"
+    }
+  ],
+  "notes": "Binding signatures and struct sizing all verified correct against duckdb.h conventions and the numbduck contract: duckdb_result is 6 pointer-sized fields and result_buf=numpy.zeros(6,int64) (48 bytes) matches duckdb_result_ty = UniTuple(intp,6) and create_duckdb_result's 6 slots; duckdb_fetch_chunk is bound by-value (_call_lib_func_byval) and is correctly fed a 6-tuple snapshot taken after execute and before destroy; duckdb_bind_int64(intp, uint64, int64) with param_idx numpy.uint64(1) (1-based) and int64 ids[i] is type-correct; FLOAT8/DOUBLE columns are carray'd as float64 matching physical type; column projection order (w0..w3 -> vectors 0..3) is consistent; the dot-product arithmetic and operand order are identical between score_python and _score_jit_loop, so the rounded-sum cross-check is sound. create/destroy pairing is complete: prepared statement (153/161), and per-iteration chunk then result (142-144). No hard type/enum/offset/size correctness defect found; the two findings are present-in-code error-handling gaps that cannot trigger under the example's deterministic data (hence low severity)."
+}

@@ -1,0 +1,20 @@
+{
+  "unit": "EX-hav",
+  "target": "examples/haversine.py",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "EX-hav-1",
+      "severity": "low",
+      "title": "Chunk callback reads no validity mask; pattern is silently wrong on NULL input",
+      "file": "examples/haversine.py",
+      "line": "105-113",
+      "category": "null-handling",
+      "description": "_haversine_chunk_impl unconditionally carrays each input vector's data buffer and reads a_lat1[i]/a_lon1[i]/a_lat2[i]/a_lon2[i] for every i in range(n) with no call to duckdb_vector_get_validity. DuckDB leaves the data slot of a NULL row uninitialized (or stale), so a NULL input would be read as a garbage double, computed through math.asin(math.sqrt(...)) and written to the output, and the output validity is never set to NULL. In THIS example it is safe by construction: setup_data populates lat/lon with DuckDB random()*180-90 / random()*360-180, which never yields NULL, and the store coordinates are non-NULL literals, so no NULL ever reaches the UDF and the count(*) cross-check against hv_py/hv_arrow passes. It is flagged because haversine.py is the de-facto reference pattern for a JIT scalar UDF (per docs/reviews .../understanding/examples.md sec 1), and irr.py demonstrates the correct discipline (duckdb_vector_get_validity + skip NULL rows, irr.py:140-153). A downstream caller copying this callback for a nullable column would get silently wrong results with no error.",
+      "impact": "Correct for the example's dense generated data (no behavioral defect here), but the copied pattern produces silently-wrong values and never-NULL output on any nullable column.",
+      "recommendation": "Either add a one-line comment at the loop asserting the inputs-are-non-NULL precondition, or (better for a reference example) fetch each input's validity via duckdb_vector_get_validity and the output validity via duckdb_vector_get_validity/duckdb_vector_ensure_validity_writable, mirroring irr.py:140-153, so the pattern is safe to reuse.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Haversine math is consistent across all three variants: the JIT loop (lines 104-113) uses p1=radians(lat1), p2=radians(lat2), dp=radians(lat2-lat1), dl=radians(lon2-lon1), a=sin(dp/2)^2 + cos(p1)cos(p2)sin(dl/2)^2, d=2*R*asin(sqrt(a)) with R=6371.0 — byte-identical to haversine_py (60-67) and equivalent to haversine_arrow (70-84); the cross-check compares integer count(*) results (exact != is fine on ints). Pointer/carray handling is correct: intp data pointers are bridged via _cast_int_to_void_p before carray over (n,) float64, n from duckdb_data_chunk_get_size, dtype float64 matches the DOUBLE columns. Handle/memory cleanup is correct and paired: the single DOUBLE logical type dbl_p is created once, used for 4x add_parameter + set_return_type, then destroyed via the boxed-pointer pattern (numpy.array([dbl_p]).ctypes.data) BEFORE register — safe because add_parameter/set_return_type deep-copy the logical type per the DuckDB C API contract; func_p builder is destroyed after register (catalog has a copy); the @cfunc trampoline is a module global so its .address never dangles; conn.close() at end. Callback signature void(intp,intp,intp) matches duckdb_scalar_function_t(info,input,output) under numbduck's all-pointers-are-intp convention. No critical/high defects found. A minor latent fragility (not reported as a finding): the hv_arrow vs hv_jit count cross-check relies on sin(x)^2 via pc.power vs x*x and pi/180 constant vs math.radians agreeing to the same side of the 50 km threshold for every point; ULP-level divergence at the boundary could spuriously fail the cross-check, but it is historically stable on the seeded data."
+}

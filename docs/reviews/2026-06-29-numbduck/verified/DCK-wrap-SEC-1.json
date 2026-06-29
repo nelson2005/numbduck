@@ -1,0 +1,6 @@
+{
+  "findingId": "DCK-wrap-SEC-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "medium",
+  "reasoning": "Every element of the finding is corroborated by the source. (1) utils.py:83-84 downloads via urlopen with no SHA-256 or signature check. (2) utils.py:85-89 extracts the dylib from the zip and writes it to ~/.numbduck/lib/<version>/libduckdb.dylib with no integrity check. (3) utils.py:41-43 returns the cached path on subsequent runs with no re-verification. (4) numbox/core/bindings/utils.py:178-180 confirms load_lib_path uses CDLL(path, mode=RTLD_GLOBAL) on Darwin/Linux, making all duckdb_* symbols available to LLVM's JIT linker process-wide. (5) ducklib.py:11 confirms duckdb_lib = load_duckdb() runs at import time. A grep for sha256/hashlib/checksum/codesign across all numbduck package files returns nothing. TLS from urlopen is the sole integrity guarantee. Severity 'medium' is appropriate: the consequence is arbitrary code execution (high), but mitigating factors — macOS-only path, explicit user consent (env var or interactive prompt), and TLS transport protection — keep likelihood low. Cache tampering as an additional vector is real but requires prior user-level write access to ~/.numbduck/lib/, which already implies a compromised host."
+}

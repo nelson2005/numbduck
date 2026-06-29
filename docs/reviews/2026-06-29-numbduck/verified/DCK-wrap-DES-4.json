@@ -1,0 +1,6 @@
+{
+  "findingId": "DCK-wrap-DES-4",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Verified directly against source. ducklib.py:727 (`duckdb_create_varint`) and ducklib.py:1052 (`duckdb_get_varint`) both use `https://duckdb.org/docs/1.3/clients/c/api#duckdb_create_varint` / `#duckdb_get_varint` — a versioned path (`1.3`) without the `.html` segment. CLAUDE.md step 5 (line 39) mandates `https://duckdb.org/docs/stable/clients/c/api.html#func_name`. A grep over all duckdb.org URLs in ducklib.py confirms exactly two deviations, both the varint wrappers — all other wrappers use the correct `stable/clients/c/api.html#` form. The claimed deviation, its scope ('only deviations'), and the mandated convention are all exactly as described. Severity low is appropriate: the defect is a stale/versioned docstring URL with no runtime impact."
+}

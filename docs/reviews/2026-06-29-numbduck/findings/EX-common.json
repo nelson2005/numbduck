@@ -1,0 +1,32 @@
+{
+  "unit": "EX-common",
+  "target": "examples/_common.py + run_irr.py",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "EX-common-1",
+      "severity": "low",
+      "title": "format_table never validates row length against headers",
+      "file": "/home/erik/projects/numbduck/examples/_common.py",
+      "line": "45-60",
+      "category": "input-validation",
+      "description": "format_table validates len(headers) == len(alignments) (line 47-48) but never checks that each row has the same number of cells as headers. The width-accumulation loop `for i, cell in enumerate(row): widths[i] = max(widths[i], len(cell))` (lines 50-52) indexes widths by the row's cell index. A row with MORE cells than headers raises IndexError on widths[i]; a row with FEWER cells is silently truncated to the shorter length by the zip() in fmt_row (line 55), dropping columns without error. Neither failure mode is reported in a way that names the mismatch.",
+      "impact": "A caller passing a ragged rows list gets an opaque IndexError or silently loses columns instead of a clear 'rows must have N columns' message. Bounded to example output, not library correctness.",
+      "recommendation": "Add `for row in rows: if len(row) != len(headers): raise ValueError(...)` alongside the existing alignment check.",
+      "confidence": "high"
+    },
+    {
+      "id": "EX-common-2",
+      "severity": "low",
+      "title": "assert_results_match: exact != misbehaves on NaN and numpy arrays",
+      "file": "/home/erik/projects/numbduck/examples/_common.py",
+      "line": "73",
+      "category": "numeric-logic",
+      "description": "The cross-check uses `if first != other` (line 73). Two failure modes: (a) if a variant legitimately returns NaN (e.g. an IRR with no real solution), NaN != NaN is True for every variant, so identical NaN results raise a spurious AssertionError that pre-rounding (the documented escape hatch, lines 65-66) cannot fix. (b) If results are numpy arrays rather than scalars, `first != other` yields an elementwise boolean array and `if <array>` raises 'truth value of an array is ambiguous'. The docstring (line 65) only promises numpy float SCALAR support, so (b) is out of contract, but (a) is a real correctness gap for any float-valued cross-check.",
+      "impact": "Genuinely-equal NaN outputs are reported as a mismatch; array outputs crash the checker. Affects the IRR/scalar examples' self-validation, not the library.",
+      "recommendation": "Compare with a NaN-aware/`==`-negated predicate, e.g. treat both-NaN as equal, and document that only scalar results are supported (or use numpy.array_equal with equal_nan=True for arrays).",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Both files are pure-Python example glue with no DuckDB C-API surface, so the COR sub-criteria (idx_t/uint64 typing, _p/_pp suffixes, struct-by-value, enum values, buffer sizes) do not apply. run_irr.py (sys.path.insert + `from irr import main`) is correct and its __module__-stability rationale is sound. _common.print_env and time_median are correct; time_median's env override int(os.environ.get('NUMBDUCK_BENCH_REPEATS', repeats)) raises ValueError on a non-integer env value but that is acceptable fail-fast behavior. Findings are low severity by construction (example helpers, caller-controlled inputs)."
+}

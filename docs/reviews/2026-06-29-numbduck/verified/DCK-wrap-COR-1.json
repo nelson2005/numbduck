@@ -1,0 +1,6 @@
+{
+  "findingId": "DCK-wrap-COR-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "The inconsistency is directly observable in ducklib.py. Five idx_t-typed signatures use intp (int64) instead of uint64: duckdb_column_count L105 intp(intp), duckdb_data_chunk_get_column_count L155 intp(intp), duckdb_data_chunk_get_size L156 intp(intp), duckdb_data_chunk_get_vector L157 intp(intp, intp) (col_idx arg), and duckdb_row_count L225 intp(intp). Five sibling functions that also return idx_t are correctly typed as uint64: duckdb_array_type_array_size L77, duckdb_nparams L216, duckdb_rows_changed L226, duckdb_struct_type_child_count L227, duckdb_union_type_member_count L230. CLAUDE.md explicitly documents the mapping idx_t -> uint64_t -> uint64, so the project's own stated convention is violated. No duckdb.h was available locally to independently cross-check; the DuckDB C API is well-established and these functions are documented to return idx_t. The internal inconsistency within the file is itself conclusive evidence of the defect without needing duckdb.h. Functional impact is negligible: counts and column indices are always << 2^63, so intp and uint64 hold identical bit patterns in the register for every realistic value. The finding's characterization and low severity rating are both correct."
+}

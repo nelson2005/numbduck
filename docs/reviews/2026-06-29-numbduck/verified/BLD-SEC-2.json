@@ -1,0 +1,6 @@
+{
+  "findingId": "BLD-SEC-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "All cited line numbers verified exactly against source. numbduck_ci.yml:43 uses actions/checkout@v6, numbduck_ci.yml:45 uses actions/setup-python@v6, haversine_bench.yml:17 uses actions/checkout@v6, haversine_bench.yml:19 uses actions/setup-python@v6 — all mutable major-version tags, no commit SHA pinning anywhere. The link-check workflow (link-check.yml:45) additionally uses the third-party lycheeverse/lychee-action@v2 as the reviewer notes. The reviewer correctly flags this as a defense-in-depth gap: a re-pointed tag runs unaudited code in CI. Severity 'low' is correctly calibrated: the two GitHub-owned actions (checkout, setup-python) require a GitHub-infrastructure-level compromise to exploit; all workflows carry only 'contents: read' permission, bounding blast radius. The third-party lychee action carries incrementally higher risk but is used in a read-only, scheduled/PR link-check workflow. No mitigating pinning exists elsewhere in the repo."
+}

@@ -1,0 +1,6 @@
+{
+  "findingId": "TST-cover-6",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "test_get_value_type (test/test_ducklib.py:1687-1694) calls duckdb_get_value_type on an int32 value and asserts only type_p != 0 (line 1691). It never calls duckdb_get_type_id(type_p) to verify the returned logical type is DUCKDB_TYPE_INTEGER. duckdb_get_type_id is available and used immediately adjacent in the file (e.g., test_create_logical_type_integer at line 1730 asserts type_id == ducklib.DUCKDB_TYPE_INTEGER). The test comment about double-free applies to the destroy call, not to read-only duckdb_get_type_id, so the assertion could safely be added before aux_destroy_value. The defect is real: any non-null pointer returned for type_p would pass the test even if it were the wrong type. Severity low is correct — this is a weak assertion gap on one test function, not a functional bug in the binding."
+}

@@ -1,0 +1,56 @@
+{
+  "unit": "PBR-DES",
+  "target": "pybridge.py",
+  "dimension": "DES",
+  "findings": [
+    {
+      "id": "PBR-DES-1",
+      "severity": "high",
+      "title": "No runtime duckdb version guard for offset-derived layout",
+      "file": "/home/erik/projects/numbduck/numbduck/pybridge.py",
+      "line": "31-34, 58-62",
+      "category": "fragile version/layout assumption",
+      "description": "extract_connection_ptr hardcodes the +16 pybind11 header offset and the +32 DuckDBPyConnection member offset, but the docstring states these are 'Validated on duckdb 1.3.2' only. CLAUDE.md declares the supported range as duckdb>=1.3.2,<1.6, so the code is expected to run on 1.4.x and 1.5.x where the DuckDBPyConnection member layout could have changed. Nothing in the function reads duckdb.__version__ or otherwise compares the running version against the one the offsets were validated for. The only mitigation is the docstring sentence 'Re-verify offsets when upgrading duckdb' (line 34), which is a comment, not an enforced mechanism. On an unvalidated-but-supported version the code will silently read a wrong member offset.",
+      "impact": "A user installing any 1.4/1.5 duckdb wheel within the declared supported range gets no signal that the offsets are unverified for their version; the bridge either silently produces a wrong pointer or crashes (see PBR-DES-3), with no indication that a layout migration is the cause.",
+      "recommendation": "Add an explicit version guard: read duckdb.__version__ and compare against a small set/range of versions whose offsets have actually been verified. On a non-validated version, either raise a clear error or emit a warning instructing the user to re-verify offsets, and centralize the verified-version constant so it is a single source of truth alongside the offsets. At minimum, gate the offsets behind a per-version lookup so an unknown version fails loudly rather than using 1.3.2 numbers blindly.",
+      "confidence": "high"
+    },
+    {
+      "id": "PBR-DES-3",
+      "severity": "medium",
+      "title": "No graceful failure path: layout drift segfaults instead of raising",
+      "file": "/home/erik/projects/numbduck/numbduck/pybridge.py",
+      "line": "59-67",
+      "category": "graceful failure / defensive validation",
+      "description": "After reading cpp_obj_p at id+16 (line 59) the code immediately dereferences cpp_obj_p+32 (line 62) and then passes conn_ptr into duckdb_query (line 67) with no NULL/sanity check on either intermediate pointer. If the pybind11/struct layout assumptions break on a newer duckdb (the exact scenario the docstring warns about), cpp_obj_p can come back NULL or garbage, making ctypes.c_void_p.from_address(cpp_obj_p + 32) read near-NULL/arbitrary memory, and conn_ptr can be a bogus address handed straight to the C API. The intended safety net, the SELECT 1 validation query, only catches pointers that survive a full query and return DuckDBError; a NULL or wild pointer dereferenced inside duckdb_query segfaults the process instead. So the 'graceful failure path when the layout changes' that this review focuses on does not actually exist for the most likely failure modes.",
+      "impact": "On layout drift the library hard-crashes the interpreter (SIGSEGV) rather than raising a catchable Python exception, giving the user no actionable error and no clean recovery.",
+      "recommendation": "Insert cheap defensive guards that convert the common failure modes into a RuntimeError: check `if not cpp_obj_p:` before computing cpp_obj_p+32, and `if not conn_ptr:` before calling duckdb_query. These turn the NULL/zero cases (the most probable result of a shifted offset) into a clean exception, dramatically narrowing the segfault window the docstring already acknowledges.",
+      "confidence": "high"
+    },
+    {
+      "id": "PBR-DES-2",
+      "severity": "low",
+      "title": "Magic offset literals inline with no named constants",
+      "file": "/home/erik/projects/numbduck/numbduck/pybridge.py",
+      "line": "59, 62",
+      "category": "maintainability / magic numbers",
+      "description": "The two load-bearing layout constants (16 for the CPython/pybind11 header, 32 for the unique_ptr<Connection> member) are written as bare literals embedded in from_address expressions. Their meaning lives only in the docstring (lines 22-27). There is no named constant tying the literal to its derivation, so a maintainer re-verifying offsets for a new duckdb release must edit values inside expressions and keep the prose in sync by hand. This is exactly the kind of duplicated-truth that the 'Re-verify offsets' follow-up requires touching.",
+      "impact": "Increases the chance that a re-verification updates the docstring but not the code (or vice versa), and makes the fragile constants harder to locate and audit.",
+      "recommendation": "Hoist the offsets to module-level named constants (e.g. PYOBJECT_HEADER_SIZE = 16, CONNECTION_MEMBER_OFFSET = 32) with the derivation comment attached, and reference them in the from_address calls so the offsets have a single, self-documenting source of truth.",
+      "confidence": "high"
+    },
+    {
+      "id": "PBR-DES-4",
+      "severity": "low",
+      "title": "Validation RuntimeError lacks diagnostic context",
+      "file": "/home/erik/projects/numbduck/numbduck/pybridge.py",
+      "line": "70-72",
+      "category": "error message ergonomics",
+      "description": "When the round-trip validation fails, the helper raises RuntimeError('extracted connection pointer failed validation') with no context: it does not report the running duckdb version, the offsets used, or the most likely cause (an unvalidated layout). Given the function's own docstring identifies version-dependent layout as the primary failure mode, the error is the natural place to surface that hypothesis to the user.",
+      "impact": "A user hitting this on a newer duckdb gets a generic message and no pointer toward the actual root cause (offset/layout drift), slowing diagnosis of precisely the fragility this code is most exposed to.",
+      "recommendation": "Include duckdb.__version__ and a hint to re-verify the pybind11/struct offsets in the RuntimeError message (e.g. mention the validated version and that the layout may have changed for the running version).",
+      "confidence": "high"
+    }
+  ],
+  "notes": "Focus answer: pybridge.py has NO version guard, NO re-verify mechanism beyond a docstring sentence (line 34), and NO graceful failure path. The supported range (duckdb>=1.3.2,<1.6 per CLAUDE.md) is wider than the validated version (1.3.2 only, line 31), so versions inside the declared range run on unverified offsets. The SELECT 1 round-trip is the only safety net and it only catches pointers that survive a query and return DuckDBError; NULL/wild pointers from a shifted offset segfault instead (architecture note bridge.md section 6 items 1-3 corroborate). Highest-leverage fixes: a duckdb.__version__ guard (PBR-DES-1) plus cheap NULL guards to make failure catchable (PBR-DES-3)."
+}

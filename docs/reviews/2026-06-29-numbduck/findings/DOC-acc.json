@@ -1,0 +1,68 @@
+{
+  "unit": "DOC-acc",
+  "target": "README & CLAUDE & examples/README",
+  "dimension": "DOC",
+  "findings": [
+    {
+      "id": "DOC-acc-1",
+      "severity": "high",
+      "title": "CLAUDE.md \"Struct-by-value helpers (ducklib.py)\" section describes helpers that do not exist in ducklib.py",
+      "file": "/home/erik/projects/numbduck/CLAUDE.md",
+      "line": "43-53",
+      "category": "stale-doc",
+      "description": "The section claims ducklib.py provides five helpers: `_call_lib_func_struct_in`, `_call_lib_func_struct_out`, `_call_lib_func_byval`, `_emit_byval_call`, and `_build_packed_interval`. Verified against the code: ducklib.py (1431 lines total) imports only `_call_lib_func` and `_call_lib_func_byval` from numbox (ducklib.py:2) and defines none of these helpers itself. `_call_lib_func_struct_in`, `_call_lib_func_struct_out`, and `_build_packed_interval` do not exist anywhere in either numbduck or numbox (grep across numbox/core/bindings/call.py returns nothing). `_emit_byval_call` and `_call_lib_func_byval` exist only in numbox (numbox/core/bindings/call.py:203, :281), not ducklib. The actual interval ABI workaround is `_repack_to_i64_pair`/`_repack_from_i64_pair` inside numbox call.py, not a ducklib `_build_packed_interval`.",
+      "impact": "An engineer adding a struct-by-value binding will search ducklib.py for these named helpers, find nothing, and be misled about both where the ABI logic lives (numbox, not ducklib) and what its API is.",
+      "recommendation": "Rewrite the section to reflect reality: the only ABI entry points are numbox's `_call_lib_func` (generic, classifies small/large structs and does the INT/INT eightbyte repack) and `_call_lib_func_byval` (always-by-pointer, used by duckdb_fetch_chunk / result_return_type / result_statement_type). Drop the nonexistent helper names or point them at the real numbox functions.",
+      "confidence": "high"
+    },
+    {
+      "id": "DOC-acc-2",
+      "severity": "high",
+      "title": "CLAUDE.md \"Follow-ups\" section describes an already-completed migration with line numbers that no longer exist",
+      "file": "/home/erik/projects/numbduck/CLAUDE.md",
+      "line": "55-62",
+      "category": "stale-doc",
+      "description": "The Follow-up tells the reader to migrate `_duckdb_bind_hugeint`/`_uhugeint`/`_interval` from \"three hand-rolled intrinsics at ducklib.py:1525-1640 (~116 lines)\" to `_call_lib_func`. This work has already landed: duckdb_bind_hugeint (ducklib.py:1410-1413), duckdb_bind_uhugeint (:1416-1419), duckdb_bind_interval (:1422-1425) and duckdb_bind_decimal (:1428-1431) all already call `_call_lib_func(...)`. There are no hand-rolled intrinsics — grep for `@intrinsic` in ducklib.py returns zero hits, and no `_duckdb_bind_*` names exist. The cited line range 1525-1640 is past EOF (the file is only 1431 lines). The referenced sibling ranges (298-433) are also off.",
+      "impact": "A future contributor will look for ~116 lines of intrinsics to delete, find migrated code already using _call_lib_func, and waste time reconciling the doc with reality (or worse, attempt a redundant change). The 'Estimated diff ~-116/+12' is meaningless against current code.",
+      "recommendation": "Delete the Follow-ups section (the migration is done) or replace it with the remaining open numbox dependency, if any. Remove the stale ducklib.py:1525-1640 / :298-433 line references.",
+      "confidence": "high"
+    },
+    {
+      "id": "DOC-acc-3",
+      "severity": "medium",
+      "title": "CLAUDE.md claims custom @intrinsic functions are used for decimal/varint/interval — none exist in ducklib",
+      "file": "/home/erik/projects/numbduck/CLAUDE.md",
+      "line": "53",
+      "category": "stale-doc",
+      "description": "Line 53 states: \"Custom @intrinsic functions are used for >16-byte structs (decimal 24B, varint 24B) and interval (16B but needs repacking).\" In the current code decimal, varint, and interval are all handled by the generic numbox `_call_lib_func` path (e.g. duckdb_bind_decimal at ducklib.py:1428, duckdb_bind_interval at :1422). ducklib.py defines zero `@intrinsic` functions. The 24-byte byval/sret handling and the interval `{i32,i32,i64}` repack are done inside numbox call.py's generic classification, not by ducklib-local custom intrinsics.",
+      "impact": "Reinforces the false mental model that numbduck carries bespoke per-type ABI intrinsics; an engineer may try to extend a nonexistent intrinsic mechanism instead of just registering a signature and calling _call_lib_func.",
+      "recommendation": "State that decimal/varint/interval are handled by numbox's generic `_call_lib_func` ABI classification (large structs via pointer+byval+optnone on SysV; interval via the INT/INT eightbyte repack to {i64,i64}). Remove the 'custom @intrinsic' claim.",
+      "confidence": "high"
+    },
+    {
+      "id": "DOC-acc-4",
+      "severity": "medium",
+      "title": "CLAUDE.md states wrong numbox version constraint vs pyproject.toml",
+      "file": "/home/erik/projects/numbduck/CLAUDE.md",
+      "line": "16",
+      "category": "wrong-fact",
+      "description": "CLAUDE.md lists the key dependency as `numbox~=0.5.6`, but pyproject.toml declares `numbox~=0.5.11`. The doc understates the actual minimum (0.5.11). examples/README.md (line 20) additionally hard-links numbox at tag 0.5.8, a third inconsistent version reference.",
+      "impact": "A reader provisioning a dev env from CLAUDE.md could install numbox 0.5.6-0.5.10, below the real floor, and hit missing-symbol / API drift at import (the migrated _call_lib_func repack support is exactly the kind of numbox feature gated by the version bump).",
+      "recommendation": "Update CLAUDE.md to `numbox~=0.5.11` to match pyproject.toml; keep the two in sync going forward (pyproject is the source of truth).",
+      "confidence": "high"
+    },
+    {
+      "id": "DOC-acc-5",
+      "severity": "low",
+      "title": "CLAUDE.md 'Adding a New Binding' contradicts itself on whether docstring links point to duckdb.h",
+      "file": "/home/erik/projects/numbduck/CLAUDE.md",
+      "line": "30",
+      "category": "internal-contradiction",
+      "description": "Step 1 (line 30) ends with \"Verify all docstring links point to the correct line in `duckdb.h` at implementation time.\" Step 5 (line 39) says \"Docstring links must use `https://duckdb.org/docs/stable/clients/c/api.html#func_name`, not links to `duckdb.h` source.\" The actual code follows step 5: every wrapper docstring links to api.html (e.g. ducklib.py:1412, 1424, 1430). Step 1's instruction to verify docstring links against duckdb.h line numbers is therefore wrong/contradictory; duckdb.h is only the place to look up signatures, not what docstrings link to.",
+      "impact": "Mild confusion for a contributor following the checklist; risks someone 'fixing' docstrings to point at duckdb.h line numbers, the opposite of the established convention.",
+      "recommendation": "Reword step 1 to 'verify the signature against duckdb.h' and drop the 'docstring links point to the correct line in duckdb.h' clause, leaving step 5 as the single rule for docstring link targets.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Verified CLAUDE.md/README/examples prose against numbduck/ducklib.py (1431 lines) and numbox/core/bindings/call.py. The macOS C-API-stripping story (CLAUDE.md Project Status, lines 91-92) is corroborated by the loader understanding note (duckdb-python strips C API symbols on macOS >=1.4.1; loader probes and falls back) and is consistent with utils.py behavior, so no defect filed there. The duckdb.h api.html docstring links in code are uniform (api.html), matching CLAUDE.md step 5; the only link issue is the internal step1/step5 contradiction (DOC-acc-5). External URLs (duckdb-python PR #81, CMakeLists L83-L110, GitHub line links) were not network-verified per read-only/no-run constraints. The dominant defect cluster is CLAUDE.md being stale relative to the completed bind-intrinsics migration (DOC-acc-1/2/3), which the prompt flagged as 'may be stale vs origin/main' — confirmed stale."
+}

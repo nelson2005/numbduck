@@ -1,0 +1,104 @@
+{
+  "unit": "TST-cover",
+  "target": "test/test_ducklib.py",
+  "dimension": "TST",
+  "findings": [
+    {
+      "id": "TST-cover-1",
+      "severity": "medium",
+      "title": "test_struct_size_guard verifies Python arithmetic, not the ducklib ABI guard it claims to cover",
+      "file": "test/test_ducklib.py",
+      "line": 1706,
+      "category": "false-coverage",
+      "description": "The docstring says 'Verify the size computation used by _call_lib_func_struct_in/out', but the body only imports numba scalar types and asserts pure-Python facts like `sum(t.bitwidth for t in UniTuple(int64, 2)) / 8 == 16` and `... UniTuple(int64, 3) / 8 == 24`. It never calls any ducklib binding, never invokes `_call_lib_func`, and never reaches the >16B rejection branch in numbox abi.py `_classify`/`_struct_bytes` (call.py rejects >16B Record returns with TypingError). The test passes even if the ≤16B vs >16B gate in the codegen were broken, because it re-derives the byte sizes by hand instead of observing the guard's behavior. It gives false confidence that the small/large-struct classification is exercised.",
+      "impact": "A regression in the actual ≤16B/>16B classification (e.g. decimal/varint mis-routed to the small-struct register path) would not be caught by this test despite its name implying it is the guard's coverage.",
+      "recommendation": "Either rename/rescope the test to 'tuple byte-size arithmetic' so it is not mistaken for ABI coverage, or make it actually drive ducklib: assert that a >16B struct arg/return (decimal 24B, varint 24B) compiles through the intrinsic path and round-trips, and that the classification picks small vs large as expected.",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-cover-2",
+      "severity": "medium",
+      "title": "Multi-chunk result iteration is never exercised; only single-chunk + exhaustion",
+      "file": "test/test_ducklib.py",
+      "line": 212,
+      "category": "missing-coverage",
+      "description": "Every result-reading test fetches exactly one chunk via `duckdb_fetch_chunk(tuple(result))` and reads it; the only multi-chunk behavior tested is exhaustion (`test_duckdb_fetch_chunk_exhausted`, where the 2nd fetch returns null on a 3-row result). No test produces a result larger than one 2048-row DuckDB vector, so the real-world loop of repeatedly calling `duckdb_fetch_chunk` until null and reading each non-trivial chunk is never driven. The chunk/vector readback idioms (`duckdb_data_chunk_get_size`, `duckdb_data_chunk_get_vector`, `duckdb_vector_get_data`, per-chunk validity) are all validated only on a single small chunk.",
+      "impact": "Bugs in chunk-boundary handling, per-chunk vector pointer refresh, or offset arithmetic across chunks would pass the suite. This is the most common real consumption pattern and is untested.",
+      "recommendation": "Add a test that selects > 2048 rows (e.g. `SELECT * FROM range(5000)`), loops `duckdb_fetch_chunk` until it returns 0, and asserts the total row count and a few values spanning a chunk boundary.",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-cover-3",
+      "severity": "medium",
+      "title": "DECIMAL with width > 18 (int128 physical storage) bind/readback is untested",
+      "file": "test/test_ducklib.py",
+      "line": 891,
+      "category": "missing-coverage",
+      "description": "`test_bind_decimal` (DECIMAL(10,2)) and `test_create_get_decimal` only exercise the int64 physical-storage path (width <= 18), reading the column back as `ctypes.c_int64`. DuckDB stores DECIMAL with width 19..38 as int128 (hugeint) physically. The 16-byte readback layout for a high-precision decimal column is never asserted, and the unscaled-value packing into the duckdb_decimal struct's hugeint `value` field is only tested for values that fit in 64 bits (`(10, 2, 12345, 0)`). The decimal struct ABI tuple itself is 24B (`duckdb_decimal_ty`), but the physical column readback for the int128 case is a distinct, untested path.",
+      "impact": "A wrong physical-width readback or hugeint packing for high-precision decimals would not be detected.",
+      "recommendation": "Add a DECIMAL(38, x) bind + execute test that reads the column back as a 16-byte int128 (low/high uint64/int64) and asserts both halves, plus a get_decimal round-trip with a value exceeding 2**63.",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-cover-4",
+      "severity": "low",
+      "title": "Bind error branch (invalid param index -> DuckDBError) tested for only 4 of ~20 bind_* wrappers",
+      "file": "test/test_ducklib.py",
+      "line": 628,
+      "category": "missing-negative-case",
+      "description": "Only boolean/float/date/timestamp have an `*_invalid_param_index` negative test (lines 507, 541, 577, 613) and int32 has one (388). The remaining bind wrappers — int8, int16, int64, uint8, uint16, uint32, uint64, double, time, timestamp_tz, varchar, varchar_length, blob, hugeint, uhugeint, interval, decimal, bind_null — are only exercised on the success path. The DuckDBError-returning branch (out-of-range index) is uncovered for these, so an ABI/argument-marshaling regression that corrupts the index argument for, e.g., the struct-by-value binds (hugeint/interval/decimal) would not surface via an error-code mismatch.",
+      "impact": "Asymmetric negative coverage; the error-return protocol is assumed uniform but not verified for most binds, including the load-bearing struct-by-value ones.",
+      "recommendation": "Parametrize a single invalid-param-index check across all bind_* wrappers (index 999) asserting DuckDBError, or add the missing variants for the struct binds at minimum.",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-cover-5",
+      "severity": "low",
+      "title": "test_create_array_value runs but never reads element values back",
+      "file": "test/test_ducklib.py",
+      "line": 1634,
+      "category": "weak-assertion",
+      "description": "Unlike the list/map/struct value tests (which read children back via `duckdb_get_list_child`/`duckdb_get_map_key`/`duckdb_get_struct_child` and assert the contained ints), `test_create_array_value` only asserts `av != 0` and then destroys everything. The created array value's contents (1, 2, 3) are never verified. The test exercises `duckdb_create_array_value` codegen but asserts no correct value about the result.",
+      "impact": "A miscreation of the array value (wrong size, wrong element marshaling) that still returns a non-null handle would pass.",
+      "recommendation": "Read the array back (e.g. via a logical-type/array introspection or by embedding it in a query) and assert the three element values, mirroring the list/struct tests.",
+      "confidence": "medium"
+    },
+    {
+      "id": "TST-cover-6",
+      "severity": "low",
+      "title": "test_get_value_type asserts only non-null, not the actual type id",
+      "file": "test/test_ducklib.py",
+      "line": 1687,
+      "category": "weak-assertion",
+      "description": "`duckdb_get_value_type` is called on an int32 value and the test only checks `type_p != 0`. It never confirms the returned logical type is actually DUCKDB_TYPE_INTEGER (a `duckdb_get_type_id(type_p) == DUCKDB_TYPE_INTEGER` check is available and used elsewhere). The test documents the shared-handle double-free hazard in a comment but does not assert the binding returns a correct/usable type.",
+      "impact": "A binding that returned an arbitrary non-null pointer (or a wrong-but-non-null type) would pass.",
+      "recommendation": "Assert `duckdb_get_type_id(type_p) == DUCKDB_TYPE_INTEGER` before destroying the value.",
+      "confidence": "medium"
+    },
+    {
+      "id": "TST-cover-7",
+      "severity": "low",
+      "title": "test_create_get_bit asserts only the byte length, not the bit payload",
+      "file": "test/test_ducklib.py",
+      "line": 1359,
+      "category": "weak-assertion",
+      "description": "`test_create_get_bit` creates a BIT value from `b\"\\x05\\xA0\"`, then asserts only `result[1] == 2` (size). It reads `result[0]` purely to free it and never compares the returned bytes against the input, unlike `test_create_get_varint`/`test_create_get_blob` which assert the raw bytes round-trip. The data-payload correctness of the bit get/create struct-by-value path is unverified.",
+      "impact": "A corruption of the BIT data pointer/contents (while preserving size) would not be caught.",
+      "recommendation": "Read `(ctypes.c_char * size).from_address(result[0])` and assert it equals the input bytes, matching the blob/varint tests.",
+      "confidence": "medium"
+    },
+    {
+      "id": "TST-cover-8",
+      "severity": "low",
+      "title": "Platform-gated paths (Windows struct ABI sret/by-pointer, macOS loader download) are entirely unexercised",
+      "file": "test/test_ducklib.py",
+      "line": 833,
+      "category": "platform-gap",
+      "description": "All struct-by-value ABI correctness rests on round-trip asserts that run only on SysV x86-64 (Linux): hugeint/uhugeint/interval/decimal binds (833-906) and value create/get round-trips (1263-1356). The Windows x64 branches in numbox call.py (small-struct-by-pointer and sret for non-register-passable returns) and the AAPCS64 by-reference path are never driven by this suite. Separately, the focus's 'macOS download' loader branch in numbduck/utils.py is not covered here (test_init.py is only an import smoke on the host platform). These are inherent to the CI host but the gaps are real: the Windows-specific lowering and macOS symbol-discovery/download logic have zero test signal.",
+      "impact": "ABI regressions specific to Windows/AAPCS64 struct passing, or breakage in the macOS shared-library discovery/download path, cannot be caught by this suite.",
+      "recommendation": "Acknowledge these as explicitly out-of-CI gaps and add (a) a Windows/ARM CI job that runs the struct-by-value round-trip subset, and (b) a unit test for the loader's platform-branch discovery (mocking the macOS download path) so it is not exercised only implicitly at import on Linux.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Read test/test_ducklib.py in full (3617 lines) plus understanding notes bindings.md and tests.md. The suite is broad on the happy path: every value create/get, logical-type constructor, bind type, scalar/aggregate UDF, and the NRT/MemInfo refcount+leak machinery are well covered with real value assertions and alloc==free leak checks. Findings are coverage-shape gaps, not correctness bugs in the bindings. Highest-value gaps: false-coverage test_struct_size_guard (does not touch ducklib), no multi-chunk iteration, no int128-physical DECIMAL readback. Note: contrary to a hedge in tests.md, the >16B large-struct byval (arg) and sret (return) paths ARE exercised on Linux via decimal/varint create/get/bind round-trips; the genuine struct-ABI gap is Windows/AAPCS64 only. A stray debug `print` remains at line 134 (test_query) but is not a coverage defect."
+}

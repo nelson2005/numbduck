@@ -1,0 +1,6 @@
+{
+  "findingId": "UTL-DES-5",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "All sub-claims verified against /home/erik/projects/numbduck/numbduck/utils.py. (1) URL is built from duckdb.__version__ at lines 50-56 exactly as described. (2) Lines 83-90 have no try/except; a 404, connection error, or any HTTP failure surfaces as a raw urllib.error.HTTPError with no actionable guidance. (3) The consent-decline branch at lines 71-77 already provides a RuntimeError with brew/NUMBDUCK_LIBDUCKDB guidance; the fetch/extract path has no equivalent handler. (4) zf.open(\"libduckdb.dylib\") at line 88 is unwrapped; a KeyError on member-not-found propagates bare. (5) The cache dir at lines 19-21 carries the same version coupling. Counter-argument: DuckDB PyPI releases map 1:1 to core git tags in practice and the osx-universal asset layout has been stable, so the probability of the version assumption failing is low. The finding's core claim, however, is about the absence of error handling for when failure does occur — that is unconditionally true and the characterization is accurate. Severity low is correct: macOS-only fallback, currently stable upstream layout, purely an error-ergonomics defect."
+}

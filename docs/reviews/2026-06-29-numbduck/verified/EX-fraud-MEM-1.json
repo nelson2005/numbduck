@@ -1,0 +1,6 @@
+{
+  "findingId": "EX-fraud-MEM-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Defect is real and correctly characterized. fraud_score.py:125-144 (_fraud_chunk_impl) iterates all n rows reading a_amt/a_co/a_hco/a_hr/a_rt/a_rx[i] with no call to duckdb_vector_get_validity. Per DuckDB's C API contract, data slots for NULL rows are not guaranteed to contain initialized values; the validity mask is the authoritative null indicator. By contrast, irr.py:140-153 correctly calls ducklib.duckdb_vector_get_validity for all four input vectors and guards each row with duckdb_validity_row_is_valid before accessing the data buffer — the exact pattern the finding cites. Both APIs are bound in ducklib.py (duckdb_vector_get_validity at L1206-1209, duckdb_validity_row_is_valid at L1188-1191), so the fix is available in-repo. The bug is latent: setup_data (fraud_score.py:176-188) generates only non-NULL values via random()/floor(random()*N), and assert_results_match compares variants that all share the same non-NULL input, so the cross-check never exercises a NULL path. No memory-safety violation: carray is sized (n,) and i in range(n) is always in-bounds (confirmed by finding notes item 2). Severity low is correct — latent correctness bug only, no OOB/use-after-free, inert for the example's fixed data."
+}

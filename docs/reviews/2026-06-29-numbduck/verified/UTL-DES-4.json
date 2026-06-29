@@ -1,0 +1,6 @@
+{
+  "findingId": "UTL-DES-4",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "All three claims in the finding are verified by reading utils.py directly. (1) Circular guidance: _find_standalone_libduckdb (line 35) silently discards NUMBDUCK_LIBDUCKDB when os.path.isfile returns False and returns None; load_duckdb then reaches the non-Darwin branch (lines 124-128) and raises the same 'Set NUMBDUCK_LIBDUCKDB=...' message whether the var was unset or pointed to a non-existent file — so a user who set it to a wrong path is told to do exactly what they just did. (2) No diagnostic about env var rejection: the bad path is tested at line 35 with no logging and no record passed to the caller; the error message at line 127 does not echo the offending path or explain that the file was not found. (3) Platform asymmetry undocumented: Darwin falls through to _download_libduckdb() (line 129), which offers an interactive download; the non-Darwin error message does not mention this asymmetry or state that the env var is the only recourse on non-Darwin. Severity low is correct: this is an error-message ergonomics defect only — the load fails appropriately in all cases and the root cause (missing C API symbols) is correctly identified; only the remediation guidance is misleading."
+}

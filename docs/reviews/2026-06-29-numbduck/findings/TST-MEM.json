@@ -1,0 +1,44 @@
+{
+  "unit": "TST-MEM",
+  "target": "test/test_ducklib.py",
+  "dimension": "MEM",
+  "findings": [
+    {
+      "id": "TST-MEM-1",
+      "severity": "medium",
+      "title": "Result handle leaked: aux_query_1 consumers never call duckdb_destroy_result",
+      "file": "test/test_ducklib.py",
+      "line": "107-137, 153-160",
+      "category": "handle-leak/teardown",
+      "description": "aux_query_1() (lines 107-129) allocates and populates an out_result via duckdb_query but returns it without ownership notes; several consumers tear the DB down with aux_close_db() while never calling duckdb_destroy_result on that handle. test_query (132-137) and test_duckdb_column_count_and_duckdb_row_count (153-160) both end with aux_close_db(...) and no destroy. A duckdb_result owns materialized/streaming result memory that is NOT reclaimed by duckdb_disconnect/duckdb_close (per the C API, every successful duckdb_query result must be passed to duckdb_destroy_result). The destroy is performed correctly in the sibling tests (e.g. test_duckdb_destroy_result:168, test_column_name:921, test_result_return_type:979), confirming the omission in these two is an oversight, not an intentional contract.",
+      "impact": "Per-test leak of one duckdb_result's backing memory. Harmless to correctness in-process, but it means these tests cannot serve as teardown regression guards, and the leak is invisible because no C-handle allocation accounting wraps them.",
+      "recommendation": "Call ducklib.duckdb_destroy_result(out_result.ctypes.data) before aux_close_db in test_query and test_duckdb_column_count_and_duckdb_row_count; or give aux_query_1 a paired teardown helper that destroys the result so every consumer is covered uniformly.",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-MEM-2",
+      "severity": "medium",
+      "title": "Data chunk and result both leaked across aux_get_data_vector consumers and fetch_chunk_exhausted",
+      "file": "test/test_ducklib.py",
+      "line": "172-236",
+      "category": "handle-leak/teardown",
+      "description": "aux_get_data_vector (172-182) fetches a chunk via duckdb_fetch_chunk and returns (duckdb_result, data_chunk_p, ...) but its consumers destroy neither. test_duckdb_data_chunk_get_column_count (185-189), test_duckdb_data_chunk_get_size (192-196), and test_duckdb_fetch_chunk_data_chunk_get_vector_get_data_vector (222-235) all end with aux_close_db and never call duckdb_destroy_data_chunk on data_chunk_p nor duckdb_destroy_result on the result. test_duckdb_fetch_chunk_exhausted (212-219) additionally fetches a first chunk (chunk_p != 0) and discards it without destroy, plus leaks the result. duckdb_fetch_chunk returns an owned duckdb_data_chunk the caller must duckdb_destroy_data_chunk (the JIT/round-trip tests do this correctly, e.g. 2352-2354, 1121-1124). The ctypes arrays built via arr_ty.from_address(i_vec_data_p) alias the live chunk and are read while it is still alive, so there is no use-after-free here — but the chunk is never freed.",
+      "impact": "Per-test leak of a data chunk plus its result for five tests. Again undetected because no leak accounting wraps the non-UDAF C-handle tests.",
+      "recommendation": "Destroy the chunk (duckdb_destroy_data_chunk via a 1-elem intp buffer) and the result before aux_close_db in each consumer; centralize chunk+result teardown in aux_get_data_vector's callers or return a teardown closure.",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-MEM-3",
+      "severity": "medium",
+      "title": "No leak/double-free detection for DuckDB C handles; only the two NRT-state UDAF tests guard lifetimes",
+      "file": "test/test_ducklib.py",
+      "line": "1163-2599",
+      "category": "coverage-gap",
+      "description": "The review goal is whether the suite would catch a leak or double-free. For the numba/NRT meminfo side the answer is yes and the coverage is strong: test_structref_meminfo_bridge_refcount_ladder (2999-3040) asserts refcount==1 at each ladder step via _read_refcount; test_structref_meminfo_bridge_nested_heap (3412-3457) asserts alloc==free over 100 cycles using rtsys.get_allocation_stats; test_aggregate_function_structref_stddev (3507-3534) and test_aggregate_function_array_variance (3589-3616) wrap the full init/update/combine/finalize/destroy lifecycle in alloc==free assertions, so a missing/!registered destructor or a stripped release_meminfo would fail them. For the DuckDB C-handle side (result/chunk/value/prepared/logical_type) there is NO equivalent accounting: every value/type test relies solely on correct manual destroy calls, so a missing-destroy regression (as already present in TST-MEM-1/2) passes silently, and a double-free is only avoided by hand (the explicit comment at test_get_value_type:1692-1694 'do NOT destroy both (double-free)' shows the hazard is real and unguarded). There is no negative/teardown-path coverage exercising destroy of a NULL or already-destroyed duckdb handle, nor any DuckDB-side allocation counter.",
+      "impact": "Memory-safety regressions on the C-handle path (leaked or double-freed result/chunk/value/logical_type) would not be caught by the suite; the lifetime correctness of dozens of create/get/destroy tests rests entirely on hand-written destroy calls with no automated balance check.",
+      "recommendation": "Either fix the omitted destroys (TST-MEM-1/2) so the tests are at least self-consistent, and/or add a lightweight balance harness — e.g. a fixture that snapshots the OS RSS / a duckdb-side counter, or simply assert that re-destroying a zeroed handle buffer is a no-op — to convert these from happy-path-only into teardown regression guards mirroring what the UDAF tests already do for NRT state.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Scope: memory safety / lifetimes / refcounting in the test file only. Positives: numpy buffers backing C structs (create_duckdb_result/chunk/database/connection) are held as locals through teardown, and tuple(result) copies the by-value struct correctly, so no GC/move UAF was found. NRT meminfo balance for UDAF state is well covered (release_meminfo in _welford_destroy_impl:3361-3368 and _arr_destroy_impl:3218-3226, both registered via set_destructor and bracketed by alloc==free assertions). The plain-int64 aggregate tests (test_aggregate_function_round_trip:2299, set_overloads:2427) deliberately register no destructor and allocate no NRT memory (state is an int64 written into the 8-byte slot), so the missing destructor is correct, not a leak. Findings TST-MEM-1/2 are genuine resource leaks of DuckDB C handles; TST-MEM-3 is the coverage gap that lets such leaks (and the explicitly-noted double-free hazard at line 1692) go undetected on the C-handle path."
+}

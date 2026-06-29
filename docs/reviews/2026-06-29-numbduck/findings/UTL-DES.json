@@ -1,0 +1,68 @@
+{
+  "unit": "UTL-DES",
+  "target": "utils.py loader",
+  "dimension": "DES",
+  "findings": [
+    {
+      "id": "UTL-DES-1",
+      "severity": "medium",
+      "title": "Cache-file path is recomputed instead of a shared constant; \"libduckdb.dylib\" literal repeated 5x",
+      "file": "/home/erik/projects/numbduck/numbduck/utils.py",
+      "line": "41, 87, 88",
+      "category": "duplication",
+      "description": "The cached dylib path `os.path.join(_LIBDUCKDB_CACHE_DIR, \"libduckdb.dylib\")` is built independently in two functions: the consumer side in `_find_standalone_libduckdb` (line 41) and the producer side in `_download_libduckdb` (line 87). The bare filename literal \"libduckdb.dylib\" appears five times (lines 38, 41, 87, 88, and twice embedded in `_MACOS_LIBDUCKDB_SEARCH_PATHS` at lines 24-25). The module already factors `_LIBDUCKDB_CACHE_BASE`/`_LIBDUCKDB_CACHE_DIR` into constants (lines 16-21) but stops short of the leaf. WHY this is wrong: the read path and the write path agree on the cache filename only by coincidence of two separate string literals; changing the cached name (or the archive member name) requires editing several call sites in lockstep, and a producer/consumer mismatch would silently break the cache hit at line 42 (forcing an unneeded re-download every run with no error).",
+      "impact": "Edits to the cache layout can desynchronize the write site (line 87) from the read site (line 41), defeating caching silently. Higher maintenance cost and a latent correctness trap.",
+      "recommendation": "Introduce module constants `_LIBDUCKDB_FILENAME = \"libduckdb.dylib\"` and `_LIBDUCKDB_CACHE_FILE = os.path.join(_LIBDUCKDB_CACHE_DIR, _LIBDUCKDB_FILENAME)`, then reference `_LIBDUCKDB_CACHE_FILE` at lines 41 and 87 and `_LIBDUCKDB_FILENAME` at the zip member open (line 88) and old-cache cleanup (line 38).",
+      "confidence": "high"
+    },
+    {
+      "id": "UTL-DES-2",
+      "severity": "medium",
+      "title": "_download_libduckdb fuses interactive consent, network I/O, unzip, and FS write into one untestable unit",
+      "file": "/home/erik/projects/numbduck/numbduck/utils.py",
+      "line": "50-91",
+      "category": "testability",
+      "description": "`_download_libduckdb` (lines 50-91) does four unrelated things in one body: (a) decides consent via a blocking `input()` prompt and `print` (lines 57-77), (b) fetches a hardcoded URL with `urlopen` (lines 83-84), (c) unzips an in-memory archive (lines 85-89), and (d) writes to a global-derived cache path (lines 86-90). None of the collaborators (the URL, the destination path, the consent decision, the network fetch) are injectable — URL is built inline from `duckdb.__version__`, dest comes from module global `_LIBDUCKDB_CACHE_DIR`, and `input`/`urlopen` are referenced directly. WHY this is wrong: a unit test of the extract-and-cache logic cannot run without monkeypatching builtin `input`, patching `urllib.request.urlopen`, and mutating module globals, and it can never exercise the happy path without hitting (or stubbing) GitHub. The function name (`_download_...`) also hides that calling it may block on stdin or raise `RuntimeError` on a declined prompt (lines 71-77) — a surprising side effect for a 'download' helper. The lazy imports of `io`/`zipfile`/`urllib` inside the body (lines 78-80) further obscure the dependency surface.",
+      "impact": "The fallback download path — the one piece of loader logic most likely to break on a duckdb release/layout change — is effectively unit-untestable and can only be validated by an actual network round-trip, so regressions ship undetected.",
+      "recommendation": "Split into (1) a pure-policy `_consent_to_download() -> bool` (or have the caller decide), and (2) a `_fetch_and_cache(url, dest)` that takes URL and destination as parameters and returns the path. This lets tests drive `_fetch_and_cache` with a local file:// URL or an injected opener and a tmp dest, and lets consent be tested in isolation.",
+      "confidence": "high"
+    },
+    {
+      "id": "UTL-DES-3",
+      "severity": "medium",
+      "title": "Destructive os.remove side effect hidden inside the query function _find_standalone_libduckdb, unguarded",
+      "file": "/home/erik/projects/numbduck/numbduck/utils.py",
+      "line": "37-40",
+      "category": "side-effects",
+      "description": "`_find_standalone_libduckdb` (lines 33-47) reads as a pure locator ('find ... return a path or None'), but lines 37-40 perform an unconditional, unguarded `os.remove` of the legacy unversioned cache `~/.numbduck/lib/libduckdb.dylib`. WHY this is wrong on two counts: (1) a function whose contract is discovery should not mutate the filesystem — the destructive migration cleanup is invisible to any reader of `load_duckdb`'s control flow and runs on every load attempt that reaches the fallback, including on Linux/Windows where the macOS `.dylib` cleanup is meaningless work; (2) the `os.remove` is not wrapped in try/except, so a permission error or a concurrent-process race (TOCTOU between `os.path.isfile` at line 39 and `os.remove` at line 40) raises an unhandled `OSError` out of what callers treat as a non-throwing probe, aborting library load with an error unrelated to the user's actual problem (a missing C API).",
+      "impact": "A read-only-looking helper can raise on transient FS conditions and silently does destructive migration work; surprising for maintainers and a latent crash path during loader bring-up.",
+      "recommendation": "Move the one-time legacy-cache cleanup out of the locator into an explicit migration step (or gate it on Darwin), and wrap the `os.remove` in `try/except OSError: pass` so cleanup failure never aborts library loading.",
+      "confidence": "high"
+    },
+    {
+      "id": "UTL-DES-4",
+      "severity": "low",
+      "title": "Asymmetric/fragile error guidance: non-Darwin message ignores already-checked env var and the macOS-only download asymmetry",
+      "file": "/home/erik/projects/numbduck/numbduck/utils.py",
+      "line": "124-128",
+      "category": "error-messages",
+      "description": "When the wheel lacks C API symbols and a standalone is not found, the non-Darwin branch (lines 124-128) raises with only `Set NUMBDUCK_LIBDUCKDB=/path/to/libduckdb.so`. But `_find_standalone_libduckdb` already consulted `NUMBDUCK_LIBDUCKDB` (lines 34-36) and rejected it — so if the user set it to a non-existent path, the message tells them to do exactly what they just did, with no hint that the path was missing/invalid. Meanwhile the Darwin path silently proceeds to a network download. WHY this is a maintainability/ergonomics defect: the two terminal branches give the user materially different experiences for the same root cause (stripped wheel) with no shared, explanatory message, and the non-Darwin message gives no diagnostic about why the env var did not take effect. Per CLAUDE.md the project assumes Linux/Windows wheels always export the C API, so a non-Darwin user hitting this is in genuinely uncharted territory and most needs a precise message.",
+      "impact": "A user who set NUMBDUCK_LIBDUCKDB to a bad path on Linux gets unhelpful, circular guidance; the inconsistent behavior between platforms is undocumented at the call site.",
+      "recommendation": "Distinguish 'env var unset' from 'env var set but file missing' in the message (echo the offending path), and state the platform asymmetry (download is macOS-only) so a non-Darwin user understands their only recourse is the env var.",
+      "confidence": "medium"
+    },
+    {
+      "id": "UTL-DES-5",
+      "severity": "low",
+      "title": "Download URL assumes duckdb.__version__ maps 1:1 to a GitHub release tag with an osx-universal asset, with no failure guidance",
+      "file": "/home/erik/projects/numbduck/numbduck/utils.py",
+      "line": "51-56",
+      "category": "fragile-version-assumption",
+      "description": "The download URL is built as `.../download/v{version}/libduckdb-osx-universal.zip` directly from `duckdb.__version__` (lines 51-56). This couples three independent facts that are not guaranteed to hold together: that the Python package version string is exactly the DuckDB core git tag (no dev/post/local suffix, no package-vs-core skew), and that a `libduckdb-osx-universal.zip` asset exists for that tag. WHY this is a maintainability risk: any divergence yields a raw `urllib` `HTTPError`/404 surfacing from deep inside `_download_libduckdb`, with none of the actionable guidance the consent-decline branch already provides (brew / NUMBDUCK_LIBDUCKDB, lines 71-77). The same single-point version coupling also drives the cache dir (line 20) and the archive member name (line 88, `zf.open(\"libduckdb.dylib\")` assumes a flat archive), so a release-layout change breaks extraction with a bare `KeyError`.",
+      "impact": "On a version-string mismatch or upstream asset-naming change, the auto-download dies with an opaque HTTP/zip error instead of the friendly remediation the module already knows how to print.",
+      "recommendation": "Wrap the fetch/extract in a try/except that re-raises as a RuntimeError carrying the same brew/NUMBDUCK_LIBDUCKDB guidance plus the attempted URL, so download failures are as actionable as a declined prompt; optionally normalize `version` (strip post/dev suffixes) before building the tag.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Scope: design/maintainability of utils.py loader only; correctness/robustness risks (double-load of two duckdb runtimes, handle-retention, single-symbol heuristic) are flagged in loader.md and belong to the robustness/correctness dimension, not DES. Findings concentrate on the four focus areas: duplicated path constants (DES-1), download-path testability (DES-2), a destructive side effect in the fallback flow (DES-3), Darwin-branch error-message asymmetry (DES-4), and the fragile version->release-tag assumption (DES-5)."
+}

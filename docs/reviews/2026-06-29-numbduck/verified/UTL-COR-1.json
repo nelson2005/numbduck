@@ -1,0 +1,6 @@
+{
+  "findingId": "UTL-COR-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "medium",
+  "reasoning": "Code at utils.py:38-40 exactly matches the description. old_cached = os.path.join(_LIBDUCKDB_CACHE_BASE, 'libduckdb.dylib'); if os.path.isfile(old_cached): os.remove(old_cached) — the os.remove is unguarded and executes before the versioned-cache check (lines 41-43) and the homebrew search (lines 44-46). load_duckdb() (lines 113-130) calls _find_standalone_libduckdb() at line 119 with no enclosing try/except, so any OSError from the remove propagates to the caller and aborts the loader entirely. A PermissionError, EROFS, or TOCTOU race on the legacy cache file would skip both the versioned cache and homebrew paths that follow, causing a full import failure even when a valid libduckdb is available. Medium severity is correct: the trigger (unremovable legacy file in ~/.numbduck/lib/) is uncommon but real on NFS home dirs, shared machines, or containers with read-only mounts, and the failure is user-visible with a confusing error message."
+}

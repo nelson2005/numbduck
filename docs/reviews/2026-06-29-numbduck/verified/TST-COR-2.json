@@ -1,0 +1,6 @@
+{
+  "findingId": "TST-COR-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "The duckdb_string_t layout at v1.3.2 is a union: inlined form {uint32_t length; char inlined[12]} (length <= 12) has string data at offset 4; pointer form {uint32_t length; char prefix[4]; char *ptr} (length > 12) has string data at the address stored at offset 8, not inline at offset 4. aux_read_inline_string (test/test_ducklib.py:267-272) reads str_len bytes from data_p+4 unconditionally, which is only correct for the inlined form. The blob reader (779-782) has the identical defect. All current callers use values well within the 12-byte cutoff: 'hello' (5 bytes) at lines 376 and 761, 4-byte blob at line 782. No test exercises a string longer than 12 bytes via these raw-layout helpers; the 12-byte 'hello duckdb' at line 1473 is read via duckdb_get_varchar+ctypes.string_at, bypassing the flawed helper entirely. The defect is latent: no currently-executing assertion is wrong, but a future test that binds a string longer than 12 bytes and reads it through aux_read_inline_string or the inline blob reader would silently receive the 4-byte prefix plus raw pointer bytes instead of the actual string, producing a false pass or a corrupt comparison. Severity low is correct for an undocumented test-helper precondition that has not yet been violated."
+}

@@ -1,0 +1,6 @@
+{
+  "findingId": "PBR-DES-4",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "The RuntimeError at pybridge.py:70-72 is exactly as described: a bare message with no duckdb version, no offsets, and no hint toward layout drift. The duckdb module is imported at line 3, making duckdb.__version__ trivially accessible at the raise site. The docstring (lines 31-34) explicitly names version-dependent layout as the primary failure mode and identifies 1.3.2 as the only validated version, making this error the natural place to surface that hypothesis. No other code path surfaces this information to the user. Severity low is correct: purely a diagnostic ergonomics issue with no effect on correctness or crash behavior."
+}

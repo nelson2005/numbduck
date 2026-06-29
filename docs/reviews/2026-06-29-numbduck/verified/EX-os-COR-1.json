@@ -1,0 +1,6 @@
+{
+  "findingId": "EX-os-COR-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Both ducklib.duckdb_bind_int64 (online_scoring.py:117) and ducklib.duckdb_execute_prepared (online_scoring.py:118) return duckdb_state (int32, confirmed by ducklib.py:89 and ducklib.py:170 signatures). Both return values are silently discarded — no variable assignment, no assertion. The only duckdb_state check in the path is at online_scoring.py:156 (duckdb_prepare). CLAUDE.md 'Error Handling' explicitly requires callers to do C-style return code checks. The secondary risk described by the reviewer is accurate: result_buf is zeroed once before the loop (line 109) but duckdb_destroy_result is called at the end of each iteration (line 144), so on failure the buffer state entering the next duckdb_fetch_chunk is indeterminate rather than a clean zero. Severity low is correct: the defect cannot trigger under the example's deterministic data (always-valid prepared statement, always-in-range int64 bind, always-matching feature id), but it is a real deviation from the stated caller contract in a file that serves as reference material for the prepared-statement loop pattern."
+}

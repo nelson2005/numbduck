@@ -1,0 +1,32 @@
+{
+  "unit": "DCK-sig-COR",
+  "target": "ducklib signatures/enum/types",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "DCK-sig-COR-1",
+      "severity": "low",
+      "title": "idx_t typed as signed `intp` instead of `uint64` in several signatures",
+      "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+      "line": 105,
+      "category": "type-correctness / idx_t mapping",
+      "description": "DuckDB's `idx_t` is `uint64_t` (unsigned). CLAUDE.md's binding rule says to trace it `idx_t -> uint64_t -> uint64`, and most entries do (e.g. duckdb_nparams:216, duckdb_rows_changed:226, duckdb_get_list_size:188, duckdb_get_map_size:190, duckdb_struct_type_child_count:227, duckdb_array_type_array_size:77 all use uint64). But six entries map an idx_t to signed `intp` instead: return type of duckdb_column_count (`intp(intp)`, :105, C returns idx_t), duckdb_row_count (:225, idx_t), duckdb_data_chunk_get_column_count (:155, idx_t), duckdb_data_chunk_get_size (:156, idx_t); and the idx_t value-argument of duckdb_data_chunk_get_vector (2nd arg col_idx, `intp(intp, intp)`, :157) and duckdb_validity_row_is_valid (2nd arg row, `int8(intp, intp)`, :233). This is an inconsistent and technically-wrong (signed vs unsigned) mapping of the same C type.",
+      "impact": "ABI-neutral on the supported 64-bit targets (intp and uint64 are both i64; register/stack passing is identical, so there is no miscompilation and counts never realistically exceed 2^63). The real risk is a numba typing footgun: numba treats int64 and uint64 as distinct and promotes a mixed int64/uint64 expression to float64. User @njit code that mixes one of these intp-typed counts with a correctly-uint64-typed count (e.g. `duckdb_data_chunk_get_size(chunk) < duckdb_get_list_size(val)`) silently unifies to float64. A signed return is also semantically wrong for an unsigned count.",
+      "recommendation": "Map every idx_t to `uint64` for consistency with the rest of the file and with `duckdb.h`: change the return types at :105, :155, :156, :225 and the second argument types at :157 and :233 from `intp` to `uint64`.",
+      "confidence": "high"
+    },
+    {
+      "id": "DCK-sig-COR-2",
+      "severity": "low",
+      "title": "duckdb_vector_get_validity return typed `uint64` (value) instead of `intp` (pointer)",
+      "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+      "line": 236,
+      "category": "pointer typing / convention",
+      "description": "C: `uint64_t *duckdb_vector_get_validity(duckdb_vector vector)` returns a POINTER to the validity bitmask. The file's uniform convention (and CLAUDE.md) models every pointer as `intp` -- e.g. the sibling duckdb_vector_get_data at :235 returns `intp` for its `void*`. This signature instead types the pointer return as `uint64` (`uint64(intp)`), a scalar value type rather than the pointer convention used everywhere else.",
+      "impact": "ABI-neutral (both 64-bit; the address is returned intact and remains usable as an address inside @njit, including via the _cast_int_to_void_p bridge used for carray). It is a type-hygiene/convention deviation: it labels a pointer as an unsigned scalar, and mixing this uint64 result with intp-typed pointers from the other vector/handle accessors hits the same numba int64/uint64 -> float64 unification described in DCK-sig-COR-1.",
+      "recommendation": "Type the return as `intp` (i.e. `intp(intp)`) to match duckdb_vector_get_data and the pointer-as-intp convention.",
+      "confidence": "high"
+    }
+  ],
+  "notes": "Scope: enum (lines 22-65), duckdb_state (16), type aliases (67-74), and every signatures[...] entry (77-272), audited against the DuckDB C API for 1.3.2-1.5.x. VERIFIED CORRECT: duckdb_state_ty=int32 (enum). All duckdb_type enum values 0..38 match duckdb.h (INVALID=0 .. INTEGER_LITERAL=38), including the out-of-numeric-order UHUGEINT=32/ARRAY=33/ANY=34. Struct aliases match the C natural-alignment layouts and the duckdb_utils.py buffer allocations: duckdb_result_ty=UniTuple(intp,6)=48B (= allocate_buffer(6)); hugeint {u64,i64}=16B, uhugeint {u64,u64}=16B, interval {i32,i32,i64}=16B (non-canonical, correctly repacked by numbox _needs_int_int_eightbyte_repack), blob/bit {ptr,u64}=16B, decimal {u8,u8,u64,i64}=24B, varint {ptr,u64,i8}=24B. Spot-checked ~all signature arg/return shapes (binds, creates, gets, logical-type accessors, scalar/aggregate-function registration, 8-byte time_tz single-uint64 struct returned/passed as uint64) against duckdb.h -- no arg-count or struct-by-value/by-pointer encoding errors found in the signatures dict itself. COULD NOT VERIFY (no duckdb.h present on the system; values within or just past the Jan-2026 knowledge cutoff): the 1.5-specific DUCKDB_TYPE_BIGNUM=35 (aliased to VARINT, :60-61) and DUCKDB_TYPE_TIME_NS=39 (:65). The VARINT/BIGNUM same-value-same-layout claim and TIME_NS=39 should be re-checked against the v1.5 header at upgrade time; flagged here as unverified rather than as a defect. CROSS-UNIT (not a defect of this unit): duckdb_fetch_chunk (sig :171, wrapper :942), duckdb_result_return_type (sig :223, wrapper :1128) and duckdb_result_statement_type (sig :224, wrapper :1134) have CORRECT signatures -- `...(duckdb_result_ty)` correctly encodes pass-by-value of the 48-byte duckdb_result. However their wrappers lower via _call_lib_func_byval (numbox call.py:203-209/280-301), which emits a bare pointer argument with no `byval` attribute. On SysV x86-64 a >16-byte (MEMORY-class) by-value argument is passed copied on the stack, not as a pointer in a register, so this lowering choice is a potential ABI mismatch on Linux x86-64 (it coincides with the correct convention only on AAPCS64). This is the same concern raised in understanding/bindings.md section 8 risk #1; it belongs to the ABI/bridge lowering review unit, not to signatures/enum/types -- the signature declarations themselves are correct -- and the merged/documented UDAF pattern uses duckdb_fetch_chunk, so runtime verification on x86-64 is recommended there."
+}

@@ -1,0 +1,6 @@
+{
+  "findingId": "BLD-SEC-3",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "All factual claims are accurate. pyproject.toml:13 uses `numbox~=0.5.11` (compatible-release operator, meaning >=0.5.11,<0.6), which is a range, not an exact pin. numbduck_ci.yml:65-66 exact-pin numba and duckdb via `==` matrix values; line 67 runs `pip install -e .` which resolves numbox against that range at PyPI install time with no lockfile and no --require-hashes. No constraints file, requirements.txt, or hash-pinned lockfile exists anywhere in the repo. The haversine_bench.yml:28 also carries the same `pip install -e .` pattern. The asymmetry between numba/duckdb (==) and numbox (~=) is real and the non-reproducibility claim holds. Severity low is correct: numbox is a niche trusted dependency from the same ecosystem, the ~= operator still bounds the minor version, realistic risk is accidental breakage rather than supply-chain compromise, and blast radius is CI-only."
+}

@@ -1,0 +1,6 @@
+{
+  "findingId": "EX-os-COR-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "The defect is real and correctly characterized. At online_scoring.py:123, chunk_p = ducklib.duckdb_fetch_chunk(result_tup) is called with no subsequent null guard before duckdb_data_chunk_get_vector(chunk_p, 0..3) at lines 125-128. The null-return contract is confirmed by test/test_ducklib.py:217-218 (test_duckdb_fetch_chunk_exhausted), which asserts chunk_p == 0 on an exhausted result. If chunk_p is 0, calling duckdb_data_chunk_get_vector(0, ...) dereferences a null pointer inside nogil JIT code — a hard segfault with no Python exception. The code is correct only by construction: setup_features (lines 74-79) creates ids as range(k), giving a dense [0, k-1] table; setup_events (line 84) draws ids via rng.integers(0, k_features), which is [0, k_features), guaranteeing exactly one matching row per probe. Any deviation — a sparse feature table, an id outside range, or a failed execute whose return code is already ignored (EX-os-COR-1) — produces a null chunk and a segfault. Severity low is correct: under the shipped deterministic data this never triggers, it is an example file rather than production code, and the risk is latent rather than immediately exploitable. No evidence of a guard elsewhere (no chunk_p check anywhere in _score_jit_loop)."
+}

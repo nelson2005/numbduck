@@ -1,0 +1,44 @@
+{
+  "unit": "PBR-SEC",
+  "target": "pybridge.py",
+  "dimension": "SEC",
+  "findings": [
+    {
+      "id": "PBR-SEC-1",
+      "severity": "medium",
+      "title": "isinstance guard is bypassable via __class__ spoofing, enabling type confusion and arbitrary memory reads",
+      "file": "/home/erik/projects/numbduck/numbduck/pybridge.py",
+      "line": 52,
+      "category": "type-confusion / insufficient input validation",
+      "confidence": "high",
+      "description": "The only structural precondition is `if not isinstance(conn, duckdb.DuckDBPyConnection)` (pybridge.py:52-55). CPython's `isinstance` consults `obj.__class__` (not just `type(obj)`), so any plain Python object can pass this guard by exposing a `__class__` property that returns `duckdb.DuckDBPyConnection` (the classic isinstance spoof). Such an object is NOT a pybind11 instance, yet the code proceeds to treat `id(conn)+16` as a held C++ pointer: `cpp_obj_p = ctypes.c_void_p.from_address(py_obj_addr + 16).value` (line 59) reads whatever 8 bytes happen to live at offset 16 of an arbitrary Python object, and `ctypes.c_void_p.from_address(cpp_obj_p + 32)` (line 62) then dereferences that wild value as a pointer. Both raw reads occur BEFORE the `SELECT 1` validation at line 67, so the validation query never gets a chance to gate them. The result is an arbitrary memory read at `*(garbage)+32`, which segfaults in the common case and can disclose process memory in the worst case. This is exactly the 'sufficiency of the isinstance guard' and 'arbitrary memory read via pointer arithmetic on an externally-owned object' surface.",
+      "impact": "A hostile or buggy caller can pass a non-connection object that satisfies the type guard and cause an arbitrary memory dereference (segfault / potential info disclosure / type confusion) with no clean error. The guard provides no memory-safety guarantee against a crafted object.",
+      "recommendation": "Replace the spoofable `isinstance` check with an exact-type identity check: `if type(conn) is not duckdb.DuckDBPyConnection`. `type(conn)` cannot be overridden by a `__class__` property, so this rejects both spoofed objects and Python subclasses (whose instance layout may differ). Document that only genuine, exact-type connection objects are accepted, and treat the raw-pointer extraction as an unsafe trust boundary."
+    },
+    {
+      "id": "PBR-SEC-2",
+      "severity": "medium",
+      "title": "No closed/freed-connection check: NULL or dangling Connection* is dereferenced or passed to the C API",
+      "file": "/home/erik/projects/numbduck/numbduck/pybridge.py",
+      "line": 62,
+      "category": "use-after-free / NULL deref / missing liveness validation",
+      "confidence": "medium",
+      "description": "The guard at line 52 checks type but never checks that the connection is open. When a user calls `conn.close()`, DuckDBPyConnection's held `unique_ptr<Connection>` is reset, so `ctypes.c_void_p.from_address(cpp_obj_p + 32).value` (line 62) reads NULL. Note `ctypes.c_void_p(0).value is None`, so `conn_ptr` becomes `None` rather than `0`; that `None` is then passed to the JIT-compiled `ducklib.duckdb_query(conn_ptr, ...)` (line 67) which expects an `intp`, producing an opaque numba coercion error instead of the documented `RuntimeError`, and on the success path `extract_connection_ptr` could even return `None`. Worse, if a close path leaves a dangling (non-NULL, freed) `Connection*` instead of NULL, the `SELECT 1` validation query at line 67 is a use-after-free dereference of freed C++ state that can segfault or corrupt memory rather than returning `DuckDBError`. Symmetrically, if step 1 yields a NULL `cpp_obj_p`, line 62 evaluates `None + 32` and raises a bare `TypeError` (wrong exception type, not the contract's `RuntimeError`).",
+      "impact": "A closed connection causes either a misleading exception, a `None` return that propagates a bad pointer to JIT code, or a use-after-free crash inside the validation query. The 'validation' cannot cleanly distinguish a closed/freed connection from a live one.",
+      "recommendation": "Before the raw reads, reject closed connections using a Python-level liveness signal (e.g. probe a benign attribute/method on `conn` that fails on a closed connection). After line 62, explicitly test for NULL (`if conn_ptr is None: raise RuntimeError(...)`) so a NULL handle is rejected with the contract's `RuntimeError` and is never passed to `duckdb_query` or returned. Document that the borrowed pointer is only valid while the connection is both alive and open."
+    },
+    {
+      "id": "PBR-SEC-3",
+      "severity": "medium",
+      "title": "The SELECT-1 validation is not a memory-safety check: a wrong-but-plausible pointer is fed straight into the C API",
+      "file": "/home/erik/projects/numbduck/numbduck/pybridge.py",
+      "line": 67,
+      "category": "trusting external memory layout / unsafe pointer arithmetic",
+      "confidence": "high",
+      "description": "The `+16` (line 59) and `+32` (line 62) offsets are hand-derived from a single configuration (duckdb 1.3.2 / Linux x86-64 / libstdc++ / pybind11 simple holder), per the docstring at lines 31-34. The supported range is `duckdb>=1.3.2,<1.6`. On any layout change — a different libstdc++/libc++/MSVC `shared_ptr`/`weak_ptr`/`unique_ptr` size, member reordering in `DuckDBPyConnection`, an added base class, or a non-simple pybind11 holder — `cpp_obj_p + 32` yields a bogus-but-non-NULL address. That wild value is passed directly as the `duckdb_connection` argument to `duckdb_query(conn_ptr, query_p, ...)` (line 67), where the DuckDB C library dereferences it. The `rc != DuckDBSuccess` check (line 69) only catches pointers that survive a full query and return a clean error code; a wild pointer dereferenced inside `duckdb_query` segfaults (or, worse, reads/writes uncontrolled memory) before any return code exists. So the validation step is a functional smoke test, not the memory-safety validation the docstring (lines 28-29, 'validated ... before it is returned') implies.",
+      "impact": "Under a duckdb upgrade within the declared supported range (or a non-Linux/non-libstdc++ environment), the helper can silently extract and dereference an invalid pointer, crashing the process or causing undefined behavior inside libduckdb, with no reliable error path. The safety net is best-effort only.",
+      "recommendation": "Treat offset extraction as an explicitly unsafe, version-pinned operation: assert/verify the running `duckdb.__version__` against the validated set and refuse (or loudly warn) otherwise; add a cheap runtime sanity check on the extracted address where feasible; and reword the docstring so callers understand the `SELECT 1` step does not guarantee memory safety. Longer term, prefer an official C-handle accessor if/when duckdb-python exposes one (tracked as duckdb/duckdb-python#404)."
+    }
+  ],
+  "notes": "Scope: security audit of extract_connection_ptr in pybridge.py (the only function). Three findings center on the prompt's focus areas: (SEC-1) the isinstance guard is spoofable via a __class__ property, allowing a non-connection object to reach the raw pointer-arithmetic reads at lines 59/62 and trigger an arbitrary memory dereference before the validation query runs; (SEC-2) no closed/freed-connection check, so a closed connection yields a NULL/dangling Connection* that is dereferenced in the validation query or returned/passed onward (note ctypes c_void_p(0).value is None); (SEC-3) the SELECT 1 round-trip is a smoke test, not a memory-safety validation, so a wrong-but-plausible pointer from a layout/version change is dereferenced inside duckdb_query and can crash rather than return an error code. All three are reachable only by a caller that controls the `conn` argument (the developer using numbduck), so none are remotely triggerable; rated medium accordingly. The +16/+32 offsets and layout fragility are inherent to the design (also flagged as design/robustness risks in bridge.md sections 6.1-6.3); SEC-3 is the security framing of that fragility. No download/TLS/checksum or env-var-path surface exists in this file (those live in utils.py / loader)."
+}

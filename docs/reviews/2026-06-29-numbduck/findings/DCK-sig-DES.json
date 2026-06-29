@@ -1,0 +1,68 @@
+{
+  "unit": "DCK-sig-DES",
+  "target": "ducklib signatures/enum/types",
+  "dimension": "DES",
+  "findings": [
+    {
+      "id": "DCK-sig-DES-1",
+      "severity": "medium",
+      "title": "Migrated bind wrappers and two scalar wrappers orphaned at end of file, breaking the established grouping",
+      "file": "numbduck/ducklib.py",
+      "line": "1398-1432",
+      "category": "organization/drift",
+      "description": "The module groups wrappers by family: bind_* wrappers run 287-410, the scalar-function block runs 1212-1311, the aggregate block 1314-1395. But four bind wrappers — duckdb_bind_hugeint (1410), duckdb_bind_uhugeint (1416), duckdb_bind_interval (1422), duckdb_bind_decimal (1428) — and two scalar wrappers — duckdb_scalar_function_get_extra_info (1398) and duckdb_scalar_function_set_error (1404) — sit appended at EOF, far from their siblings. Their *signatures* are correctly grouped (bind sigs at 79-103, scalar sigs at 271-272 — the latter themselves appended after the aggregate sig block 256-269), so the dict and the wrapper order disagree. This is residue of the hugeint/uhugeint/interval/decimal migration documented in CLAUDE.md 'Follow-ups': the new wrappers were appended rather than placed with the 18 sibling bind wrappers.",
+      "impact": "A maintainer scanning the bind_* wrapper run (287-410) sees only 18 of the 22 binds and may re-add a duplicate hugeint/interval wrapper, or edit one copy. The grouping invariant erodes silently with each such append; diff review and 'is this function bound?' scans become unreliable.",
+      "recommendation": "Relocate the four bind wrappers into the bind_* run and the two scalar wrappers into the scalar block (1212-1311); move sig keys 271-272 up into the scalar sig block (238-254). Going forward, place new bindings in their family rather than at EOF.",
+      "confidence": "high"
+    },
+    {
+      "id": "DCK-sig-DES-2",
+      "severity": "low",
+      "title": "signatures dict ordering is inconsistent: duckdb_connect wedged inside the create_* run",
+      "file": "numbduck/ducklib.py",
+      "line": 121,
+      "category": "organization",
+      "description": "The signatures dict is otherwise alphabetical (e.g. the whole bind_* run 79-103, the column_* run 105-108). But duckdb_connect (121) is placed between two runs of duckdb_create_* (109-120 and 122-154), even though 'connect' sorts before every 'create_*' key. The create block is effectively split in two by connect. (Minor secondary: bind_int8 precedes bind_int16/32/64 — numeric, not lexicographic order.)",
+      "impact": "No runtime effect, but it defeats the alphabetical scan/diff convention the rest of the dict follows, so there is no rule a contributor can apply when inserting a new key — invites further drift.",
+      "recommendation": "Move duckdb_connect to its alphabetical slot (before the create_* keys) and keep the dict consistently sorted; mirror that order in the wrapper section.",
+      "confidence": "high"
+    },
+    {
+      "id": "DCK-sig-DES-3",
+      "severity": "low",
+      "title": "Dead code: _is_win and its import sys are unused in ducklib.py",
+      "file": "numbduck/ducklib.py",
+      "line": 13,
+      "category": "dead-code",
+      "description": "Line 6 imports sys and line 13 defines _is_win = sys.platform == 'win32'. grep confirms _is_win is referenced nowhere else in the file, and sys is used nowhere else. All Windows-vs-SysV ABI branching lives in numbox (call.py/abi.py), not here. So both the import and the constant are dead.",
+      "impact": "Misleads readers into thinking ducklib does platform-specific ABI handling; flake8 F401/F841-class noise if rules tighten; minor maintenance weight.",
+      "recommendation": "Remove line 13 and the now-unused `import sys` (line 6), unless a planned use exists — if so, add a comment.",
+      "confidence": "high"
+    },
+    {
+      "id": "DCK-sig-DES-4",
+      "severity": "low",
+      "title": "Two varint wrappers use a non-standard, version-pinned docstring URL",
+      "file": "numbduck/ducklib.py",
+      "line": "727, 1052",
+      "category": "doc-drift",
+      "description": "duckdb_create_varint (727) and duckdb_get_varint (1052) document with 'https://duckdb.org/docs/1.3/clients/c/api#...' (version-pinned to 1.3, no .html). Every other wrapper (and CLAUDE.md's stated convention, step 5 of 'Adding a New Binding') uses 'https://duckdb.org/docs/stable/clients/c/api.html#func_name'. These two are the only deviations.",
+      "impact": "Inconsistent docs; the 1.3-pinned link rots independently of the stable docs and breaks the uniform link convention that makes the file auditable. Concrete instance of the un-checked name/URL duplication (see DCK-sig-DES-5).",
+      "recommendation": "Normalize both to the stable .html form: 'https://duckdb.org/docs/stable/clients/c/api.html#duckdb_create_varint' and '#duckdb_get_varint'.",
+      "confidence": "high"
+    },
+    {
+      "id": "DCK-sig-DES-5",
+      "severity": "low",
+      "title": "Each binding repeats its name string up to five times with no single source of truth",
+      "file": "numbduck/ducklib.py",
+      "line": "77-1432",
+      "category": "duplication/abstraction",
+      "description": "For every one of the 193 bindings the function name appears as: (1) the signatures dict key, (2) the def name, (3) the docstring URL anchor, (4) the @cres(signatures.get(\"...\")) lookup, and (5) the _call_lib_func(\"...\") literal. The sig-key/@cres/_call_lib_func triple and the def name are cross-checked at import (eager @cres compile raises on mismatch), so those drift loudly — but the docstring URL is NOT machine-checked, which is exactly how DCK-sig-DES-4 arose. There is no helper/factory that derives the wrapper from the name once.",
+      "impact": "High edit-multiplicity per binding and a class of silent drift (the docstring anchor) that no test catches; copy-paste of a wrapper that forgets to update the URL produces a wrong-but-green doc link. Scales with the ~200-and-growing binding count.",
+      "recommendation": "At minimum add a tiny CI/test assertion that each wrapper's docstring anchor matches its def name (closes the one un-checked copy). Optionally factor the boilerplate through a generator/helper keyed on the name once; weigh against numbox's established explicit-wrapper style and the need for distinct first-class @njit function values.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Scope: enum/type-alias block (16-74) and signatures dict + wrappers (77-1432). Verified mechanically: no duplicate signature keys; 193 sig keys and 193 wrappers with exact parity (no orphan either way); no current def-name vs docstring-URL vs _call_lib_func-literal mismatches (DES-5 is a latent risk, not an active defect, except the URL convention break in DES-4); _is_win/import sys confirmed unused via grep. cres_if_available usage (duckdb_create_varint, duckdb_get_varint, duckdb_scalar_function_set_init) is consistent and correctly version-gates the 1.5-era symbols; no missing gate found (no binding exists for TIME_NS-only or other 1.5 symbols beyond those gated). The VARINT/BIGNUM=35 aliasing (60-61) and identical blob_ty/bit_ty (72-73) are intentional, documented, and not flagged. CLAUDE.md's 'Struct-by-value helpers'/'Follow-ups' sections are stale vs the current file (helpers and the 1525-1640 intrinsics no longer exist; migration landed) — a docs defect, out of scope for this code-unit review but worth noting for the docs reviewer."
+}

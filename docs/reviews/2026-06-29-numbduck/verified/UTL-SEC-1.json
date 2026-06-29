@@ -1,0 +1,6 @@
+{
+  "findingId": "UTL-SEC-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "medium",
+  "reasoning": "All factual claims verified against source. (1) URL built from duckdb.__version__ (utils.py:51-56) confirmed. (2) urlopen + resp.read() with no integrity check (utils.py:83-84) confirmed; _download_libduckdb() imports only io, zipfile, urllib.request.urlopen — no hashlib, sha256, codesign, or hmac anywhere in the file. (3) zipfile.ZipFile(io.BytesIO(data)) extraction to ~/.numbduck/lib/<version>/libduckdb.dylib (utils.py:85-89) confirmed. (4) load_lib_path(downloaded) at utils.py:130 maps to numbox CDLL(path, mode=RTLD_GLOBAL) at numbox/core/bindings/utils.py:178-180, confirmed via direct read. (5) NUMBDUCK_LIBDUCKDB_DOWNLOAD=1 silently bypasses the prompt (utils.py:57-58) confirmed. (6) Interactive prompt does not disclose unverified status (utils.py:59-70) confirmed. No digest check exists in callers or elsewhere in the file. TLS (PEP 476 default) protects only the transport layer and provides zero protection against a compromised upstream GitHub release asset. Medium severity is correct: mitigating factors (macOS-only, consent-gated, TLS on transport) are real and bound the likelihood, but the residual risk (supply-chain compromise undetectable by TLS, arbitrary native code executed in-process via RTLD_GLOBAL) is real and keeps it above low."
+}

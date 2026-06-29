@@ -1,0 +1,44 @@
+{
+  "unit": "PBR-COR",
+  "target": "pybridge.py",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "PBR-COR-1",
+      "severity": "medium",
+      "title": "Pointer-offset/struct layout validated only on duckdb 1.3.2 but dependency range allows up to <1.6, with no runtime layout guard",
+      "file": "/home/erik/projects/numbduck/numbduck/pybridge.py",
+      "line": 62,
+      "category": "cross-version",
+      "description": "The +32 member offset at line 62 (and the +16 pybind11 header offset at line 59) is hand-derived from a specific DuckDBPyConnection C++ layout: weak_ptr(16) + shared_ptr<DuckDB>(16) + unique_ptr<Connection>, which itself depends on libstdc++ smart-pointer sizes and on duckdb not reordering or adding members. The docstring (lines 31-34) states it is validated only on duckdb 1.3.2 / Linux x86-64 / libstdc++, yet pyproject.toml line 12 declares 'duckdb>=1.3.2,<1.6'. Any 1.4.x/1.5.x release within the declared-supported range that reorders members, adds a base class, or is built against libc++/MSVC shifts this offset. There is no compile-time or runtime assertion of the layout; the read at line 62 will return whatever bytes sit at cpp_obj_p+32.",
+      "impact": "On a supported-but-unvalidated duckdb minor version the extracted conn_ptr is a wrong pointer. Best case is a segfault during validation; worst case it is a plausible-but-wrong pointer that survives and is returned, leading to memory corruption when later C API calls dereference it.",
+      "recommendation": "Either tighten the dependency to '==1.3.*' (the only validated ABI) or add an explicit, version-gated assertion of the duckdb version at import/use time so an unvalidated version fails loudly rather than silently reading a wrong offset.",
+      "confidence": "medium"
+    },
+    {
+      "id": "PBR-COR-2",
+      "severity": "low",
+      "title": "SELECT 1 validation cannot reliably catch a wrong offset; docstring overstates the guarantee",
+      "file": "/home/erik/projects/numbduck/numbduck/pybridge.py",
+      "line": 67,
+      "category": "validation-logic",
+      "description": "The docstring (lines 28-29, 49-50) presents the round-trip query as validation that the 'extracted pointer fails the validation query' raises RuntimeError. But the rc check at line 69 only fires when duckdb_query(conn_ptr, ...) returns cleanly with rc != DuckDBSuccess. The dominant failure mode of a wrong +16/+32 offset is a garbage/non-Connection pointer, which causes duckdb_query to dereference invalid memory and segfault rather than return DuckDBError. The destroy ordering and the rc != DuckDBSuccess comparison themselves are correct (DuckDBSuccess==0; duckdb_destroy_result is correctly called unconditionally before the rc check per the C API protocol), but the guard only covers the narrow case of a pointer that is a valid duckdb_connection yet errors on SELECT 1 — which essentially never happens. So the safety net is far weaker than the docstring implies.",
+      "impact": "False confidence: a layout mismatch will typically crash the process instead of surfacing the documented RuntimeError, defeating the stated purpose of the validation step.",
+      "recommendation": "Document the guard as best-effort (it confirms a working Connection*, not that the offsets are correct). The actual offset-correctness safeguard should be the version/ABI gate from PBR-COR-1, not the query.",
+      "confidence": "high"
+    },
+    {
+      "id": "PBR-COR-3",
+      "severity": "low",
+      "title": "NULL intermediate pointer yields None, raising TypeError (not the documented RuntimeError) or returning None",
+      "file": "/home/erik/projects/numbduck/numbduck/pybridge.py",
+      "line": 62,
+      "category": "validation-logic",
+      "description": "ctypes.c_void_p.from_address(...).value returns None (not 0) when the pointed-to pointer is NULL (verified: ctypes.c_void_p(0).value is None). If the unique_ptr<Connection> slot is null (e.g. a closed/half-initialized connection) cpp_obj_p at line 59 or conn_ptr at line 62 can be None. Then 'None + 32' at line 62 raises a bare TypeError, contradicting the documented Raises contract (lines 46-50: only TypeError for bad type, RuntimeError for failed validation). If conn_ptr itself is None it would be passed to duckdb_query / returned as the documented int, violating the int return type.",
+      "impact": "An edge-case (closed/null connection) surfaces as an unexpected TypeError or a None return rather than the documented RuntimeError, breaking the helper's stated error contract.",
+      "recommendation": "After each from_address read, treat a None/0 result as a validation failure and raise the documented RuntimeError, e.g. check 'if not cpp_obj_p' and 'if not conn_ptr' before dereferencing/returning.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Core logic of the validation step is correct: DuckDBSuccess==0 and 'rc != DuckDBSuccess' robustly treats any nonzero state as failure; duckdb_destroy_result is correctly called unconditionally and before the rc check (DuckDB protocol requires destroying the result on both success and failure, and a zeroed 6xint64/48-byte buffer is safe to destroy); the returned conn_ptr is a Python int. The Connection*->duckdb_connection identity the code relies on is sound (the C API casts a Connection* directly to the handle type). create_duckdb_result()'s sz=6 (48B) matches the 1.3.2 duckdb_result struct. The remaining risk is entirely the ABI/offset assumption: validated on a single config (1.3.2/Linux x86-64/libstdc++) while the dependency range permits <1.6, with a validation guard that cannot reliably detect a wrong offset. duckdb_query signature duckdb_state_ty(intp,intp,intp) and duckdb_destroy_result void(intp) (ducklib.py:220,164) match usage."
+}

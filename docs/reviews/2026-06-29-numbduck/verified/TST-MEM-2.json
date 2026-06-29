@@ -1,0 +1,6 @@
+{
+  "findingId": "TST-MEM-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "medium",
+  "reasoning": "All claimed leaks are real. aux_close_db (test_ducklib.py:67-69) calls only duckdb_disconnect + duckdb_close — no destroy of result or chunk. create_duckdb_result() returns a plain numpy int64 buffer; tuple(out_result) in aux_get_data_vector (line 174) produces a plain Python tuple; data_chunk_p is a raw intp integer. None of these carry a DuckDB-aware Python finalizer, so GC reclaims only the Python wrapper, not the C-heap memory. The four named tests (185-189, 192-196, 222-235, 212-219) all reach aux_close_db without calling duckdb_destroy_data_chunk or duckdb_destroy_result, confirming per-test leaks of both handles. The correct destroy pattern at lines 1121-1124 and 2352-2354 (duckdb_destroy_data_chunk then duckdb_destroy_result before disconnect/close) confirms the omission in the named tests is an oversight. Additionally, test_duckdb_destroy_data_chunk (199-209) destroys the chunk but still leaks duckdb_result — the finding omits this instance but nothing it does claim is wrong. Severity medium is appropriate: the leaks are real, per-test in scope, have no correctness impact, and carry no production risk."
+}

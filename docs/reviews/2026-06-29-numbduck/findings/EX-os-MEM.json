@@ -1,0 +1,32 @@
+{
+  "unit": "EX-os-MEM",
+  "target": "examples/online_scoring.py",
+  "dimension": "MEM",
+  "findings": [
+    {
+      "id": "EX-os-MEM-1",
+      "severity": "medium",
+      "title": "No null/empty-chunk guard before dereferencing the fetched chunk",
+      "file": "examples/online_scoring.py",
+      "line": "123-136",
+      "category": "use-after-free / null-pointer dereference",
+      "description": "In _score_jit_loop the chunk returned by duckdb_fetch_chunk(result_tup) (line 123) is consumed without checking that chunk_p != 0. duckdb_fetch_chunk returns a NULL duckdb_data_chunk to signal 'no more chunks' (and an empty/NULL chunk for a zero-row result or an error result). The very next calls duckdb_data_chunk_get_vector(chunk_p, 0..3) (lines 125-128) then duckdb_vector_get_data(...) (lines 129-132) and carray(..., (1,), float64)[0] (lines 133-138) dereference that pointer and read index [0] with no row-count or null check. If chunk_p is NULL, get_vector dereferences NULL; if a row simply did not match, the data pointers and [0] read are garbage. This is purely a data-construction-gated safety: the SELECT ... WHERE id = $1 returns exactly one row only because setup_features builds id = range(N_FEATURES) (lines 74-79) and events draw ids from [0, N_FEATURES) (line 84). Any deviation (a miss, an empty result, or an error result from duckdb_execute_prepared whose return code is ignored at line 118) turns this into a hard segfault inside nogil JIT code. duckdb_destroy_data_chunk(chunk_pp) on a NULL chunk_buf[0] is itself a no-op, so the crash is strictly on the read path.",
+      "impact": "Latent segmentation fault / undefined behavior on the first non-matching probe, error result, or empty chunk. Not triggered by the shipped example data, but the loop is one bad id away from a native crash with no Python traceback.",
+      "recommendation": "After line 123 check `if chunk_p == 0:` (and/or duckdb_data_chunk_get_size(chunk_p) == 0) and skip the read, writing a sentinel/NaN into scores_out[i] and still destroying the result before continuing. At minimum assert chunk_p != 0 so a miss fails loudly rather than dereferencing NULL.",
+      "confidence": "high"
+    },
+    {
+      "id": "EX-os-MEM-2",
+      "severity": "low",
+      "title": "Prepared statement leaked when duckdb_prepare fails (assert short-circuits destroy)",
+      "file": "examples/online_scoring.py",
+      "line": "155-161",
+      "category": "resource leak (error path)",
+      "description": "score_jit calls duckdb_prepare(...) (line 155) and immediately `assert rc == ducklib.DuckDBSuccess` (line 156). The DuckDB C API allocates a prepared-statement object even when duckdb_prepare returns DuckDBError (the handle must be inspected via duckdb_prepare_error and freed with duckdb_destroy_prepare regardless of success). If the assert raises, control leaves the function before duckdb_destroy_prepare(stmt.ctypes.data) at line 161, leaking the C-side prepared statement. The same exposure applies if _score_jit_loop were to raise: destroy is not in a try/finally. The stmt numpy buffer itself is GC-managed, but the DuckDB-internal allocation it points to is not.",
+      "impact": "One leaked prepared-statement object per failed prepare. Error-path only and effectively never hit given the static SQL, so impact is minor; matters for robustness and for downstream callers copying this pattern.",
+      "recommendation": "Wrap the prepare+loop in try/finally so duckdb_destroy_prepare always runs, e.g. assign stmt, try: prepare/assert/loop, finally: duckdb_destroy_prepare(stmt.ctypes.data). On failure read duckdb_prepare_error before destroying for a useful message.",
+      "confidence": "high"
+    }
+  ],
+  "notes": "The hot loop's core handle lifecycle is sound: result_buf (6 int64) and chunk_buf (1 int64) are allocated once before the loop (lines 109-110, not per-iteration), the data pointers are read before destruction, and every iteration destroys the chunk (lines 142-143) then the result (line 144) in the correct order, so there is no per-iteration leak and no use-after-free across iterations under the example's data. The 6-slot result buffer matches the 48-byte duckdb_result struct (duckdb_utils.create_duckdb_result). The result value-tuple snapshot (lines 119-122) passed by value to duckdb_fetch_chunk is consistent with numbduck's by-value fetch binding; the cursor lives in the heap internal_data pointer (slot 5), so destroy_result via result_p still frees correctly. The carray views (a0..a3) are NRT array structs over external DuckDB memory with no owned buffer and no raising calls between creation and scope-exit, so they incur no refcount leak. No double-free or borrow/release (export_meminfo/release_meminfo) imbalance is present in this file. The two findings are unguarded edges, not defects in the steady-state loop."
+}

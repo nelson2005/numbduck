@@ -1,0 +1,32 @@
+{
+  "unit": "XC-err",
+  "target": "error-handling contract",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "XC-err-1",
+      "severity": "low",
+      "title": "Closed/NULL connection bypasses round-trip validation and raises a non-contract exception",
+      "file": "/home/erik/projects/numbduck/numbduck/pybridge.py",
+      "line": 62,
+      "category": "error-handling / return-code-discipline",
+      "description": "extract_connection_ptr documents (pybridge.py:44-51) that it raises TypeError (wrong type) or RuntimeError (validation failure). The SELECT 1 round-trip at lines 65-72 is the sole runtime guard. But it only catches the narrow case where the extracted pointer survives a query and returns DuckDBError. ctypes.c_void_p.from_address(addr).value returns Python None for a stored NULL pointer, not 0. Two reachable paths produce a non-contract exception that bypasses the rc check entirely: (a) if the unique_ptr<Connection> slot is null (e.g. the user passed a connection on which .close() was called and pybind11 reset the holder), line 62 sets conn_ptr=None, and line 67 ducklib.duckdb_query(None, query_p, ...) raises a numba/ctypes argument-coercion error (None cannot be unboxed to intp), not the documented RuntimeError; (b) if cpp_obj_p (line 59) reads back as None, line 62 evaluates None + 32 and raises TypeError: unsupported operand, which falsely implies a type mismatch of conn. In both cases the round-trip validation never runs.",
+      "impact": "A closed or otherwise invalid-but-type-correct connection surfaces as a confusing TypeError or opaque numba unboxing error instead of the contract's RuntimeError('extracted connection pointer failed validation'). Callers catching RuntimeError per the docstring will not catch it; the failure also looks like an internal bug rather than 'bad/closed connection'. This is a robustness gap in the helper's stated error contract, not a memory-safety issue (it fails with some exception rather than returning a bad pointer).",
+      "recommendation": "After line 62, guard explicitly before issuing the query: `if not conn_ptr: raise RuntimeError('connection has no live C API handle (closed or unsupported layout)')`, and similarly guard cpp_obj_p after line 59. This keeps all failure modes funneled into the documented RuntimeError and preserves the C-style return-code discipline the rest of the helper follows.",
+      "confidence": "medium"
+    },
+    {
+      "id": "XC-err-2",
+      "severity": "low",
+      "title": "Version-gated bindings do not raise NotImplementedError for JIT callers (the primary call path)",
+      "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+      "line": 725,
+      "category": "error-handling / cross-version",
+      "description": "Three bindings are wrapped with @cres_if_available (duckdb_create_varint at ducklib.py:725, duckdb_get_varint at ducklib.py:1050, duckdb_scalar_function_set_init at ducklib.py:1284) so they degrade when the loaded libduckdb lacks the symbol. The numbox implementation (numbox/numbox/utils/highlevel.py:41-58) returns a plain Python function `stub(*args)` that raises NotImplementedError when the symbol is absent, and its docstring promises callers 'get a stub that raises NotImplementedError instead of a confusing LLVM link error at call time'. That promise only holds for pure-Python callers. These are JIT bindings whose intended call site is inside @njit code; from @njit the stub is an untyped Python global and numba raises an opaque TypingError at compile time, NOT the documented NotImplementedError. So the degraded path delivers a confusing error for exactly the consumer it was meant to protect. (When the symbol IS present, cres returns a CompileResultWAP, so the same name is two different object types depending on the runtime library — only the present case is @njit-callable.)",
+      "impact": "On a DuckDB version in the supported range (>=1.3.2,<1.6) that lacks a gated symbol, JIT code calling the gated wrapper fails to compile with a generic numba typing error instead of a clear 'X is not available' message. No exception leaks across the JIT/C boundary at runtime (it is a compile-time failure, the safe direction), so the binding-level contract is not violated; the defect is the unmet diagnostic promise. Root cause lives in numbox highlevel.py, but numbduck relies on this stub for cross-version portability.",
+      "recommendation": "Make the unavailable-symbol stub @njit-introspectable so JIT callers get a clear NotImplementedError-equivalent: e.g. register an overload/@intrinsic that raises a numba error with the function name at typing time, or document that gated functions are unavailable in @njit on older libduckdb and have numbduck guard with a Python-level capability check before compiling dependent JIT code. (Fix is in numbox; track as an upstream numbox follow-up.)",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Core contract is upheld. Every binding in ducklib.py is a thin _call_lib_func / _call_lib_func_byval wrapper (numbox call.py is a pure @intrinsic that lowers to a direct C call); none has any runtime Python-exception path, so no binding can raise into JIT/C at runtime. State codes are returned verbatim (duckdb_state_ty=int32, DuckDBSuccess=0/DuckDBError=1) and pointer/handle returns are passed back unchecked for C-style NULL inspection by callers, exactly per the contract. utils.py raises RuntimeError only at import time (module load: find_duckdb_shared_lib ambiguity at utils.py:107, missing C API symbols at utils.py:125) and never inside JIT/C; the interactive input() in _download_libduckdb is also import-time only. pybridge.py's rc check is correct: duckdb_destroy_result is called unconditionally before the `rc != DuckDBSuccess` test (destroy-on-any-path is the documented protocol), and the test treats any non-zero as error rather than equality to DuckDBError, so additional non-zero states are not missed. No @cfunc boundary exists in these three files (the @cfunc UDF/UDAF callbacks live in test code, out of scope here). The two findings are robustness/diagnostic gaps at the Python and cross-version edges, not runtime contract violations."
+}

@@ -1,0 +1,6 @@
+{
+  "findingId": "DCK-wrap-COR-3",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Both deviations verified in /home/erik/projects/numbduck/numbduck/ducklib.py. Line 727 (duckdb_create_varint docstring) and line 1052 (duckdb_get_varint docstring) both use 'https://duckdb.org/docs/1.3/clients/c/api#duckdb_*' — version-pinned to 1.3 and missing the .html segment. A grep of the entire file for duckdb.org/docs links that don't match the canonical 'stable/clients/c/api.html#' form returns exactly these two lines and nothing else, confirming they are the only deviations. CLAUDE.md 'Adding a New Binding' step 5 explicitly mandates 'https://duckdb.org/docs/stable/clients/c/api.html#func_name'. No runtime effect; documentation inconsistency only. Severity low is correct."
+}

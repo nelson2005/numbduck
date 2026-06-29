@@ -1,0 +1,6 @@
+{
+  "findingId": "DCK-sig-DES-3",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Grep over ducklib.py returns exactly two hits for 'sys': the import on line 6 and the assignment on line 13. The name '_is_win' appears only on line 13 and nowhere else in the 1432-line file. No other numbduck source file references '_is_win' or 'sys.platform'. All platform-conditional ABI logic lives in numbox: 'sys.platform == \"win32\"' at numbox/core/bindings/abi.py:27 drives '_is_windows_register_passable', which is then called from numbox/core/bindings/call.py:108,154. ducklib.py delegates ABI decisions entirely to '_call_lib_func' and '_call_lib_func_byval' imported from numbox, so the local '_is_win' constant and 'import sys' serve no purpose. The defect is real, precisely located, and correctly characterised. Severity 'low' is appropriate: no runtime impact, but the dead import and constant mislead readers into thinking ducklib does its own platform branching."
+}

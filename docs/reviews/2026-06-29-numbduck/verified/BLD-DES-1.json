@@ -1,0 +1,6 @@
+{
+  "findingId": "BLD-DES-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "high",
+  "reasoning": "All four CI workflows (numbduck_ci.yml, haversine_bench.yml, doc-codeblock-flake8.yml, link-check.yml) use only Linux and Windows runners — no macOS runner exists anywhere. The matrix at numbduck_ci.yml:22 is exactly [\"ubuntu-latest\", \"ubuntu-24.04-arm\", \"windows-latest\"]. utils.py contains three macOS-specific code paths that receive zero CI exercise: _find_standalone_libduckdb (lines 33-47, searches env var + version-keyed cache + hardcoded .dylib paths), _download_libduckdb (lines 50-91, interactive consent gate with NUMBDUCK_LIBDUCKDB_DOWNLOAD=1 bypass + GitHub release download + cache write), and the macOS branch of load_duckdb (lines 113-130, three-step chain: wheel lib → standalone fallback → download fallback). CLAUDE.md explicitly calls macOS the hard case ('macOS C API stripping is intentional') and documents the upstream duckdb-python issue (PR #81) as the reason for all this complexity. The cited line numbers are accurate. Severity high is correct: the platform requiring the most bespoke acquisition logic has no automated coverage of that logic, so regressions ship silently."
+}

@@ -1,0 +1,6 @@
+{
+  "findingId": "TMD-DOC-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "medium",
+  "reasoning": "Verified against test_ducklib.py and test_ducklib.md directly. The doc at test/test_ducklib.md:51 and :192 both cite test_ducklib.py#L3280-3304 as the Welford registration block. Reading L3277-3304 of test_ducklib.py shows: L3277-3279 is _welford_state_size_cb (@cfunc), L3282-3292 is _welford_init_impl (@njit) + _welford_init_cb (@cfunc), and L3295-3304 is the start of _welford_update_impl (@njit). No registration calls (duckdb_create_aggregate_function, set_name, add_parameter, set_functions, set_destructor, register_aggregate_function) appear in this range. A grep for all registration calls confirms the first Welford registration block begins at L3477 (duckdb_create_aggregate_function) and runs through L3501 (duckdb_register_aggregate_function), matching exactly the reviewer's claim of L3477-3500. The recommendation to change both cites to approximately test_ducklib.py#L3477-3500 is correct. Severity medium is appropriate: this is a doc-only error but it actively misdirects readers trying to locate the registration code — the primary purpose of the source citation."
+}

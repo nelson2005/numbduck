@@ -1,0 +1,6 @@
+{
+  "findingId": "PBR-COR-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "The finding is correct. When the +32 offset is wrong, conn_ptr (pybridge.py:62) holds a garbage address. duckdb_query (pybridge.py:67) must dereference that address to access the Connection object. An invalid/unmapped address delivers SIGSEGV — the process dies; duckdb_query never returns, so the rc check at line 69 never executes. The guard can only fire if duckdb_query returns cleanly with a nonzero rc, which requires conn_ptr to point to a valid Connection that then fails SELECT 1 — essentially impossible in practice. The rc check and destroy-before-check ordering are themselves correct (DuckDBSuccess==0 at ducklib.py:18; unconditional duckdb_destroy_result at pybridge.py:68 matches the C API protocol). The defect is purely in the docstring: lines 28-29 say the pointer is 'validated' by the query, and lines 49-50 document RuntimeError 'if the extracted pointer fails the validation query', both overstating what the guard can detect. Severity low is appropriate — the code logic is not wrong, only the documented guarantee is."
+}

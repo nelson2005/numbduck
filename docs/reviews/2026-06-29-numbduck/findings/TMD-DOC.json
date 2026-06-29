@@ -1,0 +1,68 @@
+{
+  "unit": "TMD-DOC",
+  "target": "test/test_ducklib.md",
+  "dimension": "DOC",
+  "findings": [
+    {
+      "id": "TMD-DOC-1",
+      "severity": "medium",
+      "title": "Welford callback/@cfunc source cites (L3075-3176) point at the array-state variant, not the Welford code the doc describes",
+      "file": "test/test_ducklib.md",
+      "line": 51,
+      "category": "stale-line-reference",
+      "description": "The 'DuckDB aggregate lifecycle' section (Source line 51) and the '@cfunc + @njit callback pattern' section (Source line 75) both cite `test_ducklib.py#L3075-L3176` as where the callbacks are defined. The text describes the Welford UDAF (WelfordState, welford_update, welford_combine, welford_finalize). But the actual Welford callbacks are at test_ducklib.py L3273-L3375 (_welford_state_size_impl L3273, _welford_init_impl L3283, _welford_update_impl L3298, _welford_combine_impl L3319, _welford_finalize_impl L3341, _welford_destroy_impl L3362). The cited range L3075-L3176 is the entirely separate array-state variant region (test_array_meminfo_bridge_refcount_ladder L3042, _arr_state_size_impl L3107, _arr_init/_arr_update/_arr_combine). A reader following the cite lands on different code.",
+      "impact": "Anyone using the doc as a map into the implementation is sent to the wrong functions, undermining the doc's primary purpose of explaining the Welford bridge.",
+      "recommendation": "Update both cites (lines 51 and 75) to the Welford callback range, approximately test_ducklib.py#L3273-L3375.",
+      "confidence": "high"
+    },
+    {
+      "id": "TMD-DOC-2",
+      "severity": "medium",
+      "title": "Registration source cite (L3280-3304) points at the init callback, not the Welford registration code",
+      "file": "test/test_ducklib.md",
+      "line": 192,
+      "category": "stale-line-reference",
+      "description": "Line 51 ('registered at L3280-3304') and line 192 ('Source: L3280-3304') both cite test_ducklib.py#L3280-L3304 for the registration code block (duckdb_create_aggregate_function / set_name / add_parameter / set_functions / set_destructor). The actual Welford registration is at test_ducklib.py L3477-L3500 (duckdb_create_aggregate_function L3477, set_functions L3490, set_destructor L3498). The cited L3280-L3304 is instead the _welford_state_size_cb / _welford_init_impl / _welford_init_cb / start of _welford_update_impl region — no registration calls occur there.",
+      "impact": "The registration source link is wrong, again misdirecting readers to unrelated code.",
+      "recommendation": "Change both registration cites (lines 51 and 192) to approximately test_ducklib.py#L3477-L3500.",
+      "confidence": "high"
+    },
+    {
+      "id": "TMD-DOC-3",
+      "severity": "medium",
+      "title": "Link to test_structref_meminfo_bridge_refcount_ladder uses wrong line (#L3179)",
+      "file": "test/test_ducklib.md",
+      "line": 199,
+      "category": "broken-line-reference",
+      "description": "Line 199 links `test_structref_meminfo_bridge_refcount_ladder` to `test_ducklib.py#L3179`. The function `def test_structref_meminfo_bridge_refcount_ladder()` is actually at test_ducklib.py L2999. Line 3179 falls inside the array variant's combine impl (`tgt[_ARR_IDX_SUM] += src[_ARR_IDX_SUM]`), an unrelated function.",
+      "impact": "The anchor link jumps to the middle of an unrelated function instead of the named test, breaking traceability of the doc's central refcount-verification claim.",
+      "recommendation": "Change the anchor to test_ducklib.py#L2999.",
+      "confidence": "high"
+    },
+    {
+      "id": "TMD-DOC-4",
+      "severity": "low",
+      "title": "Commented-out refcount_of_meminfo cite (L2877-2914) is offset from the actual block",
+      "file": "test/test_ducklib.md",
+      "line": 197,
+      "category": "stale-line-reference",
+      "description": "Line 197 cites the commented-out intrinsic at `test_ducklib.py#L2877-L2914`. The commented cautionary block actually runs from the WARNING comment at L2882 through the commented `refcount_of_meminfo` wrapper ending at L2919. L2877 falls on the live `release_meminfo` njit wrapper (def at L2878), not the commented intrinsic, and the cited end (L2914) truncates before the commented `refcount_of_meminfo` wrapper (L2917-2919).",
+      "impact": "Minor; the range brackets the wrong start (live code) and cuts off the end of the example.",
+      "recommendation": "Adjust the cite to approximately test_ducklib.py#L2882-L2919.",
+      "confidence": "medium"
+    },
+    {
+      "id": "TMD-DOC-5",
+      "severity": "medium",
+      "title": "Stability claim asserts removerefctpass is a durable structural invariant, but the pass is removed in numba main",
+      "file": "test/test_ducklib.md",
+      "line": 161,
+      "category": "stale-mechanism",
+      "description": "The 'Stability across numba versions' subsection (lines 161-163) asserts that removerefctpass 'has used the same _accepted_nrtfns set and _legalize logic since numba 0.43 (2019)' and that 'the symmetric stripping is a structural property of the pass, not an implementation accident.' The doc only contemplates one future failure mode (the pass becoming asymmetric, line 163) and never anticipates the pass being deleted. removerefctpass has in fact been removed in numba main, which directly contradicts the doc's durability framing. The whole bridge correctness narrative (lines 103-163) is anchored on this pass existing and behaving all-or-nothing. (Confirmed present in the pinned 0.65.1: numbox venv has numba.core.removerefctpass with _accepted_nrtfns and _legalize, so the doc matches the current pinned version but overstates forward durability.)",
+      "impact": "Readers/maintainers are told the mechanism is structurally durable across numba versions; in reality the design is coupled to a pass that upstream has dropped, so the doc gives false confidence about portability to newer numba.",
+      "recommendation": "Soften lines 161-163 to state the design depends on removerefctpass existing and being all-or-nothing, note this is true only through the pinned numba (0.65.x) and that the pass is removed on numba main, so the structref-via-raw-pointer pattern needs re-validation (or an alternative incref/decref strategy) before upgrading numba.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Verified against test_ducklib.py (3616 lines) and numbox/numbox/utils/meminfo.py. Bridge intrinsic names (export_meminfo, borrow_structref, release_meminfo, _deref_structref_raw_ptr, _incref_meminfo) and the @cfunc void(intp,intp)+@njit init pattern, state_size=8, and the release_meminfo-uses-NRT_MemInfo_release rationale all match the code accurately. The five findings are: four stale/wrong line references (callbacks, registration, test anchor, commented intrinsic) and one forward-durability overstatement about removerefctpass (removed in numba main; still present in the pinned numba 0.65.1, confirmed via numbox venv). Could not verify the external duckdb.h v1.3.2 L3430 and numba 0.61.2 nrt.cpp L220 anchors offline; not flagged. Mixed numba version pins in links (0.61.2 vs release0.65) noted but not flagged as defects."
+}

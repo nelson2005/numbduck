@@ -1,0 +1,32 @@
+{
+  "unit": "EX-irr-COR",
+  "target": "examples/irr.py",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "EX-irr-COR-1",
+      "severity": "medium",
+      "title": "Scale-dependent absolute NPV tolerance makes irr_bisect return NaN for a fully-converged root at large cashflow magnitudes",
+      "file": "examples/irr.py",
+      "line": "82-94",
+      "category": "numeric/math logic",
+      "description": "irr_bisect terminates successfully only on the absolute test `abs(npv) < 1e-9` (line 88); if that is never satisfied within the fixed 100 iterations it returns `math.nan` (line 94) instead of the converged bracket midpoint. The convergence criterion is on the magnitude of NPV, which has units of money and scales with the cashflow/investment magnitudes, while the bracket [-0.99, 10.0] is only ~10.99 wide so after ~52 iterations r_mid has converged to float resolution and stops changing. Near the root NPV(r_mid) is bounded below by |dNPV/dr| * (machine spacing of r). For the tiny test magnitudes (investment 1e4) this floor is ~1e-11..1e-9, so the 1e-9 gate is met. But |dNPV/dr| grows linearly with the cashflow magnitudes: e.g. scaling the same test 3 (single 13000 cashflow at period 12, root r~0.0221) up by ~100x gives |dNPV/dr| ~1.2e7 and a float-spacing-limited NPV floor of ~2.6e-9 > 1e-9, which the gate can NEVER satisfy. The loop then exhausts 100 iterations on an already-converged r_mid and returns NaN even though the exact root was found. The docstring (lines 14-16) reserves NaN for the all-NULL/empty-group case, so a NaN from a non-converged-but-actually-found root is silently wrong. IRR's normal domain is financial cashflows (often >>1e4), so this is reachable in realistic use even though the bundled tests (lines 285-365) all use small magnitudes that mask it.",
+      "impact": "An IRR over realistically large monetary amounts returns NaN despite the root being bracketed and converged. A user copying this reference UDAF for million-scale cashflows gets a silently wrong (NaN) aggregate result with no error, indistinguishable from the documented empty-group NaN.",
+      "recommendation": "Converge on the bracket width in r (e.g. `if r_hi - r_lo < 1e-12: return r_mid`) rather than an absolute NPV magnitude, and after the loop return the best estimate `(r_lo + r_hi) / 2.0` instead of `math.nan`. If an absolute NPV gate is kept, make it relative to the investment/cashflow scale (e.g. `abs(npv) < 1e-9 * max(1.0, abs(investment) + abs(target_npv))`).",
+      "confidence": "high"
+    },
+    {
+      "id": "EX-irr-COR-2",
+      "severity": "low",
+      "title": "Fixed bracket [-0.99, 10.0] silently yields NaN for IRR outside the range with no diagnostic",
+      "file": "examples/irr.py",
+      "line": "80-81",
+      "category": "numeric/math logic",
+      "description": "irr_bisect hardcodes r_lo = -0.99 and r_hi = 10.0 and assumes a sign change of NPV inside that interval. A monthly IRR above 10.0 (1000%/month) or a deeply unprofitable project whose NPV never crosses zero in (-0.99, 10.0) produces no sign change; the bisection then never satisfies the convergence test and returns math.nan (line 94). This NaN is indistinguishable from the documented empty-group NaN (lines 14-16), so an out-of-range-but-valid IRR is reported the same as 'no data'. Not exercised by the bundled tests, all of which fall well inside the bracket.",
+      "impact": "Valid inputs whose IRR lies outside the assumed bracket are reported as NaN with no signal that the cause is bracket range rather than missing data; a user cannot distinguish the two.",
+      "recommendation": "Document the [-0.99, 10.0] monthly-rate assumption at the function, and/or detect the no-sign-change case (NPV(r_lo) and NPV(r_hi) share a sign) and surface it distinctly from the empty-group NaN.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Verified all @cfunc callback signatures against the DuckDB aggregate C ABI and the ducklib.py bindings: state_size uint64(intp), init void(intp,intp) (single state, not array), update void(intp,intp,intp), combine void(intp,intp,intp,uint64) with idx_t->uint64 count, finalize void(intp,intp,intp,uint64,uint64) (count,offset), destroy void(intp,uint64). All correct, including the per-callback arity difference (init gets one state; update/combine/finalize/destroy get arrays of state pointers sized by chunk/count). state_size==8 matches sizeof(intp) slot. Binding return/arg types match ducklib.py (duckdb_validity_row_is_valid int8(intp,intp), duckdb_vector_get_validity uint64(intp) with NULL-mask==all-valid checked via `!= 0`, duckdb_vector_get_data/get_size/get_vector all intp). NPV math is correct: cashflows[i]/(1+r)^periods[i] uses the pushed period VALUES (not the index), so the sparse single-cashflow-at-period-12 case is handled correctly (test 3). Bisection bracket direction is correct: NPV is monotonically decreasing in r, so npv>0 -> r_lo=r_mid is right. finalize carray sizing (offset+count) and write at offset+i are within bounds and match DuckDB's offset contract. Per-group-constant capture (investment/target_npv from first non-NULL row in update / first partial in combine) is a documented input contract, not a defect. The borrow/export/release refcount balance is a memory/leak concern (guarded by main()'s NRT stats check) outside the correctness-of-result dimension and was not flagged here. The two findings are both in the bisection solver's numeric logic; the bindings and lifecycle wiring are sound."
+}

@@ -1,0 +1,6 @@
+{
+  "findingId": "EX-common-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "All three technical claims hold. (1) widths is sized to len(headers) at line 49; the width-accumulation loop at lines 50-52 indexes widths[i] directly by row cell position, so a row with more cells than headers raises IndexError when i >= len(headers). (2) fmt_row at lines 53-56 uses zip(cells, alignments, widths), which stops at the shortest iterable, silently dropping trailing columns for any row with fewer cells than headers. (3) No per-row length guard exists anywhere in the function. The self-test at lines 81-91 uses perfectly matched 3-header/3-cell rows and does not exercise either failure mode. Current callers (fraud_score.py, haversine.py, online_scoring.py) happen to pass correctly-sized rows, but the function itself has no contract enforcement. Severity 'low' is correct: format_table is example glue code with no impact on library correctness."
+}

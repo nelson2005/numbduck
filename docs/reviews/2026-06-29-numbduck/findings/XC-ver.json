@@ -1,0 +1,56 @@
+{
+  "unit": "XC-ver",
+  "target": "cross-version/platform portability",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "XC-ver-1",
+      "severity": "high",
+      "title": "extract_connection_ptr hardcodes pybind11/C++ ABI offsets validated only on duckdb 1.3.2 / Linux / libstdc++, yet the project supports 1.3.2-1.5.x and macOS/Windows",
+      "file": "/home/erik/projects/numbduck/numbduck/pybridge.py",
+      "line": 59,
+      "category": "abi-version-portability",
+      "description": "extract_connection_ptr() recovers the raw C-API Connection* by walking fixed byte offsets into pybind11 / DuckDBPyConnection memory: ctypes.c_void_p.from_address(id(conn) + 16) (line 59, the pybind11 instance header / holder pointer) and ctypes.c_void_p.from_address(cpp_obj_p + 32) (line 62, the unique_ptr<Connection> field inside DuckDBPyConnection). The docstring (lines 31-34) explicitly states these were 'Validated on duckdb 1.3.2 / Linux x86-64 / libstdc++' and 'may change with major duckdb releases.' The supported range is duckdb>=1.3.2,<1.6 (CLAUDE.md) and the macOS fallback path exists, so 1.4.x/1.5.x and non-Linux platforms are in scope. Two concrete portability breaks: (1) the 1.4 packaging reorg (lib moved from duckdb/ to _duckdb in site-packages, per utils.py:97-106) is exactly the kind of major internal change that can shift the C++ field offset, making cpp_obj_p+32 point at the wrong sub-object; (2) on Windows/MSVC the pybind11 instance header size and the sizes/layout of std::shared_ptr / std::weak_ptr / std::unique_ptr differ from the libstdc++ layout assumed in the comment (lines 24-27: weak_ptr 16B + shared_ptr 16B + unique_ptr), so both +16 and +32 are wrong there. There is no version or platform guard around the offsets. The 'SELECT 1' validation (lines 64-72) only weakly protects: a grossly-wrong pointer is more likely to dereference garbage and crash inside duckdb_query than to cleanly return DuckDBError, and a pointer that happens to land on plausible memory can pass SELECT 1 while still being subtly wrong.",
+      "impact": "On any version/platform combination other than the single validated one (duckdb 1.3.2, Linux x86-64, libstdc++), the bridge can extract an invalid Connection* and feed it to the C API, causing memory corruption or a crash. This affects the hybrid JIT-on-Python-connection feature (test/test_ducklib.py hybrid tests) on macOS, Windows, and on duckdb 1.4/1.5 even on Linux.",
+      "recommendation": "Gate the offset extraction on (duckdb.__version__, platform, C++ runtime) and refuse / raise a clear error for un-validated combinations instead of returning a possibly-wrong pointer; at minimum pin the offsets per known-good (version, platform) and re-validate for 1.4.x and 1.5.x and macOS. Strengthen validation beyond SELECT 1 (e.g. sanity-check pointer alignment/range before the first dereference). Document the libstdc++/Linux-only assumption as an enforced precondition, not a comment.",
+      "confidence": "medium"
+    },
+    {
+      "id": "XC-ver-2",
+      "severity": "medium",
+      "title": "Standalone/Homebrew/env libduckdb is loaded without verifying its version matches duckdb.__version__",
+      "file": "/home/erik/projects/numbduck/numbduck/utils.py",
+      "line": 44,
+      "category": "version-mismatch",
+      "description": "On the macOS fallback path, _find_standalone_libduckdb() returns either the NUMBDUCK_LIBDUCKDB env path (lines 34-36) or a Homebrew dylib at /opt/homebrew/lib/libduckdb.dylib or /usr/local/lib/libduckdb.dylib (lines 23-26, 44-46). Neither source is version-checked against the installed Python wheel's duckdb.__version__. The only acceptance test applied to the loaded handle is _has_capi_symbols (lines 29-30), which probes a single symbol, duckdb_open -- it does not check the library's version. ducklib.py bakes in version-specific assumptions that must match the loaded runtime: the duckdb_result struct shape (duckdb_result_ty = UniTuple(intp, 6) = 48 bytes), the duckdb_type enum values (e.g. DUCKDB_TYPE_TIME_NS = 39, DUCKDB_TYPE_BIGNUM = 35), and the by-value struct layouts. Homebrew installs whatever libduckdb version brew last fetched, which can differ from the pip-installed wheel (e.g. brew 1.5.x vs pip 1.3.2). The versioned cache dir (line 19-21) and the download URL (lines 51-56) are keyed by duckdb.__version__, but the Homebrew and env-override sources bypass that keying entirely. There is also no duckdb_library_version binding available to perform a runtime check.",
+      "impact": "A version skew between the loaded native libduckdb and the Python wheel silently loads a mismatched runtime; any struct-layout, enum, or function-behavior difference between the two versions yields wrong results or memory corruption on macOS, with no diagnostic.",
+      "recommendation": "After loading a standalone/Homebrew/env library, query its version (bind duckdb_library_version() and parse it) and compare against duckdb.__version__; warn or raise on mismatch. At minimum, document and log which native library and version were actually loaded.",
+      "confidence": "medium"
+    },
+    {
+      "id": "XC-ver-3",
+      "severity": "high",
+      "title": "macOS symbol-stripping fallback loads two DuckDB runtimes; pybridge then mixes handles across them",
+      "file": "/home/erik/projects/numbduck/numbduck/utils.py",
+      "line": 113,
+      "category": "dual-runtime",
+      "description": "load_duckdb() always loads the wheel library first (line 115, load_lib_path(lib_path) with RTLD_GLOBAL) before probing for C-API symbols. On macOS with duckdb-python >= 1.4.1 the wheel deliberately strips the C API (CLAUDE.md 'macOS C API stripping is intentional'), so _has_capi_symbols fails and a SECOND, full libduckdb is loaded RTLD_GLOBAL (line 121 for the standalone/cache path, or line 130 for the download path). Both copies of the DuckDB runtime now coexist in one process with global symbol visibility. The Python 'duckdb' module's connections live in the wheel runtime, while numbduck's @cres/_call_lib_func bindings resolve duckdb_* symbols to whichever copy the loader bound first. pybridge.extract_connection_ptr() pulls a Connection* out of a wheel-runtime Python connection object and passes it directly into C-API calls (duckdb_query at pybridge.py:67) that may resolve to the *other* runtime instance. Two independently loaded DuckDB instances do not share allocator/global state, and handles/allocations created by one are not contractually interchangeable with the other -- even when both are the same version.",
+      "impact": "On exactly the platform/version combo the fallback is designed for (macOS, duckdb 1.4.1+), using the Python-connection bridge can pass a Connection* across runtime boundaries, which is undefined behavior and can corrupt state or crash.",
+      "recommendation": "Avoid loading two runtimes: if the wheel lacks C-API symbols, ensure the Python 'duckdb' module and numbduck both bind to the single standalone library (e.g. force the standalone load before importing/using duckdb, or refuse the pybridge path when a second runtime was loaded). At minimum, make pybridge detect the dual-runtime condition and refuse rather than silently mix handles.",
+      "confidence": "low"
+    },
+    {
+      "id": "XC-ver-4",
+      "severity": "low",
+      "title": "macOS download URL assumes duckdb.__version__ maps 1:1 to a GitHub release tag with a libduckdb-osx-universal.zip asset",
+      "file": "/home/erik/projects/numbduck/numbduck/utils.py",
+      "line": 51,
+      "category": "version-coupling",
+      "description": "_download_libduckdb() builds the release URL as .../duckdb/duckdb/releases/download/v{version}/libduckdb-osx-universal.zip from duckdb.__version__ (lines 51-56) and extracts a flat member named exactly 'libduckdb.dylib' (line 88). Since the 1.3+ duckdb-python packaging split, the Python wheel can carry a version string that does not correspond 1:1 to a core duckdb GitHub release tag (post/dev/local suffixes, or independent python-package versioning), in which case v{version} 404s. The asset name and archive member layout are also assumed stable across the entire 1.3.2-1.5.x range with no fallback.",
+      "impact": "On macOS, for any wheel whose version string does not match a v{version} core release (or a release lacking that asset name), the download path raises HTTPError/KeyError with no recovery, blocking those users. Fails loudly rather than corrupting, but breaks the documented macOS auto-provisioning across version skews.",
+      "recommendation": "Decouple the native-library version from duckdb.__version__ defensively: handle 404/asset-name changes with a clear actionable error, allow an explicit version/URL override, and verify the extracted member name rather than assuming a flat 'libduckdb.dylib'.",
+      "confidence": "low"
+    }
+  ],
+  "notes": "Scope: ducklib.py, utils.py, pybridge.py plus numbox call.py/abi.py ABI lowering and the loader.md/bindings.md/tests.md understanding notes. Items considered and deliberately NOT raised: (1) VARINT/BIGNUM enum aliasing (DUCKDB_TYPE_VARINT = DUCKDB_TYPE_BIGNUM = 35) and all other DUCKDB_TYPE_* constants match the explicit (non-sequential, e.g. UHUGEINT=32) values in duckdb.h; could not disprove BIGNUM==35 or TIME_NS==39 for 1.5.x without the header, so no finding. There are NO duckdb_create_bignum/duckdb_get_bignum function bindings -- only the enum alias -- so IF duckdb 1.5 renamed the C functions varint->bignum, duckdb_create_varint/duckdb_get_varint would silently degrade to NotImplementedError stubs via cres_if_available (ducklib.py:725,1050); I could not confirm such a rename, so this is flagged here rather than raised. (2) Version-gated symbols duckdb_create_varint/duckdb_get_varint/duckdb_scalar_function_set_init use cres_if_available correctly (graceful stub when absent). (3) struct sizes: duckdb_result_ty=48B, hugeint/uhugeint/interval/decimal/blob/bit/varint layouts match stable C structs across 1.3-1.5. (4) _call_lib_func_byval is used for the three by-value duckdb_result functions (duckdb_fetch_chunk/result_return_type/result_statement_type); on SysV x86-64 a 48-byte by-value arg is MEMORY-class (stack-passed) whereas the bare-pointer lowering passes a register pointer -- a documented 'not audited' risk in bindings.md -- but the Linux x86-64 test suite exercises these and passes (tests.md sect.2), and the lowering is the correct Windows-x64 convention (pointer-to-copy), so I did not raise it. (5) intp models all pointers (64-bit assumption) and uint64 models idx_t -- correct on all supported 64-bit SysV/AAPCS64/Win64 targets. Minor: _is_win = sys.platform=='win32' (ducklib.py:13) is dead code (never referenced), a vestige of intended-but-absent Windows-specific handling; numbox call.py/abi.py is where the actual Win64 struct-passing ABI is handled, and it does so correctly (16-byte by-value -> pointer-to-copy, 16-byte return -> sret)."
+}

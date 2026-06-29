@@ -1,0 +1,21 @@
+{
+  "unit": "PBR-MEM",
+  "target": "pybridge.py",
+  "dimension": "MEM",
+  "findings": [
+    {
+      "id": "PBR-MEM-1",
+      "severity": "low",
+      "title": "extract_connection_ptr returns a borrowed Connection* with no lifetime coupling to conn",
+      "file": "/home/erik/projects/numbduck/numbduck/pybridge.py",
+      "line": 74,
+      "category": "lifetime / use-after-free (borrowed handle)",
+      "description": "Line 62 reads the raw Connection* out of conn's unique_ptr<Connection> (offset +32 inside DuckDBPyConnection) and line 74 returns it as a plain Python int. That pointer is OWNED by the C++ DuckDBPyConnection object that lives inside the Python `conn`; it is borrowed, not owned. When `conn` is garbage-collected (or .close()d, which resets the unique_ptr), pybind11 runs ~DuckDBPyConnection and the unique_ptr frees the underlying Connection. The returned int carries no reference to `conn`, and the docstring's Returns section (lines 41-43) only says 'int' with no statement that the caller must keep `conn` alive for the pointer's usable life. Inside extract_connection_ptr the reads and the SELECT 1 validation are themselves safe (conn is a live parameter and CPython never moves objects), so the defect is purely the escaping borrowed handle, not the in-function reads.",
+      "impact": "Latent use-after-free: a caller that lets the duckdb connection fall out of scope (or closes it) while still passing the extracted conn_ptr into @njit ducklib calls will execute the C API against freed memory -- segfault or silent heap corruption -- with no diagnostic. This is exactly the 'use-after-free of duckdb handles' failure mode for the borrow returned here.",
+      "recommendation": "Document the borrow contract explicitly in the Returns section: 'the returned pointer is borrowed from `conn`; the caller MUST keep `conn` alive (and not close it) for as long as the pointer is used.' Stronger: have callers retain the `conn` object alongside the pointer (e.g. return/store both, or stash conn on the object that owns conn_ptr) so the lifetime coupling is enforced by a real reference rather than relying on prose.",
+      "confidence": "medium",
+      "impact_area": "memory safety"
+    }
+  ],
+  "notes": "Focus-question verdicts. (1) conn lifetime/GC during the reads (lines 58-62): SAFE -- conn is a live parameter so it cannot be collected mid-function, and CPython does not relocate objects, so id(conn) and the two ctypes.from_address reads are valid even if a GC fires between them. (2) Validation query leak/double-free (lines 65-72): SOUND -- result is a Python-GC-managed numpy buffer (create_duckdb_result -> numpy.zeros(6,int64) = 48 bytes, the correct duckdb_result struct size); duckdb_destroy_result is invoked exactly once, unconditionally, before the rc check, matching duckdb.h's contract that the result struct is initialized even on DuckDBError and must always be destroyed. No leak (numpy container freed once by GC at return, duckdb-internal heap freed once by destroy) and no double-free. (3) numpy result buffer alive across the C call (line 67): SAFE -- result stays a live local (reused on line 68), so the backing buffer cannot be freed before/during duckdb_query; query_p from get_unicode_data_p(\"SELECT 1\") aliases the str literal's bytes which are pinned in co_consts and NUL-terminated, so it stays valid. No NRT refcount leak across the raise on line 70: the only raising path runs after all @njit dispatchers have returned, and the live objects (numpy array, ints) are Python-GC-managed, not NRT-tracked. The only real MEM defect is the escaping borrowed Connection* (PBR-MEM-1). The hardcoded +16/+32 ctypes offsets are an ABI-fragility/correctness concern tracked elsewhere (bridge.md RISK-6), not a leak/double-free, so not raised here."
+}

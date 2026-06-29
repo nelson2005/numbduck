@@ -1,0 +1,6 @@
+{
+  "findingId": "TMD-DOC-4",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Verified against test_ducklib.py. test_ducklib.md:197 cites test_ducklib.py#L2877-L2914 for 'the commented-out intrinsic'. Both boundary errors are real: (1) L2877 is '@njit' and L2878 is 'def release_meminfo(p):' — live code, not the commented intrinsic; the cautionary WARNING block begins at L2882. (2) L2914 is the last line of the commented _refcount_of_meminfo @intrinsic body ('return sig, codegen'), but L2917-2919 hold the commented '@njit / def refcount_of_meminfo(p): / return _refcount_of_meminfo(p)' wrapper which the cite omits. The recommended correction to L2882-L2919 is accurate: L2882 is the first line of the WARNING comment and L2919 is the last line of the commented refcount_of_meminfo wrapper. Severity low is appropriate — the referenced block is nearby and a reader still reaches the commented code, but the start clips in on live release_meminfo code and the end truncates the wrapper."
+}

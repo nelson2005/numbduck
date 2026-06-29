@@ -1,0 +1,6 @@
+{
+  "findingId": "TMD-DOC-3",
+  "verdict": "confirmed",
+  "correctedSeverity": "medium",
+  "reasoning": "test/test_ducklib.md line 199 links test_structref_meminfo_bridge_refcount_ladder to test_ducklib.py#L3179. Verified: def test_structref_meminfo_bridge_refcount_ladder() is at test_ducklib.py:2999. Line 3179 is tgt[_ARR_IDX_COUNT] += src[_ARR_IDX_COUNT], inside the array-state combine impl (_arr_combine_impl region), exactly as the reviewer described. The anchor is wrong by 180 lines. Severity medium is appropriate: the link jumps a reader to an unrelated function, breaking the doc's stated purpose of tracing the refcount-verification approach."
+}

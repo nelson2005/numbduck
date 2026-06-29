@@ -1,0 +1,6 @@
+{
+  "findingId": "TST-cover-7",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "test_create_get_bit (test/test_ducklib.py:1359-1367) creates a BIT value from b\"\\x05\\xA0\" and asserts only result[1] == 2 (size). result[0] is passed directly to duckdb_free without ever reading its contents. Both sibling pointer-payload tests — test_create_get_blob (line 1248) and test_create_get_varint (line 1345) — read (ctypes.c_char * size).from_address(ptr) and assert the bytes equal the input before freeing. The asymmetry is real and unambiguous: a corruption of the BIT data bytes that left the size field intact would pass the test. Severity low is correct: the create/get round-trip and size check do exercise the binding's ABI path; only the payload bytes go unvalidated, and the fix is a one-liner. No evidence that the bit-payload assertion is satisfied elsewhere in the suite."
+}

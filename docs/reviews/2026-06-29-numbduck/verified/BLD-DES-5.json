@@ -1,0 +1,6 @@
+{
+  "findingId": "BLD-DES-5",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "CLAUDE.md:16 reads 'numbox~=0.5.6'; pyproject.toml:13 reads 'numbox~=0.5.11'. The discrepancy is exactly as described. pip/setuptools resolve only from pyproject.toml, so the real floor is 0.5.11 (>=0.5.11,<0.6), five patch releases above what CLAUDE.md documents. Severity 'low' is correct: this is a pure doc-drift defect with no functional impact on builds or installs."
+}

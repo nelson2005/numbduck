@@ -1,0 +1,20 @@
+{
+  "unit": "EX-fraud",
+  "target": "examples/fraud_score.py",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "EX-fraud-1",
+      "severity": "low",
+      "title": "Chunk callback reads inputs and writes output with no validity/NULL handling",
+      "file": "examples/fraud_score.py",
+      "line": "118-144",
+      "category": "vector-input-handling",
+      "description": "The @njit chunk impl carrays each input vector's data pointer (lines 118-124) and the output (124) and unconditionally reads a_amt[i]/a_co[i]/.../a_rx[i] and writes a_out[i] for every i in range(n), never consulting duckdb_vector_get_validity on the inputs nor touching the output validity mask. A DuckDB scalar function receives whatever validity its input vectors carry; a NULL row would be read as uninitialized/garbage bytes at that slot and folded into the score, and a NULL-producing rule could not be expressed. This is safe ONLY because setup_data (lines 176-188) generates dense random() columns with no NULLs, so the defect cannot trigger for this example's own query. It is flagged because the file is the de-facto usage contract for the scalar chunk-callback pattern, and a downstream caller copying it against NULL-able columns would get silently wrong results.",
+      "impact": "None for the shipped benchmark (dense data). Latent silent-wrong-result risk if the pattern is reused on NULL-able inputs.",
+      "recommendation": "Either add a comment at the loop documenting the dense-data precondition, or (matching irr.py's reference handling at irr.py:140-153) fetch duckdb_vector_get_validity for each input and skip/propagate NULLs. No change needed for correctness of this example as written.",
+      "confidence": "low"
+    }
+  ],
+  "notes": "Audited the scalar chunk-callback for correctness and memory. No defects found in the audited focus areas. Verified against numbduck/ducklib.py bindings: (1) Registration uses duckdb_register_scalar_function on a single scalar function, not a function set, so duckdb_scalar_function_set_name(func_p, ...) once (line 155) is correct and sufficient; the CLAUDE.md #7 'set every member's name' caveat does not apply. (2) Handle accounting is balanced and leak-free: dbl_p/tin_p/int_p are three distinct handles each created once (156-158) and each destroyed once via the box-and-destroy loop (166-168); tin_p is reused for 4 add_parameter calls and int_p for a parameter plus return type, all of which deep-copy, so single destroys are correct and there is no double-free; func_p destroyed after register (172-173); the _fraud_chunk_cb cfunc is a module global so its .address cannot dangle. (3) Destroy-before-register ordering is safe: add_parameter (159-164) and set_return_type (165) run before the destroy loop, and set_function/register (169-170) do not need the logical types. (4) Vector input/output handling: carray dtypes match the declared DuckDB physical types exactly (float64 for DOUBLE, int8 for TINYINT x4, int32 for INTEGER and the INTEGER output); pointers bridged intp->void* via _cast_int_to_void_p. (5) Chunk size via duckdb_data_chunk_get_size (104), vectors indexed 0..5 in parameter order matching add_parameter order. (6) cfunc signature void(intp,intp,intp) matches duckdb_scalar_function_t (info, input, output) under numbduck's all-pointers-are-intp convention. (7) Score arithmetic stays small (max 17), no int32 overflow on the int64->int32 store, and the branch ruleset is identical across the py/arrow/jit variants and is cross-checked at runtime via assert_results_match on exact integer sums."
+}

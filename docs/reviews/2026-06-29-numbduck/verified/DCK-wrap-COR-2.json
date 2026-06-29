@@ -1,0 +1,6 @@
+{
+  "findingId": "DCK-wrap-COR-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "The defect is real and correctly characterized. At ducklib.py:236, `signatures[\"duckdb_vector_get_validity\"] = uint64(intp)` types the return as a scalar uint64. The DuckDB C API declares this function as `uint64_t *duckdb_vector_get_validity(duckdb_vector vector)` — a pointer return. The immediately adjacent binding at line 235 (`duckdb_vector_get_data = intp(intp)`, returning `void *`) correctly uses `intp` for its pointer return, making the inconsistency concrete and side-by-side. The project's documented convention (CLAUDE.md: pointer returns use `intp`) is violated. The JIT test at test_ducklib.py:1117-1118 directly confirms the typing friction: inside the `@njit`-decorated `jit_prepare_bind_execute()`, the code must explicitly cast `intp(v3_validity_p)` before passing to `duckdb_validity_row_is_valid(intp, intp)` — a cast that would be unnecessary if the return type were declared correctly as `intp`. Severity low is correct: on 64-bit Linux the 64-bit address value fits identically in both uint64 and intp, so all tests pass and no data is corrupted. The real cost is the typing friction (explicit cast required in JIT code) and the convention divergence from the adjacent binding."
+}

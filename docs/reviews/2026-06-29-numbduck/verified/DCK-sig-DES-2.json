@@ -1,0 +1,6 @@
+{
+  "findingId": "DCK-sig-DES-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "The defect is real and correctly characterized. At ducklib.py:121, duckdb_connect is inserted between two runs of duckdb_create_* entries (lines 109-120 and 122-154). Alphabetically 'connect' (c-o-n...) < 'create' (c-r-e...) because 'o' < 'r', so connect should precede the entire create_* block rather than splitting it. The secondary point is also correct: lines 86-89 show bind_int8 before bind_int16/32/64, which is numeric order; strict lexicographic order would place int8 after int64 (since '8' > '1' at the differentiating digit position). No runtime impact exists — signatures is a plain dict and insertion order is irrelevant to correctness or lookup. Severity low is appropriate: the inconsistency defeats the alphabetical scan convention the rest of the dict follows but carries zero functional consequence."
+}

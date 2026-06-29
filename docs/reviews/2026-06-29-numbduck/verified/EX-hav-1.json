@@ -1,0 +1,6 @@
+{
+  "findingId": "EX-hav-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "The defect is real and correctly characterized. haversine.py:88-113 (_haversine_chunk_impl) calls duckdb_vector_get_data for all four input vectors (lines 94-97) and iterates over every row (lines 105-113) with no call to duckdb_vector_get_validity or duckdb_validity_row_is_valid anywhere in the function. The contrast pattern in irr.py:140-153 confirms the omission: that function calls duckdb_vector_get_validity for each input vector and gates each row with duckdb_validity_row_is_valid before processing. Both functions are bound in ducklib.py (lines 1188-1209). The 'safe by construction' claim is also accurate: setup_data (haversine.py:140-145) generates lat/lon via random()*180-90/random()*360-180 from a range(), which never yields NULL, and the store coordinates are SQL literals — so no NULL ever reaches the UDF and the cross-checks pass. Severity 'low' is appropriate: there is no behavioral defect in the running example, the risk is entirely about pattern propagation — a caller copying this callback for a nullable column would get garbage doubles written as non-NULL output with no error."
+}

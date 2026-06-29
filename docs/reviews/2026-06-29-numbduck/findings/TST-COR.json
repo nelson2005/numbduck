@@ -1,0 +1,32 @@
+{
+  "unit": "TST-COR",
+  "target": "test/test_ducklib.py",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "TST-COR-1",
+      "severity": "low",
+      "title": "welford_combine's merged-mean arithmetic is never asserted (too loose)",
+      "file": "test/test_ducklib.py",
+      "line": 3255,
+      "category": "correctness/coverage",
+      "description": "welford_combine computes a merged mean at line 3255 (`new_mean = tgt.mean + delta * src.count / new_count`) and writes it to tgt.mean (3258). No test ever reads `.mean` after a combine. The numba-only check (test_welford_numba_only, 3376-3409) and the end-to-end UDAF (test_aggregate_function_structref_stddev, 3460-3534) only assert welford_finalize's output, which is `sqrt(m2/(count-1))` (3264-3267) and depends solely on m2 and count. The m2 merge term (3256-3257) uses `delta = src.mean - tgt.mean`, i.e. the pre-combine per-side means, which are correct independent of new_mean; and count is exercised via the ddof divisor. The only `.mean` assertion in the file is on a freshly constructed WelfordState(1.5, ...) in the borrow test (~line 3032), not on a combined state. Consequently a sign or operator-precedence regression in the new_mean line would pass the entire suite silently.",
+      "impact": "A correctness regression in the parallel-merge mean update (Chan et al. pooled mean) would not be caught by any assertion. The current code is correct, but the test does not guard it.",
+      "recommendation": "In test_welford_numba_only._compute_combined, also return and assert the combined state's mean against the expected pooled mean (e.g. compare s.mean to numpy.mean(xs) within tolerance), or add a dedicated assertion reading .mean after welford_combine.",
+      "confidence": "medium"
+    },
+    {
+      "id": "TST-COR-2",
+      "severity": "low",
+      "title": "Inline-string/blob from_address readers assume DuckDB string_t is always inlined",
+      "file": "test/test_ducklib.py",
+      "line": 267,
+      "category": "result-reading/layout",
+      "description": "aux_read_inline_string (267-272) reads `uint32 length` at data_p and then `length` bytes at data_p+4, and the blob reader (779-782) does the same. This matches DuckDB's `duckdb_string_t` ONLY for the inlined representation (length <= 12), whose layout is `{uint32 length; char inlined[12]}`. For length > 12 the layout is `{uint32 length; char prefix[4]; char *ptr}` and the characters live at the pointer stored at offset 8, not inline at offset 4 — so these readers would return the 4-byte prefix plus raw pointer bytes instead of the string. The current assertions pass only because every value tested is <= 12 bytes (\"hello\"=5, truncated \"hello\"=5, 4-byte blob), where DuckDB always inlines. The 12-byte inline cutoff is an implicit, untested invariant of these result-reading helpers.",
+      "impact": "The helpers silently misread any result string/blob longer than 12 bytes; a future test that binds/reads a longer value would get a false pass or garbage comparison rather than a clear failure. Latent, not a currently-wrong assertion.",
+      "recommendation": "Either document the <=12-byte inline-only precondition at the call sites, or make the reader branch on length (>12 -> dereference the char* at offset 8) so result-reading is correct for the general string_t layout.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Focus-area verdict: Welford math is correct. welford_update (3235-3240) and welford_combine (3244-3260) implement the standard online + Chan pairwise formulas; welford_finalize (3264-3267) returns sample stddev sqrt(m2/(count-1)) matching numpy.std(ddof=1) used as the oracle (3398, 3520). The array-backed UDAF's _arr_finalize_impl (3203-3209) computes population variance sum_sq/n - mean^2, correctly matched against numpy.var(xs) (ddof=0) (3602); the two end-to-end tests intentionally assert different statistics (sample stddev vs population variance) and are each internally consistent. Scalar-function-set name setting is correct: test_scalar_function_set_overloads sets duckdb_scalar_function_set_name on each member function (2125-2126, 2138-2139) before adding to the set, consistent with CLAUDE.md key-pattern #7; the aggregate-set test does the same (2444-2445, 2461-2462). Struct/result from_address reads (hugeint lower@0/upper@8, interval months@0/days@4/micros@8, decimal int64) match the duckdb.h struct layouts. IRR math and the sparse cashflow case named in the focus are NOT in this unit -- they live in examples/irr.py and examples/run_irr.py, outside test/test_ducklib.py, so no findings are raised for them here. No wrong or tautological assertions were found; the two findings are 'too loose' / latent-fragility issues of low severity."
+}

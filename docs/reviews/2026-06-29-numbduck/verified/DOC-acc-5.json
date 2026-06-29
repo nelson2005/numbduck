@@ -1,0 +1,6 @@
+{
+  "findingId": "DOC-acc-5",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "The contradiction is unambiguous. CLAUDE.md line 30 (Step 1) ends with 'Verify all docstring links point to the correct line in duckdb.h at implementation time.' CLAUDE.md line 39 (Step 5) states 'Docstring links must use https://duckdb.org/docs/stable/clients/c/api.html#func_name, not links to duckdb.h source.' These are directly contradictory instructions about where docstring links should point. The codebase uniformly resolves the contradiction in favor of Step 5: every wrapper docstring in ducklib.py (lines 277, 283, 289, ..., 1412, 1424, 1430, 1431) uses api.html; the sole duckdb.h reference in ducklib.py is a plain code comment on line 21, not a docstring link. The characterization is accurate: Step 1's trailing clause is the erroneous instruction, Step 5 is the established convention, and the recommendation (reword Step 1 to 'verify the signature against duckdb.h') is correct. Severity 'low' is appropriate: no code is broken, risk is contributor confusion or a misdirected 'fix' that switches docstrings to duckdb.h URLs."
+}

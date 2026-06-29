@@ -1,0 +1,6 @@
+{
+  "findingId": "DCK-sig-DES-4",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Both deviating URLs exist exactly as described. ducklib.py:727 reads '\"\"\" https://duckdb.org/docs/1.3/clients/c/api#duckdb_create_varint \"\"\"' and ducklib.py:1052 reads '\"\"\" https://duckdb.org/docs/1.3/clients/c/api#duckdb_get_varint \"\"\"'. A grep of all duckdb.org/docs URLs in the file confirms these are the only two that deviate from the 'stable/clients/c/api.html#' convention; every other wrapper uses the stable .html form (e.g. duckdb_create_uuid at line 721, duckdb_get_uuid at line 1046). CLAUDE.md step 5 of 'Adding a New Binding' explicitly mandates 'https://duckdb.org/docs/stable/clients/c/api.html#func_name'. Both wrappers use @cres_if_available (version-gated for 1.5-era varint symbols), suggesting they were added at the same time and copy-pasted from an earlier draft or a 1.3-pinned source. No runtime effect; severity low is correct."
+}

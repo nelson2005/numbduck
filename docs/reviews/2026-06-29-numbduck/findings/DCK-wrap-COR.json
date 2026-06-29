@@ -1,0 +1,44 @@
+{
+  "unit": "DCK-wrap-COR",
+  "target": "ducklib @cres wrappers",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "DCK-wrap-COR-1",
+      "severity": "low",
+      "title": "idx_t-typed returns/args inconsistently modeled as intp instead of uint64",
+      "category": "type-signature",
+      "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+      "line": "105, 155, 156, 157, 225",
+      "description": "Several functions whose duckdb.h prototypes return or accept idx_t (uint64_t) are typed with intp (int64) instead of uint64, contradicting both duckdb.h and the project's own documented convention (CLAUDE.md: idx_t -> uint64_t -> uint64). Concretely: duckdb_column_count (sig L105, idx_t return), duckdb_row_count (sig L225, idx_t return), duckdb_data_chunk_get_size (sig L156, idx_t return), duckdb_data_chunk_get_column_count (sig L155, idx_t return), and the col_idx argument of duckdb_data_chunk_get_vector (sig L157, intp(intp, intp)). Sibling idx_t functions are typed correctly as uint64: duckdb_nparams (L216), duckdb_rows_changed (L226), duckdb_struct_type_child_count (L227), duckdb_union_type_member_count (L230), duckdb_array_type_array_size (L77). So the file is internally inconsistent about the same C type.",
+      "impact": "Functionally harmless for realistic in-range values (a chunk holds at most 2048 rows; column/row counts stay well below 2^63, so the 64-bit register holds an identical bit pattern). Diverges only for values >= 2^63, which cannot occur for these counts. The real cost is a typing/convention inconsistency: callers chaining these returns into uint64-typed APIs incur an implicit/explicit cast, and the deviation from the documented rule invites copy-paste drift.",
+      "recommendation": "Type all idx_t returns and arguments as uint64 for consistency with duckdb.h and the rest of the file: change L105/L155/L156/L225 returns to uint64 and the second arg of L157 to uint64.",
+      "confidence": "high"
+    },
+    {
+      "id": "DCK-wrap-COR-2",
+      "severity": "low",
+      "title": "duckdb_vector_get_validity return typed uint64 while it is a uint64_t* pointer",
+      "category": "type-signature",
+      "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+      "line": 236,
+      "description": "signatures[\"duckdb_vector_get_validity\"] = uint64(intp) (L236, wrapper L1206-1209). In duckdb.h the function returns uint64_t* (a pointer to the validity bitmask), not a scalar uint64. Every other pointer-returning binding in the file is modeled as intp per the project's pointer convention -- including the immediately adjacent duckdb_vector_get_data = intp(intp) (L235), which returns void*. Modeling this pointer return as uint64 is inconsistent with that convention.",
+      "impact": "The 64-bit address value is preserved, so behavior is correct, but the caller receives a uint64 where the rest of the codebase expects intp for pointers. To dereference the validity mask (e.g. via carray or numbox's _cast_int_to_void_p, which take intp/voidptr) the caller must first reinterpret the uint64, creating typing friction and an inconsistency with duckdb_vector_get_data right beside it.",
+      "recommendation": "Change the return type to intp to match duckdb_vector_get_data and the project's pointer-as-intp convention.",
+      "confidence": "high"
+    },
+    {
+      "id": "DCK-wrap-COR-3",
+      "severity": "low",
+      "title": "Two varint wrappers use non-canonical version-pinned docstring links",
+      "category": "documentation",
+      "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+      "line": "727, 1052",
+      "description": "duckdb_create_varint (docstring L727) and duckdb_get_varint (docstring L1052) link to https://duckdb.org/docs/1.3/clients/c/api#duckdb_* -- version-pinned to 1.3 and missing the .html segment. Every other wrapper, and the CLAUDE.md 'Adding a New Binding' rule, uses the canonical form https://duckdb.org/docs/stable/clients/c/api.html#func_name. These are the only two deviations.",
+      "impact": "Documentation inconsistency only; no runtime effect. The non-standard base/version makes the links easy to miss in a bulk link-audit and may rot independently of the stable docs.",
+      "recommendation": "Normalize both to https://duckdb.org/docs/stable/clients/c/api.html#duckdb_create_varint and #duckdb_get_varint, matching the rest of the file (or, if the version pin is deliberate because VARINT/BIGNUM naming shifted across versions, add a one-line comment stating why).",
+      "confidence": "high"
+    }
+  ],
+  "notes": "Audited all ~200 @cres wrapper bodies (L275-1431) against duckdb.h semantics. Arg-tuple arity/order matches each signature in every wrapper checked; zero-arg wrappers correctly pass () (e.g. duckdb_create_null_value, duckdb_create_scalar_function). _call_lib_func vs _call_lib_func_byval selection is correct and notably precise: functions taking duckdb_result* by pointer (duckdb_destroy_result L774 uses _p not _pp since duckdb_result is a struct; duckdb_column_count, duckdb_row_count, duckdb_result_error, duckdb_result_error_type) pass the pointer as an intp scalar via _call_lib_func, while the three functions that take duckdb_result BY VALUE in duckdb.h (duckdb_fetch_chunk L942, duckdb_result_return_type L1128, duckdb_result_statement_type L1134) use _call_lib_func_byval -- this by-value/by-pointer split matches the C header per-function and is exercised by the (passing) test suite, so it is intentional and correct, not flagged. Struct-by-value type aliases verified against C layouts: hugeint/uhugeint {i64,i64} canonical, interval {i32,i32,i64} (non-canonical, handled by numbox eightbyte repack), decimal 24B and varint 24B (STRUCT_LARGE -> byval/sret), blob/bit {ptr,size} 16B canonical. Destroy-function _p/_pp suffixes are correct (handle typedefs that are themselves pointers get _pp; the duckdb_result struct gets _p). No high/critical correctness defects found; the three findings are low-severity type/convention inconsistencies, all high-confidence against duckdb.h."
+}

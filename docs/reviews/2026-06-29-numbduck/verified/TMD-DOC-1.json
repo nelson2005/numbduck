@@ -1,0 +1,6 @@
+{
+  "findingId": "TMD-DOC-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "medium",
+  "reasoning": "Both cited references in test/test_ducklib.md (line 51 and line 75) point to test_ducklib.py#L3075-L3176 as where the Welford UDAF callbacks are defined. Inspection of test_ducklib.py confirms: L3075 is `rc = _read_refcount(meminfo_p)` inside test_array_meminfo_bridge_refcount_ladder(), and L3088-L3176 is the array-backed variance UDAF callback section (_arr_state_size_impl L3107, _arr_init_impl L3117, _arr_update_impl L3133, _arr_combine_impl L3159 through tgt array operations at L3176). The actual Welford stddev callbacks begin at L3270 (section comment) with _welford_state_size_impl at L3273, _welford_init_impl at L3283, _welford_update_impl at L3298, _welford_combine_impl at L3319, _welford_finalize_impl at L3341, _welford_destroy_impl at L3362, ending with _welford_destroy_cb at L3373. The cited range is entirely different code from what the doc describes; a reader following either link lands in the middle of the array-variant test and callback block, not the Welford bridge. The finding is accurate in all particulars. Medium severity is appropriate: this is a pure doc defect with no code correctness impact, but it directly undermines the doc's stated purpose of explaining the Welford bridge to readers navigating the implementation."
+}

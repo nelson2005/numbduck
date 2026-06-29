@@ -1,0 +1,6 @@
+{
+  "findingId": "EX-irr-COR-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "The defect is real and correctly characterized. At irr.py:80-81 r_lo=-0.99 and r_hi=10.0 are hardcoded with no documentation and no pre-check for a sign change. If the true IRR lies above 10.0 (>1000%/month), NPV at both endpoints is positive, bisection iterates 100 times converging toward r_hi without ever finding the root, and returns math.nan (line 94). That NaN is byte-for-byte identical to the empty-group sentinel written at line 204 (_irr_finalize_impl: n==0 branch), so callers cannot distinguish 'no data' from 'IRR outside bracket'. All three bundled tests have monthly IRRs well under 5% and do not exercise the boundary. The 'deeply unprofitable / no sign change' sub-case is less common than stated because NPV(r_lo=-0.99) diverges to +inf for projects with positive future cashflows, guaranteeing a sign change whenever IRR<10.0; the practically reachable failure mode is therefore primarily IRR>10.0. Severity 'low' is appropriate: a 1000%/month monthly rate is an extreme edge case in real financial use, but the diagnostic gap (indistinguishable NaN) is a genuine correctness concern. The reviewer's confidence rating of 'medium' is reasonable given the sub-case nuance."
+}

@@ -1,0 +1,44 @@
+{
+  "unit": "UTL-COR",
+  "target": "utils.py loader",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "UTL-COR-1",
+      "severity": "medium",
+      "title": "Unguarded os.remove of legacy cache runs before valid-lib discovery and aborts the loader on any OSError",
+      "file": "/home/erik/projects/numbduck/numbduck/utils.py",
+      "line": 40,
+      "category": "robustness / control-flow",
+      "description": "In _find_standalone_libduckdb (utils.py:33-47) the legacy unversioned cache is deleted unconditionally: `old_cached = os.path.join(_LIBDUCKDB_CACHE_BASE, 'libduckdb.dylib'); if os.path.isfile(old_cached): os.remove(old_cached)` (lines 38-40). This os.remove is not wrapped in try/except and executes BEFORE the versioned-cache check (lines 41-43) and the homebrew search (lines 44-46). If the legacy file exists but cannot be removed (read-only, different owner, on a read-only/NFS mount, or a race where another process holds/removes it), os.remove raises an uncaught OSError that propagates out of _find_standalone_libduckdb -> load_duckdb and aborts loading entirely. This happens even though a perfectly valid versioned cache (~/.numbduck/lib/<version>/libduckdb.dylib) or a homebrew dylib is sitting two-to-six lines further down and would have satisfied the load. So a stale, un-removable legacy artifact causes a valid library to be missed.",
+      "impact": "On the macOS fallback path, a leftover ~/.numbduck/lib/libduckdb.dylib with the wrong permissions makes numbduck fail to import even when a usable libduckdb is available, with an OSError that does not name the real (recoverable) situation.",
+      "recommendation": "Wrap the removal in try/except OSError (best-effort cleanup), or move the cleanup to run AFTER a library has been successfully located. The legacy-cache deletion is a side-effect that must never block discovery of a valid lib.",
+      "confidence": "medium"
+    },
+    {
+      "id": "UTL-COR-2",
+      "severity": "low",
+      "title": "find_duckdb_shared_lib unconditionally prefers the duckdb/ package dir over site-packages and only accepts exactly one match",
+      "file": "/home/erik/projects/numbduck/numbduck/utils.py",
+      "line": 98,
+      "category": "version branching / library selection",
+      "description": "find_duckdb_shared_lib (utils.py:94-110) checks the 1.3.x package-dir pattern first and returns immediately when `len(pkg_libs) == 1` (lines 98-100), only then falling to the 1.4+ `_duckdb*` site-packages pattern (lines 101-106). Two correctness consequences: (1) The 1.3 branch shadows the 1.4 branch. If, in a 1.4+ (or transitional/mixed) install, the duckdb/ package directory contains any file matching `duckdb[\\w.-]*\\.(so|dll|dylib|pyd)`, that file is returned in preference to the canonical `_duckdb.*` C-API library in site-packages, with no version check distinguishing them; if the package-dir file is not the full C-API runtime this loads the wrong library. (2) The selection is strict-singleton: when `len(pkg_libs) >= 2`, the 1.3 branch is skipped (treated as 'not found'), and on a genuine 1.3.x install (which has no `_duckdb*` in site-packages) the function then raises RuntimeError even though a usable duckdb*.so was present. Both the regexes are also not end-anchored (re.match anchors start only), so the candidate set is broader than the intended exact library names.",
+      "impact": "In non-canonical/transitional duckdb layouts the loader can either select a wrong/non-C-API library or raise despite a valid library being present. Normal single-file 1.3.x and 1.4+ installs are unaffected, which is why this is low severity / low confidence.",
+      "recommendation": "Make selection version-aware (branch on duckdb.__version__ rather than first-match-wins), anchor the regexes at end ($) to the exact expected names, and on multiple matches pick deterministically (or error with a clear message) rather than silently falling through to the other layout.",
+      "confidence": "low"
+    },
+    {
+      "id": "UTL-COR-3",
+      "severity": "low",
+      "title": "Download URL and version coupling assume duckdb.__version__ equals a DuckDB core release tag v{version}",
+      "file": "/home/erik/projects/numbduck/numbduck/utils.py",
+      "line": 51,
+      "category": "cross-version correctness",
+      "description": "_download_libduckdb (utils.py:50-91) builds the asset URL as `.../releases/download/v{version}/libduckdb-osx-universal.zip` using `version = duckdb.__version__` verbatim (lines 51-56), and the versioned cache directory (_LIBDUCKDB_CACHE_DIR, utils.py:19-21) is keyed on the same string. This assumes the duckdb Python package version string maps 1:1 onto a DuckDB GitHub core release tag. A Python-package-only revision (e.g. a post/dev suffix such as '1.3.2.post1') or any package/core version skew yields a tag that does not exist, so urlopen raises HTTPError 404 rather than producing the matching native library. The same skew means a homebrew dylib found at lines 44-46 carries no guarantee of matching the wheel's ABI version (no version assertion anywhere).",
+      "impact": "On the macOS download fallback, a package-only version string breaks the download with an opaque 404; on the homebrew path a version-mismatched runtime can be loaded without warning.",
+      "recommendation": "Normalize/validate the version (strip post/dev local-version segments) before forming the tag, and surface a clear error if no matching release asset exists; optionally verify the discovered/downloaded native version against duckdb.__version__.",
+      "confidence": "low"
+    }
+  ],
+  "notes": "Reviewed utils.py:1-131 in full plus understanding/loader.md. No duckdb is installed on this host, so the duckdb/ 1.3.x vs site-packages 1.4+ directory contents could not be empirically confirmed; UTL-COR-2 is reasoned from the documented layouts in CLAUDE.md/loader.md and is intentionally low-confidence. The core load_duckdb ordering (wheel load -> _has_capi_symbols probe on duckdb_open -> standalone discovery -> Darwin-gated download) and the _has_capi_symbols hasattr/dlsym probe are sound. The versioned-cache directory naming and the os.remove target path do not collide. The strongest correctness concern in scope is UTL-COR-1 (unguarded os.remove ahead of valid-lib discovery can mask an available library)."
+}

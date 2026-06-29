@@ -1,0 +1,6 @@
+{
+  "findingId": "PBR-DES-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "pybridge.py:59 and :62 contain bare integer literals 16 and 32 embedded directly in from_address arithmetic expressions. A grep for any named constants (PYOBJECT_HEADER_SIZE, CONNECTION_MEMBER_OFFSET, or any module-level = 16 / = 32 assignment) returns nothing — pybridge.py defines zero module-level constants. The derivation of the two offsets is documented only in docstring prose (lines 16-27), which is a separate representation from the inline literals. A maintainer re-verifying offsets for a new duckdb release must locate and edit both the prose block (lines 22-27) and the arithmetic expressions (lines 59, 62) independently, with no compile-time or search-time link between them. The defect is real and correctly characterized. Severity 'low' is appropriate: this is a pure maintainability concern with no current correctness impact; the literals are accurate and the code works today. 'Low' (not 'none') is warranted because the docstring itself flags that re-verification will be required on duckdb upgrades, making this a foreseeable maintenance trap."
+}
