@@ -99,7 +99,8 @@ def extract_md_blocks(text):
             yield body_start, textwrap.dedent(''.join(body))
 
 
-SKIP_DIRS = {'venv', '.venv', 'venv313', '_build', '.doctrees', 'node_modules', '.git', '__pycache__', 'plans'}
+SKIP_DIRS = {'venv', '.venv', 'venv313', '_build', '.doctrees', 'node_modules', '.git', '__pycache__',
+             'plans', 'reviews'}
 
 
 def _walk(root, suffix):
