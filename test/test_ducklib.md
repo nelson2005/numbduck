@@ -48,7 +48,7 @@ DuckDB calls six callbacks during aggregate execution. Each receives a raw point
 └──────────────┘     freeing nested allocations like typed.List.
 ```
 
-Source: callbacks defined at [`test_ducklib.py` L3075–3176](test_ducklib.py#L3075-L3176); registered at [`test_ducklib.py` L3280–3304](test_ducklib.py#L3280-L3304).
+Source: callbacks defined at [`test_ducklib.py` L3270–3370](test_ducklib.py#L3270-L3370); registered at [`test_ducklib.py` L3474–3498](test_ducklib.py#L3474-L3498).
 
 
 ## The `@cfunc` + `@njit` callback pattern
@@ -72,16 +72,16 @@ def _welford_init_cb(info, state):
 
 All pointer arguments use `nb_types.intp` (not `voidptr`) because numbduck's C API bindings return `intp`. Inside `@njit`, `carray()` requires `voidptr`, so we bridge with numbox's [`_cast_int_to_void_p`](https://github.com/Goykhman/numbox/blob/main/numbox/utils/lowlevel.py).
 
-Source: [`test_ducklib.py` L3075–3176](test_ducklib.py#L3075-L3176).
+Source: [`test_ducklib.py` L3270–3370](test_ducklib.py#L3270-L3370).
 
 
 ## Bridge intrinsics
 
-Three functions transfer ownership between NRT and the DuckDB state slot. Defined at [`test_ducklib.py` L2796–2874](test_ducklib.py#L2796-L2874).
+Three functions transfer ownership between NRT and the DuckDB state slot: [`export_meminfo`](https://github.com/Goykhman/numbox/blob/main/numbox/utils/meminfo.py#L144), [`borrow_structref`](https://github.com/Goykhman/numbox/blob/main/numbox/utils/meminfo.py#L132), and [`release_meminfo`](https://github.com/Goykhman/numbox/blob/main/numbox/utils/meminfo.py#L156) — imported from `numbox.utils.meminfo` at [`test_ducklib.py` L14–17](test_ducklib.py#L14-L17).
 
 ### `export_meminfo(s)` — init
 
-Uses numbox's [`structref_meminfo`](https://github.com/Goykhman/numbox/blob/main/numbox/utils/meminfo.py#L13) to extract the `MemInfo*` pointer, then increfs it to account for the new external reference. Returns the pointer as `intp`.
+Uses numbox's [`structref_meminfo`](https://github.com/Goykhman/numbox/blob/main/numbox/utils/meminfo.py#L34) to extract the `MemInfo*` pointer, then increfs it to account for the new external reference. Returns the pointer as `intp`.
 
 **Used in:** `_welford_init_impl` — stores the returned pointer in the DuckDB state slot.
 
@@ -160,7 +160,7 @@ See [`test_array_meminfo_bridge_refcount_ladder`](test_ducklib.py) for a working
 
 ### Stability across numba versions
 
-`removerefctpass` has used the same `_accepted_nrtfns` set and `_legalize` logic since [numba 0.43 (2019)](https://github.com/numba/numba/blob/0.43.0/numba/core/removerefctpass.py). The symmetric stripping is a structural property of the pass, not an implementation accident. If a future numba version changes the pass to strip increfs but not decrefs (or vice versa), both the current approach and a direct-call approach would break — the whole structref-via-raw-pointer pattern depends on the pass being all-or-nothing.
+`removerefctpass` has used the same `_accepted_nrtfns` set and `_legalize` logic since [numba 0.43 (2019)](https://github.com/numba/numba/blob/0.43.0/numba/targets/removerefctpass.py). The symmetric stripping is a structural property of the pass, not an implementation accident. If a future numba version changes the pass to strip increfs but not decrefs (or vice versa), both the current approach and a direct-call approach would break — the whole structref-via-raw-pointer pattern depends on the pass being all-or-nothing.
 
 
 ## Registration: telling DuckDB about the UDAF
@@ -189,11 +189,11 @@ duckdb_register_aggregate_function(conn_p, func_p)
 
 After registration, `SELECT welford_stddev(v) FROM t` triggers the full callback lifecycle above. DuckDB allocates 8 bytes per group, calls our callbacks with pointers to those bytes, and calls destroy when done.
 
-Source: [`test_ducklib.py` L3280–3304](test_ducklib.py#L3280-L3304).
+Source: [`test_ducklib.py` L3474–3498](test_ducklib.py#L3474-L3498).
 
 
 ## The `refcount_of_meminfo` cautionary tale
 
-The commented-out intrinsic at [`test_ducklib.py` L2877–2914](test_ducklib.py#L2877-L2914) attempted to read the NRT refcount from inside JIT code, expecting to observe refcount=2 while both a local structref and an exported MemInfo pointer were live. It always read 1, because `removerefctpass` had already stripped the incref that would have bumped it to 2. The intrinsic is preserved as an example of why in-scope refcount observation doesn't work when the function signature has no NRT-tracked types.
+The commented-out intrinsic at [`test_ducklib.py` L2901–2916](test_ducklib.py#L2901-L2916) attempted to read the NRT refcount from inside JIT code, expecting to observe refcount=2 while both a local structref and an exported MemInfo pointer were live. It always read 1, because `removerefctpass` had already stripped the incref that would have bumped it to 2. The intrinsic is preserved as an example of why in-scope refcount observation doesn't work when the function signature has no NRT-tracked types.
 
-Python-side `_read_refcount()` between separate `@njit` calls is the only reliable way to verify refcounts. That's what [`test_structref_meminfo_bridge_refcount_ladder`](test_ducklib.py#L3179) does. A [similar phenomenon](https://numba.discourse.group/t/re-assigning-structrefs-member-doesnt-decrease-ref-count/3018/6?u=milton) was observed in the numba community.
+Python-side `_read_refcount()` between separate `@njit` calls is the only reliable way to verify refcounts. That's what [`test_structref_meminfo_bridge_refcount_ladder`](test_ducklib.py#L2996) does. A [similar phenomenon](https://numba.discourse.group/t/re-assigning-structrefs-member-doesnt-decrease-ref-count/3018/6?u=milton) was observed in the numba community.
