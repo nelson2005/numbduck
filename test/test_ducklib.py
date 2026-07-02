@@ -4411,3 +4411,17 @@ def test_load_duckdb_non_darwin_message(monkeypatch, env_configured):
         assert bad_path in message
     else:
         assert "NUMBDUCK_LIBDUCKDB=" in message
+
+
+def test_pybridge_closed_connection_raises_runtime_error():
+    """A closed connection resets its unique_ptr<Connection> to null, so the
+    documented offset yields a null pointer. extract_connection_ptr must raise a
+    clean RuntimeError there rather than pass the null on to duckdb_query (an
+    opaque numba TypeError or a NULL-connection dereference).
+    """
+    from numbduck.pybridge import extract_connection_ptr
+
+    conn = duckdb.connect()
+    conn.close()
+    with pytest.raises(RuntimeError, match="null"):
+        extract_connection_ptr(conn)
