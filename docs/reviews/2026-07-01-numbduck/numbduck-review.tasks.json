@@ -19,6 +19,12 @@
       "confirmedMapped": 99,
       "unmappedConfirmed": [],
       "refutedLeaked": []
+    },
+    "executed": {
+      "completed": "2026-07-02",
+      "tasksDone": 24,
+      "suite": "197 passed, 1 skipped, 1 deselected",
+      "notes": "T13 rider da50f9a fixed a pre-existing chunk leak in test_bind_decimal."
     }
   },
   "tasks": [
@@ -42,7 +48,9 @@
         "flake8 --max-line-length=120 is clean over the whole tree.",
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
       ],
-      "rationale": "_call_lib_func_byval lowers func(T*) semantics and omits the SysV x86-64 byval stack copy, so the 48-byte result is read from stale stack; today it works only by coincidence and can silently corrupt the core result-fetch path."
+      "rationale": "_call_lib_func_byval lowers func(T*) semantics and omits the SysV x86-64 byval stack copy, so the 48-byte result is read from stale stack; today it works only by coincidence and can silently corrupt the core result-fetch path.",
+      "status": "done",
+      "commit": "17cb436"
     },
     {
       "id": "T2",
@@ -71,7 +79,9 @@
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest.",
         "Affected docs are updated and doc code-blocks stay flake8-clean at --max-line-length=120 (doc-codeblock-flake8 CI passes)."
       ],
-      "rationale": "On the macOS/standalone fallback a second, possibly version-mismatched libduckdb is loaded RTLD_GLOBAL and pybridge hands it a Connection* minted by the wheel, which is undefined behavior; numbox already guards this exact hazard and numbduck has no equivalent."
+      "rationale": "On the macOS/standalone fallback a second, possibly version-mismatched libduckdb is loaded RTLD_GLOBAL and pybridge hands it a Connection* minted by the wheel, which is undefined behavior; numbox already guards this exact hazard and numbduck has no equivalent.",
+      "status": "done",
+      "commit": "f714b7f"
     },
     {
       "id": "T3",
@@ -97,7 +107,9 @@
         "The non-existent flake8 --exclude path is removed (or replaced with a real exclude).",
         "The full CI matrix is green."
       ],
-      "rationale": "Every matrix job wastes ~2 minutes running the 1M-row benchmark the marker claims is deselected, the macOS acquisition subsystem has zero CI coverage, and the flake8 exclude points at a path that does not exist."
+      "rationale": "Every matrix job wastes ~2 minutes running the 1M-row benchmark the marker claims is deselected, the macOS acquisition subsystem has zero CI coverage, and the flake8 exclude points at a path that does not exist.",
+      "status": "done",
+      "commit": "a771874"
     },
     {
       "id": "T4",
@@ -123,7 +135,9 @@
         "The numbox pin reads numbox>=0.5.13 (matching pyproject.toml), and 'Adding a New Binding' steps 1/7 no longer contradict step 5 on docstring link targets.",
         "Affected docs are updated and doc code-blocks stay flake8-clean at --max-line-length=120 (doc-codeblock-flake8 CI passes)."
       ],
-      "rationale": "CLAUDE.md is the core onboarding doc yet describes a removed @cres pattern, nonexistent helpers/intrinsics, an already-completed migration at past-EOF line numbers, and a wrong numbox pin, so a contributor following it writes non-matching code."
+      "rationale": "CLAUDE.md is the core onboarding doc yet describes a removed @cres pattern, nonexistent helpers/intrinsics, an already-completed migration at past-EOF line numbers, and a wrong numbox pin, so a contributor following it writes non-matching code.",
+      "status": "done",
+      "commit": "18cb3dd"
     },
     {
       "id": "T5",
@@ -147,7 +161,9 @@
         "The refcount-ladder test link resolves to L2931 and the commented-intrinsic range to ~L2836-2851.",
         "doc-codeblock-flake8 and link-check CI pass."
       ],
-      "rationale": "Several design-doc cites point at unrelated code (the array UDAF, callback bodies) or a range with no definitions, breaking the doc's traceability into the implementation."
+      "rationale": "Several design-doc cites point at unrelated code (the array UDAF, callback bodies) or a range with no definitions, breaking the doc's traceability into the implementation.",
+      "status": "done",
+      "commit": "14d1683"
     },
     {
       "id": "T6",
@@ -172,7 +188,9 @@
         "flake8 --max-line-length=120 is clean over the whole tree.",
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
       ],
-      "rationale": "Non-object JSON silently collapses to {} (caching silently off for every binding) and an unknown key kills any import of the package with a numba error that never names the env var."
+      "rationale": "Non-object JSON silently collapses to {} (caching silently off for every binding) and an unknown key kills any import of the package with a numba error that never names the env var.",
+      "status": "done",
+      "commit": "cf91c10"
     },
     {
       "id": "T7",
@@ -193,7 +211,9 @@
         "Every action is pinned to a full 40-char commit SHA with a version comment, prioritizing pypa/gh-action-pypi-publish (currently a mutable release/v1 branch in the id-token:write job) and the third-party lychee-action.",
         "release.yml action pins and build steps are reconciled with the other workflows (build produces the intended sdist/wheel), and CI is green."
       ],
-      "rationale": "release.yml splices an attacker-influenceable tag name into shell and into __init__.py feeding a Trusted-Publishing PyPI pipeline, and pins the publish action to a moving branch."
+      "rationale": "release.yml splices an attacker-influenceable tag name into shell and into __init__.py feeding a Trusted-Publishing PyPI pipeline, and pins the publish action to a moving branch.",
+      "status": "done",
+      "commit": "51b36bd"
     },
     {
       "id": "T8",
@@ -215,7 +235,9 @@
         "CI is green.",
         "Affected docs are updated and doc code-blocks stay flake8-clean at --max-line-length=120 (doc-codeblock-flake8 CI passes)."
       ],
-      "rationale": "numbduck imports deep, private numbox internals under an uncapped numbox>=0.5.13, so a future numbox reshuffle breaks it with a bare ImportError, and CI floats to arbitrary-latest numbox."
+      "rationale": "numbduck imports deep, private numbox internals under an uncapped numbox>=0.5.13, so a future numbox reshuffle breaks it with a bare ImportError, and CI floats to arbitrary-latest numbox.",
+      "status": "done",
+      "commit": "45bc5b9"
     },
     {
       "id": "T9",
@@ -241,7 +263,9 @@
         "flake8 --max-line-length=120 is clean over the whole tree.",
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
       ],
-      "rationale": "The macOS download/cache path dlopens unverified native code RTLD_GLOBAL (arbitrary-code-execution and cache-poisoning surface), skips the symbol re-check, has no timeout, and surfaces raw urllib/zip errors."
+      "rationale": "The macOS download/cache path dlopens unverified native code RTLD_GLOBAL (arbitrary-code-execution and cache-poisoning surface), skips the symbol re-check, has no timeout, and surfaces raw urllib/zip errors.",
+      "status": "done",
+      "commit": "ba2820a"
     },
     {
       "id": "T10",
@@ -270,7 +294,9 @@
         "flake8 --max-line-length=120 is clean over the whole tree.",
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
       ],
-      "rationale": "The download path fuses consent/fetch/unzip/write into one untestable body, the locator mutates the filesystem (an unguarded os.remove can abort import), input() crashes headless imports, and the non-Darwin guidance is circular. Sequence after T9, which hardens the same download/cache body in utils.py, to avoid conflicting edits."
+      "rationale": "The download path fuses consent/fetch/unzip/write into one untestable body, the locator mutates the filesystem (an unguarded os.remove can abort import), input() crashes headless imports, and the non-Darwin guidance is circular. Sequence after T9, which hardens the same download/cache body in utils.py, to avoid conflicting edits.",
+      "status": "done",
+      "commit": "f9f8af7"
     },
     {
       "id": "T11",
@@ -299,7 +325,9 @@
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest.",
         "Affected docs are updated and doc code-blocks stay flake8-clean at --max-line-length=120 (doc-codeblock-flake8 CI passes)."
       ],
-      "rationale": "A closed/null-backed connection yields a confusing TypeError or a NULL C call instead of the documented RuntimeError, the isinstance guard is spoofable, and the docstring overstates the SELECT 1 guarantee and omits the borrowed-pointer lifetime coupling. Sequence after T2, which edits the same pybridge.py sites (offset constants and the extraction guard), to avoid conflicting edits."
+      "rationale": "A closed/null-backed connection yields a confusing TypeError or a NULL C call instead of the documented RuntimeError, the isinstance guard is spoofable, and the docstring overstates the SELECT 1 guarantee and omits the borrowed-pointer lifetime coupling. Sequence after T2, which edits the same pybridge.py sites (offset constants and the extraction guard), to avoid conflicting edits.",
+      "status": "done",
+      "commit": "30da2b3"
     },
     {
       "id": "T12",
@@ -322,7 +350,9 @@
         "flake8 --max-line-length=120 is clean over the whole tree.",
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
       ],
-      "rationale": "Several tests leak duckdb_result/data_chunk handles and the DuckDB C-handle side has no leak accounting (only the NRT side does), so handle-lifetime regressions pass silently."
+      "rationale": "Several tests leak duckdb_result/data_chunk handles and the DuckDB C-handle side has no leak accounting (only the NRT side does), so handle-lifetime regressions pass silently.",
+      "status": "done",
+      "commit": "248b582"
     },
     {
       "id": "T13",
@@ -347,7 +377,9 @@
         "flake8 --max-line-length=120 is clean over the whole tree.",
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
       ],
-      "rationale": "The named ABI size guard only tests pure-Python arithmetic, multi-chunk and wide-decimal (upper-64-bit) paths are never driven, and every UDF/UDAF callback is only shown correct on dense NULL-free data."
+      "rationale": "The named ABI size guard only tests pure-Python arithmetic, multi-chunk and wide-decimal (upper-64-bit) paths are never driven, and every UDF/UDAF callback is only shown correct on dense NULL-free data.",
+      "status": "done",
+      "commit": "be7bb32"
     },
     {
       "id": "T14",
@@ -375,7 +407,9 @@
         "flake8 --max-line-length=120 is clean over the whole tree.",
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
       ],
-      "rationale": "The reference examples leak prepared-statement and scalar-function handles on error paths and dereference the fetched chunk with no NULL/size guard, teaching an unsafe pattern."
+      "rationale": "The reference examples leak prepared-statement and scalar-function handles on error paths and dereference the fetched chunk with no NULL/size guard, teaching an unsafe pattern.",
+      "status": "done",
+      "commit": "46e3ac9"
     },
     {
       "id": "T15",
@@ -398,7 +432,9 @@
         "flake8 --max-line-length=120 is clean over the whole tree.",
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
       ],
-      "rationale": "The fixed absolute NPV tolerance cannot be met for realistic (~10M) cashflow magnitudes, so a fully converged root returns NaN indistinguishable from an empty group; the fixed bracket has the same NaN conflation."
+      "rationale": "The fixed absolute NPV tolerance cannot be met for realistic (~10M) cashflow magnitudes, so a fully converged root returns NaN indistinguishable from an empty group; the fixed bracket has the same NaN conflation.",
+      "status": "done",
+      "commit": "3bfbc3f"
     },
     {
       "id": "T16",
@@ -418,7 +454,9 @@
         "The numbox clock.py doc link is repinned to a version consistent with the numbox>=0.5.13 dependency pin.",
         "link-check CI passes."
       ],
-      "rationale": "The README advertises irr.py as runnable but gives no working command (irr.py exits 1) and links numbox docs at a tag below the dependency floor."
+      "rationale": "The README advertises irr.py as runnable but gives no working command (irr.py exits 1) and links numbox docs at a tag below the dependency floor.",
+      "status": "done",
+      "commit": "32e49b1"
     },
     {
       "id": "T17",
@@ -443,7 +481,9 @@
         "flake8 --max-line-length=120 is clean over the whole tree.",
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
       ],
-      "rationale": "Several idx_t entries are signed intp instead of uint64 and the validity pointer is a uint64 scalar, breaking the file's conventions and risking numba int/uint->float64 unification."
+      "rationale": "Several idx_t entries are signed intp instead of uint64 and the validity pointer is a uint64 scalar, breaking the file's conventions and risking numba int/uint->float64 unification.",
+      "status": "done",
+      "commit": "358b83c"
     },
     {
       "id": "T18",
@@ -473,7 +513,9 @@
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest.",
         "Affected docs are updated and doc code-blocks stay flake8-clean at --max-line-length=120 (doc-codeblock-flake8 CI passes)."
       ],
-      "rationale": "Migration residue left six wrappers appended at EOF out of order, ducklib carries dead Windows code and two non-canonical varint URLs, and the repeated name literal has no import-time integrity check."
+      "rationale": "Migration residue left six wrappers appended at EOF out of order, ducklib carries dead Windows code and two non-canonical varint URLs, and the repeated name literal has no import-time integrity check.",
+      "status": "done",
+      "commit": "75a01e2"
     },
     {
       "id": "T19",
@@ -499,7 +541,9 @@
         "flake8 --max-line-length=120 is clean over the whole tree.",
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
       ],
-      "rationale": "A raise inside a callback impl is swallowed at numba's cfunc boundary, leaking a borrowed structref incref and handing DuckDB a silently-wrong aggregate, and the combine borrow/release balance is never actually exercised."
+      "rationale": "A raise inside a callback impl is swallowed at numba's cfunc boundary, leaking a borrowed structref incref and handing DuckDB a silently-wrong aggregate, and the combine borrow/release balance is never actually exercised.",
+      "status": "done",
+      "commit": "fda5018"
     },
     {
       "id": "T20",
@@ -522,7 +566,9 @@
         "flake8 --max-line-length=120 is clean over the whole tree.",
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
       ],
-      "rationale": "The reference scalar-UDF chunk callbacks read input vectors with no validity check, so a NULL input row is folded into the result as a garbage value."
+      "rationale": "The reference scalar-UDF chunk callbacks read input vectors with no validity check, so a NULL input row is folded into the result as a garbage value.",
+      "status": "done",
+      "commit": "d5fb05c"
     },
     {
       "id": "T21",
@@ -552,7 +598,9 @@
         "flake8 --max-line-length=120 is clean over the whole tree.",
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
       ],
-      "rationale": "Many tests assert existence but not value, and several paths (long strings, in-JIT errors, init callbacks, handle destroys, most bind invalid-index branches) are untested, so real regressions would pass silently."
+      "rationale": "Many tests assert existence but not value, and several paths (long strings, in-JIT errors, init callbacks, handle destroys, most bind invalid-index branches) are untested, so real regressions would pass silently.",
+      "status": "done",
+      "commit": "63b3a8d"
     },
     {
       "id": "T22",
@@ -573,7 +621,9 @@
         "flake8 --max-line-length=120 is clean over the whole tree.",
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
       ],
-      "rationale": "assert_results_match spuriously fails on identical NaN results and format_table silently truncates or crashes on wrong-width rows."
+      "rationale": "assert_results_match spuriously fails on identical NaN results and format_table silently truncates or crashes on wrong-width rows.",
+      "status": "done",
+      "commit": "6af4057"
     },
     {
       "id": "T23",
@@ -594,7 +644,9 @@
         "flake8 --max-line-length=120 is clean over the whole tree.",
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
       ],
-      "rationale": "The committed __version__ = \"\" makes any non-CI build silently report the placeholder 0.0.0."
+      "rationale": "The committed __version__ = \"\" makes any non-CI build silently report the placeholder 0.0.0.",
+      "status": "done",
+      "commit": "76a0f80"
     },
     {
       "id": "T24",
@@ -615,7 +667,9 @@
         "flake8 --max-line-length=120 is clean over the whole tree.",
         "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
       ],
-      "rationale": "proxy_if_available stubs raise a clear error only for Python callers; from @njit (the intended consumer) an unavailable symbol surfaces as an opaque TypingError."
+      "rationale": "proxy_if_available stubs raise a clear error only for Python callers; from @njit (the intended consumer) an unavailable symbol surfaces as an opaque TypingError.",
+      "status": "done",
+      "commit": "2b9c311"
     }
   ]
 }
