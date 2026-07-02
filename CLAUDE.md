@@ -13,7 +13,7 @@ numbduck — adapts DuckDB's C API for use inside numba `@njit` code. Built on t
 - Test: `pytest` (a `benchmark`-marked test is deselected by default via `pyproject.toml`'s `addopts`; run it explicitly with `pytest -m benchmark`)
 - Lint: `flake8`
 - Python: >=3.10
-- Key dependencies: `duckdb>=1.3.2,<1.6`, `numbox>=0.5.13`
+- Key dependencies: `duckdb>=1.3.2,<1.6`, `numbox>=0.5.13,<0.6`
 
 ## Architecture
 

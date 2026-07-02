@@ -76,6 +76,9 @@ jobs:
         pip install flake8 pytest
         pip install "numba==${{ matrix.numba-version }}"
         pip install "duckdb==${{ matrix.duckdb-version }}"
+        # numbduck imports deep numbox internals, so pin the validated numbox
+        # rather than let pip resolve an arbitrary latest through the range cap.
+        pip install "numbox==0.5.23"
         pip install -e .
     - name: Lint with flake8
       run: |
@@ -129,6 +132,9 @@ jobs:
         pip install pytest
         pip install "numba==0.64.0"
         pip install "duckdb==1.5.1"
+        # numbduck imports deep numbox internals, so pin the validated numbox
+        # rather than let pip resolve an arbitrary latest through the range cap.
+        pip install "numbox==0.5.23"
         pip install -e .
     - name: Test with pytest
       env:
