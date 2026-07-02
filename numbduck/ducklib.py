@@ -1,5 +1,7 @@
 from numba.core.errors import TypingError
-from numba.core.types import float32, float64, int8, int16, int32, int64, intp, Tuple, uint8, uint16, uint32, uint64, UniTuple, void
+from numba.core.types import (
+    float32, float64, int8, int16, int32, int64, intp, Tuple, uint8, uint16, uint32, uint64, UniTuple, void
+)
 from numba.extending import overload
 from numbox.core.bindings.call import _call_lib_func
 from numbox.core.bindings.signatures import signatures
@@ -1396,9 +1398,12 @@ def duckdb_aggregate_function_set_extra_info(aggregate_function_p, extra_info_p,
 
 
 @proxy(signatures.get("duckdb_aggregate_function_set_functions"), jit_options=jit_options)
-def duckdb_aggregate_function_set_functions(aggregate_function_p, state_size_p, init_p, update_p, combine_p, finalize_p):
+def duckdb_aggregate_function_set_functions(
+        aggregate_function_p, state_size_p, init_p, update_p, combine_p, finalize_p):
     """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_aggregate_function_set_functions """
-    return _call_lib_func("duckdb_aggregate_function_set_functions", (aggregate_function_p, state_size_p, init_p, update_p, combine_p, finalize_p))
+    return _call_lib_func(
+        "duckdb_aggregate_function_set_functions",
+        (aggregate_function_p, state_size_p, init_p, update_p, combine_p, finalize_p))
 
 
 @proxy(signatures.get("duckdb_aggregate_function_set_name"), jit_options=jit_options)
