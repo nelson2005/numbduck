@@ -22,9 +22,8 @@ authors = [
 readme = "README.md"
 
 [tool.pytest.ini_options]
-addopts = "-m 'not benchmark'"
 markers = [
-    "benchmark: slow benchmarks; deselected by default, run explicitly with -m benchmark",
+    "benchmark: slow benchmarks; skipped by default, run explicitly with -m benchmark",
 ]
 
 [tool.setuptools.dynamic]
