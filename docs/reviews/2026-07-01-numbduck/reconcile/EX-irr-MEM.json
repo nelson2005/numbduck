@@ -1,0 +1,23 @@
+{
+  "unit": "EX-irr-MEM",
+  "results": [
+    {
+      "oldId": "EX-irr-MEM-1",
+      "class": "missed",
+      "newIds": [],
+      "justification": "Old-confirmed (verdict confirmed, low). The defect is a test-coverage gap: the module-end NRT alloc/free balance guard (examples/irr.py:372-377) only validates the callback paths the three tiny single-threaded queries drive (state_size/init/update/finalize/destroy); the parallel-merge combine path (_irr_combine_impl, 170-186) is never invoked, so its borrow/release balance and the removerefctpass-stripping risk in combine are unchecked. The two current examples/irr.py MEM findings (EX-irr-MEM-1 'Borrowed structref ref leaks if an impl raises inside a @cfunc callback' and XC-numbox-MEM-1) address a DIFFERENT root cause — missing try/except exception guards on the cfunc callbacks (exception swallowing), not the combine-path coverage gap. EX-irr-COR-1/2 concern the bisection solver. No current finding covers the combine coverage gap.",
+      "currentEvidence": "Still present on current tree. NRT guard: examples/irr.py:372-377 (alloc_delta != free_delta -> WARNING + sys.exit(1)). Combine impl: examples/irr.py:170-186 (vector_extend at 180-181, borrow_structref at 178-179); cfunc wrapper 188-190. All three datasets remain tiny/single-threaded with no PRAGMA/SET threads or forced parallelism: Test 1 = 12 rows ungrouped (275-285), Test 2 = 18 rows / 2 groups (302-331), Test 3 = 1 row (352-363). DuckDB's hash aggregate therefore runs single-partition and never calls combine, so the guard cannot validate the combine path.",
+      "adopted": {
+        "id": "REC-EX-irr-MEM-1",
+        "severity": "low",
+        "confidence": "medium",
+        "title": "Combine refcount/borrow-balance path is never exercised by the in-file NRT leak guard",
+        "file": "examples/irr.py",
+        "line": 170,
+        "description": "The module ends with an NRT alloc/free balance guard (examples/irr.py:372-377: `if alloc_delta != free_delta` -> WARNING + sys.exit(1)), the file's only runtime check that the meminfo lifecycle (export_meminfo / borrow_structref / release_meminfo) is balanced. That guard only validates the callback paths the three queries actually drive: state_size, init, update, finalize, destroy. DuckDB invokes `_irr_combine_impl` (170-186) only when it merges thread-local / partitioned partial aggregate states. All three test datasets are tiny (Test 1: 12 rows ungrouped at 275-285; Test 2: 18 rows / 2 groups at 302-331; Test 3: 1 row at 352-363), so DuckDB's hash aggregate runs single-partition and almost certainly never calls combine. The combine path — where the borrow/release balance across `borrow_structref` (178-179) and the no-aliasing property of `vector_extend` (180-181) matter — carries no coverage from the guard. Per the documented removerefctpass fragility (test_ducklib.md, udaf.md risk #1/#2): the borrow net-zero property in combine depends on an NRT-alloc symbol (via vector_extend -> numpy.empty) landing in the `_irr_combine_impl` LLVM module to disable removerefctpass; if a numba build inlines/lowers vector_extend such that no NRT_MemInfo_alloc symbol remains in `_irr_combine_impl`, the surviving borrow incref (from borrow_structref, a separate NRT-typed unit) would be paired with a stripped scope-exit decref, leaking +1 per merged source and target — silently, only under parallel aggregation, with no guard coverage.",
+        "impact": "A combine-specific refcount imbalance (a leak, or in the mirror case an early free / use-after-free of a partial state) would ship undetected: the example asserts correctness only for paths DuckDB exercises on small single-threaded inputs, and combine is not among them. The risk is dormant until a large/parallel aggregation triggers combine in a downstream consumer.",
+        "recommendation": "Force the combine path to run inside the guarded region: run at least one query against a table large enough (or with `PRAGMA threads` raised / forced parallelism) to produce multiple partial states per group, keeping the existing alloc==free assertion at 375. This turns the combine borrow/release balance and the no-aliasing property of vector_extend into a checked invariant rather than dead, unvalidated code."
+      }
+    }
+  ]
+}

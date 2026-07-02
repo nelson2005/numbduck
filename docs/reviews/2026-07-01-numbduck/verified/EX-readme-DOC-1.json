@@ -1,0 +1,6 @@
+{
+  "findingId": "EX-readme-DOC-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "medium",
+  "reasoning": "Verified against the current tree. examples/README.md:33 links irr.py in the Scripts list with no caveat, and the 'Running' section (README.md:49-61) contains commands only for haversine.py, online_scoring.py, and fraud_score.py; grep confirms 'run_irr' does not appear anywhere in README.md. examples/irr.py:33-39 has `if __name__ == \"__main__\": sys.stderr.write(...); sys.exit(1)`, refusing direct execution and telling the user to run examples/run_irr.py instead (the docstring at irr.py:24-28 explains why: IRRStateType needs a stable __module__ for numba's warm-cache type inference). examples/run_irr.py:1-18 is confirmed to be the actual importable launcher (`from irr import main; main()`). So a reader following the README's Scripts link and inferring `python examples/irr.py` hits the exit(1) guard, and there is no correct run instruction anywhere in the doc for the fourth advertised example. Severity medium is appropriate: real and complete gap in required-reading docs, but self-diagnosing since irr.py's own stderr message names the fix, limiting real-world impact."
+}

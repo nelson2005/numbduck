@@ -1,0 +1,14 @@
+{
+  "findingId": "EX-hav-2",
+  "verdict": "CONFIRMED",
+  "correctedSeverity": "low",
+  "reasoning": "Verified against examples/haversine.py:121-137 (register_jit_udf). func_p = ducklib.duckdb_create_scalar_function() at line 125; the assert rc == ducklib.DuckDBSuccess is at line 135; the destroy call (func_buf = numpy.array([func_p], dtype=numpy.intp); ducklib.duckdb_destroy_scalar_function(func_buf.ctypes.data)) is at lines 136-137, strictly after the assert. register_jit_udf is a plain (undecorated) Python function, so a failed assert raises AssertionError immediately and lines 136-137 never execute -- func_p is genuinely never destroyed on that path. Confirmed against ducklib.py: duckdb_register_scalar_function (ducklib.py:1225-1228, signature duckdb_state_ty(intp, intp)) only registers the function and returns a duckdb_state; nothing in its signature or the sibling duckdb_create_scalar_function/duckdb_destroy_scalar_function pair (ducklib.py:1213-1222) indicates the library takes ownership of func_p on failure -- the destroy call is the caller's sole responsibility regardless of the registration outcome, matching the DuckDB C API contract (duckdb_register_scalar_function does not consume/free the function object; duckdb_destroy_scalar_function is required in all cases). The dbl_p logical-type handle is unaffected since it is already destroyed at lines 131-132, well before the assert -- as the finding correctly notes. This is a genuine order-of-operations bug (assert placed before cleanup) and is real, not a false positive: DuckDBError is a plausible outcome of duckdb_register_scalar_function (e.g. duplicate function name, malformed function object), so the leak path is reachable, not merely theoretical. Severity is appropriately low: the leaked handle is a single duckdb_scalar_function object (a small library-managed struct), the failure path is registration-time only (not a hot loop or per-row leak), it only fires in this example script (not core library/production binding code), and the assert itself terminates the process shortly after (an example script has no long-running server context to accumulate leaks across many failures), so real-world impact is negligible as the finding's own impact section states. No evidence the reviewer is wrong about the API/version/migration -- this is a straightforward, low-severity, high-confidence code-cleanliness/robustness finding correctly characterized on the current tree.",
+  "citations": [
+    "examples/haversine.py:121-137",
+    "examples/haversine.py:125",
+    "examples/haversine.py:131-132",
+    "examples/haversine.py:135",
+    "examples/haversine.py:136-137",
+    "numbduck/ducklib.py:1213-1228"
+  ]
+}

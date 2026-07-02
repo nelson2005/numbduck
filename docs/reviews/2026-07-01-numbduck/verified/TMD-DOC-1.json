@@ -1,0 +1,12 @@
+{
+  "findingId": "TMD-DOC-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "high",
+  "reasoning": "Verified against current tree. test/test_ducklib.md:80 states: 'Three functions transfer ownership between NRT and the DuckDB state slot. Defined at test_ducklib.py L2796-2874.' This is doubly wrong. (1) test/test_ducklib.py:11-14 shows export_meminfo, borrow_structref, and release_meminfo are imported ('from numbox.utils.meminfo import (borrow_structref, export_meminfo, _incref_meminfo, release_meminfo, structref_meminfo)'), not defined in the test file. Their real definitions are in /home/erik/projects/numbox/numbox/utils/meminfo.py at borrow_structref:132, export_meminfo:144, release_meminfo:156 (confirmed by grep). (2) test_ducklib.py lines 2794-2874 (read directly) contain only a comment block describing the bridge-intrinsics contract plus a commented-out '_refcount_of_meminfo' intrinsic and its 'refcount_of_meminfo' wrapper -- no live function definitions of any kind, let alone the three named functions. A reader following the cited anchor lands on comments/dead code, not the functions described, and is misdirected away from the actual numbox source that owns the contract. Severity high is appropriate: this is a core documentation claim (not a minor line-off-by-a-few-lines drift) that is categorically false on two independent axes (wrong file AND the cited range holds no definitions at all), directly undermining the doc's stated purpose of explaining where the ownership-transfer contract lives.",
+  "verifiedFiles": [
+    "/home/erik/projects/numbduck/test/test_ducklib.md:80",
+    "/home/erik/projects/numbduck/test/test_ducklib.py:11-14",
+    "/home/erik/projects/numbduck/test/test_ducklib.py:2794-2874",
+    "/home/erik/projects/numbox/numbox/utils/meminfo.py:132,144,156"
+  ]
+}

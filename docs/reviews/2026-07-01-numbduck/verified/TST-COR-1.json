@@ -1,0 +1,14 @@
+{
+  "findingId": "TST-COR-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Verified against current tree. test_get_value_type at test/test_ducklib.py:1687-1694 only asserts `type_p != 0` (line 1691) after calling duckdb_get_value_type, and never calls duckdb_get_type_id to check the returned logical-type id. numbduck/ducklib.py:208 declares duckdb_get_value_type's signature as intp(intp) (returns a logical-type handle), and numbduck/ducklib.py:201/1033-1036 shows duckdb_get_type_id (int32(intp)) is the standard way to inspect that handle's type id -- exactly the pattern used by every sibling logical-type test in the same file (e.g. test_create_logical_type_integer at test/test_ducklib.py:1727-1733, and the list/array/map/struct/union tests at lines ~1780-1881), all of which assert `duckdb_get_type_id(...) == ducklib.DUCKDB_TYPE_INTEGER` or similar. test_get_value_type is the outlier: it stops at a non-null check, so a wrapper bug that returns a wrong-but-nonzero type handle (e.g. wrong offset/sig, or accidentally returning val_p type-punned) would still pass. This is a real too-loose-assertion gap, correctly characterized and correctly scoped to a single test; severity 'low' is appropriate since it doesn't affect production code, only reduces this one test's discriminating power, and the fix is a one-line addition consistent with the existing test suite's own pattern.",
+  "citations": [
+    "test/test_ducklib.py:1687-1694",
+    "test/test_ducklib.py:1727-1733",
+    "numbduck/ducklib.py:201",
+    "numbduck/ducklib.py:208",
+    "numbduck/ducklib.py:925-928",
+    "numbduck/ducklib.py:1033-1036"
+  ]
+}

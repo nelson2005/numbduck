@@ -1,0 +1,24 @@
+{
+  "findingId": "DCK-wrap-COR-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Verified against a vendored duckdb.h (typedef uint64_t idx_t; h:243) and the current ducklib.py. All cited idx_t returns/args ARE idx_t in duckdb.h: duckdb_column_count (h:995), duckdb_row_count (h:1006), duckdb_data_chunk_get_column_count (h:2957), duckdb_data_chunk_get_size (h:2976), and the 'row' arg of duckdb_validity_row_is_valid (h:3171: 'idx_t row'). ducklib.py declares them intp instead of uint64 at exactly the cited lines: L106 duckdb_column_count=intp(intp), L156 duckdb_data_chunk_get_column_count=intp(intp), L157 duckdb_data_chunk_get_size=intp(intp), L226 duckdb_row_count=intp(intp), L234 duckdb_validity_row_is_valid=int8(intp, intp) (2nd arg is the idx_t row). Sibling idx_t returns are correctly uint64 (L78 duckdb_array_type_array_size, L189 duckdb_get_list_size, L217 duckdb_nparams, L228 duckdb_struct_type_child_count), confirming the inconsistency is real and internal to this file. duckdb_vector_get_validity genuinely returns 'uint64_t *' (h:3043, a pointer) but ducklib.py L237 declares it uint64 (scalar) rather than intp, breaking the module's all-pointers-are-intp convention (sibling pointer-returning duckdb_vector_get_data at L236 correctly uses intp). This is real, not refuted: numba's IntegerModel/LLVM lower both intp (int64) and uint64 to the same i64 register width on every 64-bit ABI, so no data corruption occurs for realistic (always < 2^63) DuckDB counts/rows -- confirming the reviewer's own 'labeling, not corruption' characterization. Went further and found the vector_get_validity mismatch has a concrete (if minor) operational consequence beyond pure labeling: because @proxy dispatchers are eagerly compiled to a fixed signature, numba's typing does not silently unify a uint64 value with the intp argument type expected by duckdb_validity_row_is_valid's first parameter, so JIT call sites must add an explicit cast -- confirmed at test/test_ducklib.py:1118 ('intp(v3_validity_p)') and examples/irr.py:140-143 ('numpy.intp(ducklib.duckdb_vector_get_validity(vec_cf))', repeated x4 for cf/pd/inv/npv). This is stronger, concrete evidence for the defect than the original finding's speculative impact language ('could surprise numba callers'), but it still amounts to caller-side boilerplate/consistency friction rather than incorrect behavior, a crash, or silent data corruption, so 'low' severity is the right call -- not upgraded. All ducklib.py line citations (106, 156, 157, 226, 234, 237) checked directly against the current tree and match verbatim; the finding is accurately characterized and correctly scoped.",
+  "evidence": [
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:106 signatures[\"duckdb_column_count\"] = intp(intp)",
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:156 signatures[\"duckdb_data_chunk_get_column_count\"] = intp(intp)",
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:157 signatures[\"duckdb_data_chunk_get_size\"] = intp(intp)",
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:226 signatures[\"duckdb_row_count\"] = intp(intp)",
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:234 signatures[\"duckdb_validity_row_is_valid\"] = int8(intp, intp)",
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:237 signatures[\"duckdb_vector_get_validity\"] = uint64(intp)",
+    "duckdb.h:243 typedef uint64_t idx_t;",
+    "duckdb.h:995 DUCKDB_C_API idx_t duckdb_column_count(duckdb_result *result);",
+    "duckdb.h:1006 DUCKDB_C_API idx_t duckdb_row_count(duckdb_result *result);",
+    "duckdb.h:2957 DUCKDB_C_API idx_t duckdb_data_chunk_get_column_count(duckdb_data_chunk chunk);",
+    "duckdb.h:2976 DUCKDB_C_API idx_t duckdb_data_chunk_get_size(duckdb_data_chunk chunk);",
+    "duckdb.h:3043 DUCKDB_C_API uint64_t *duckdb_vector_get_validity(duckdb_vector vector);",
+    "duckdb.h:3171 DUCKDB_C_API bool duckdb_validity_row_is_valid(uint64_t *validity, idx_t row);",
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:78,189,217,228 confirm the correct uint64-for-idx_t convention used elsewhere in the same file",
+    "/home/erik/projects/numbduck/test/test_ducklib.py:1118 explicit intp(v3_validity_p) cast forced by the uint64/intp mismatch",
+    "/home/erik/projects/numbduck/examples/irr.py:140-143 explicit numpy.intp(...) casts (x4) forced by the same mismatch"
+  ]
+}

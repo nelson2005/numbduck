@@ -1,0 +1,21 @@
+{
+  "unit": "EX-os-MEM",
+  "results": [
+    {
+      "oldId": "EX-os-MEM-1",
+      "class": "covered",
+      "newIds": ["EX-os-MEM-2", "EX-os-COR-2"],
+      "justification": "Old EX-os-MEM-1 (no null/empty-chunk guard before dereferencing the chunk returned by duckdb_fetch_chunk, examples/online_scoring.py:123-136) is the same root-cause defect reported by current EX-os-MEM-2 (\"No NULL/size guard on fetched chunk before dereferencing it\", line 123) and EX-os-COR-2 (\"No chunk_p != 0 / empty-result guard before dereferencing the fetched chunk\", line 123). Same file, same read path (get_vector -> vector_get_data -> carray[0] on a possibly-NULL/empty chunk), same data-construction-gated trigger.",
+      "currentEvidence": "",
+      "adopted": {}
+    },
+    {
+      "oldId": "EX-os-MEM-2",
+      "class": "covered",
+      "newIds": ["EX-os-MEM-1", "EX-os-COR-1"],
+      "justification": "Old EX-os-MEM-2 (prepared statement leaked when duckdb_prepare fails / no try/finally, examples/online_scoring.py:155-161) is the same defect as current EX-os-MEM-1 (\"Prepared statement not destroyed on any error path (no try/finally)\", line 156) and EX-os-COR-1 (\"Prepared statement leaked when duckdb_prepare fails\", line 156). Identical root cause: the assert rc == DuckDBSuccess short-circuits duckdb_destroy_prepare, leaking the C-side handle that DuckDB allocates even on error.",
+      "currentEvidence": "",
+      "adopted": {}
+    }
+  ]
+}

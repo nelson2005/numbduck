@@ -1,0 +1,10 @@
+{
+  "findingId": "TMD-DOC-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "medium",
+  "reasoning": "Verified against current test/test_ducklib.md and test/test_ducklib.py (3548 lines). test_ducklib.md:51 and :75 both cite 'test_ducklib.py L3075-3176' as the location of the Welford callbacks. Reading test_ducklib.py confirms L3075-3176 spans from inside _arr_update_impl (L3065-3087, array-backed UDAF) through _arr_combine_impl/_arr_finalize_impl/_arr_destroy_impl (L3090-3163) and the plain @njit helpers welford_update/welford_combine (L3166-3192, not @cfunc/@njit-impl callback pairs at all). None of the actual Welford UDAF callbacks (_welford_state_size_impl/_cb through _welford_destroy_impl/_cb) are in that range -- they start at L3205 (_welford_state_size_impl) and run through L3305 (_welford_destroy_cb), exactly matching the finding's proposed replacement range. The doc's surrounding prose (lines 41-75) explicitly describes the structref-based Welford init/update/combine/finalize/destroy callback pattern using export_meminfo/borrow_structref, which textually matches the code at L3205-3305, not the array-bridge code at L3039-3163 that the stale anchor actually points to. Both citations of the anchor (design-doc lines 51 and 75) are wrong in the same way, so the defect is real, correctly characterized, and not refuted by any alternate contract, version-gating, or migration already handling it. Severity 'medium' is appropriate: it's a working-doc line-anchor rot (not a code bug) but it actively misdirects a reader to the wrong (structurally different, array vs. structref) implementation while prose describes the other, which is the same class of misattribution as the sibling TMD-DOC findings all rated medium/high.",
+  "citations": {
+    "doc": ["test/test_ducklib.md:51", "test/test_ducklib.md:75"],
+    "code": ["test/test_ducklib.py:3039-3163 (array UDAF, wrongly anchored)", "test/test_ducklib.py:3205-3305 (actual Welford callbacks)"]
+  }
+}

@@ -1,0 +1,39 @@
+{
+  "unit": "audit-adoptions",
+  "results": [
+    {
+      "oldId": "BLD-DES-1",
+      "class": "missed",
+      "justification": "Old confirmed HIGH (macOS entirely absent from CI, so all macOS-specific loader/download code is unexercised) was classified 'covered' solely by current TST-cover-10, which was REFUTED (correctedSeverity none) because its severity-driving Windows-ABI half is false on the current tree. TST-cover-10's own verifier note explicitly preserves the macOS sub-claim ('genuinely never referenced by any test... no macOS/darwin leg at all'). Cross-checking new-index.json against verified/: the confirmed UTL-* findings (UTL-COR-2/3, UTL-DES-2/3/4/5, UTL-SEC-1/2, XC-ver-1) each address a specific code DEFECT inside the macOS acquisition path, but none asserts the CI-coverage gap itself, and the BLD-DES unit's live findings concern the benchmark marker, numbox pin, __version__, flake8 exclude, and release.yml. So the still-valid 'macOS acquisition subsystem exercised by no CI job' substance is carried by no confirmed current finding.",
+      "currentEvidence": "numbduck/.github/workflows/numbduck_ci.yml:22 arch matrix is [\"ubuntu-latest\", \"ubuntu-24.04-arm\", \"windows-latest\"] with no macOS runner in any workflow. numbduck/utils.py still carries the entire macOS-only acquisition subsystem: _MACOS_LIBDUCKDB_SEARCH_PATHS (23-26), _find_standalone_libduckdb (33-47), _download_libduckdb with consent gate + versioned cache (50-91), and the double-runtime fallback in load_duckdb (113-130, gated on platform.system() == 'Darwin' at 124). No test in test/test_ducklib.py or test/test_init.py references these paths, and there is no macOS/darwin CI leg to reach them.",
+      "adopted": {
+        "id": "REC-BLD-DES-1",
+        "severity": "medium",
+        "title": "macOS is absent from CI, so numbduck's macOS-only library-acquisition subsystem is exercised by no automated job",
+        "file": "numbduck/.github/workflows/numbduck_ci.yml",
+        "line": 22,
+        "description": "The CI arch matrix (numbduck_ci.yml:22) is [\"ubuntu-latest\", \"ubuntu-24.04-arm\", \"windows-latest\"] and no workflow adds a macOS runner. Yet numbduck's most bespoke platform code exists precisely because the duckdb Python wheel strips the C API on macOS: the standalone-dylib discovery (_find_standalone_libduckdb, utils.py:33-47), the network download fallback with consent gate and versioned cache (_download_libduckdb, utils.py:50-91), the legacy-unversioned-cache cleanup (utils.py:37-40), and the Darwin-gated double-load of two duckdb runtimes (load_duckdb, utils.py:113-130). None of this is reached by any test or CI job. This is a pure CI/test coverage gap, not an active defect (the specific defects inside these functions are tracked separately as UTL-* findings); the concern here is that no platform exists to catch a regression in the acquisition path.",
+        "impact": "The platform the project documents as its hardest case (symbol-stripped wheel requiring standalone discovery or download) can regress silently for all macOS users. A change to the download URL scheme, cache layout, version-string-to-release-tag mapping, or the double-load runtime interaction would not be caught by any CI job.",
+        "recommendation": "Add at least one macos-latest (ARM64) matrix entry that exercises load_duckdb end-to-end, ideally with NUMBDUCK_LIBDUCKDB pointing at a brew-installed libduckdb so the standalone path is hit deterministically without the interactive download. A single smoke job materially closes the gap.",
+        "confidence": "high"
+      }
+    },
+    {
+      "oldId": "BLD-DES-3",
+      "class": "missed",
+      "justification": "Old confirmed MEDIUM (committed __version__ = \"\" means a non-release/local build silently reports a placeholder version) was classified 'covered' solely by current BLD-DES-3, which was REFUTED: current BLD-DES-3 overclaimed a PEP 440 build FAILURE, and the verifier empirically showed (pinned setuptools~=75.3.0 toolchain) that setuptools silently defaults the empty string to '0.0.0' with no failure. The old finding's milder, actually-correct claim (silent 0.0.0 placeholder on a local/non-release build) survives and is carried by no other confirmed current finding; BLD-DES-3 is the only live finding touching __version__ and it is refuted.",
+      "currentEvidence": "numbduck/numbduck/__init__.py:1 is literally `__version__ = \"\"`. pyproject.toml:29-30 resolves the dynamic version via attr = \"numbduck.__version__\", and the meaningful value is injected only by the CI 'Write version to __init__.py' step (numbduck_ci.yml:61-63). A contributor running `pip install -e .` or `python -m build` without that CI step therefore builds a wheel that setuptools silently normalizes to version '0.0.0' (verifier reproduced this with the pinned build toolchain).",
+      "adopted": {
+        "id": "REC-BLD-DES-3",
+        "severity": "low",
+        "title": "Committed __version__ is the empty string, so any non-CI build silently reports version 0.0.0",
+        "file": "numbduck/numbduck/__init__.py",
+        "line": 1,
+        "description": "The tracked numbduck/__init__.py is `__version__ = \"\"`, and pyproject.toml:29-30 uses dynamic version = {attr = \"numbduck.__version__\"}. The real value is written only by CI's 'Write version to __init__.py' step (numbduck_ci.yml:61-63). A contributor running `python -m build` or `pip install -e .` locally therefore resolves the version to the empty string, which setuptools silently normalizes to the placeholder '0.0.0' (no error, no failure). The single source of truth for the version lives only in CI YAML, not in the repo.",
+        "impact": "Local/non-release builds are silently mis-versioned as 0.0.0; a developer cannot produce a correctly-versioned wheel without replicating the CI echo step by hand. This is a minor packaging/reproducibility issue, not a build failure.",
+        "recommendation": "Commit a real fallback version (e.g. `__version__ = \"0.0.0.dev0\"`) or move version resolution to a tool that reads git metadata (setuptools-scm), so a local build yields a meaningful version without the CI overwrite.",
+        "confidence": "high"
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "findingId": "DCK-sig-COR-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Verified against the current /home/erik/projects/numbduck/numbduck/ducklib.py and duckdb.h (idx_t typedef'd to uint64_t at duckdb.h:243). All six cited sites are exactly as described: duckdb_column_count (ducklib.py:106) = intp(intp), duckdb_row_count (:226) = intp(intp), duckdb_data_chunk_get_column_count (:156) = intp(intp), duckdb_data_chunk_get_size (:157) = intp(intp) all return idx_t (duckdb.h:995,1006,2957,2976) but are declared with signed intp instead of uint64; duckdb_data_chunk_get_vector (:158) = intp(intp, intp) and duckdb_validity_row_is_valid (:234) = int8(intp, intp) both take an idx_t 2nd argument (duckdb.h:2968 col_idx, :3171 row) declared intp instead of uint64. This is a genuine inconsistency: sibling idx_t entries in the same file correctly use uint64 -- duckdb_nparams (:217), duckdb_get_list_size (:189), duckdb_rows_changed (:227), duckdb_struct_type_child_count (:228), duckdb_array_type_array_size (:78) as returns, and the idx_t args of duckdb_get_list_child/_map_key/_struct_child (:188,190,193) -- and numbduck's own CLAUDE.md documents the exact convention being violated: 'idx_t -> uint64_t -> uint64' (numbduck/CLAUDE.md line 30). Checked numbox's ABI lowering (/home/erik/projects/numbox/numbox/core/bindings/call.py, lines 79-116, 144-158): both intp and uint64 are 8-byte scalar (_CLASS_SCALAR) integer types, lowered via context.get_value_type(arg_ty) to the same LLVM i64 with no sign/zero-extension codegen -- confirming the reviewer's 'no runtime miscomputation for realistic (<2^63) values' claim at the ABI/register level. Checked all call sites of these six functions in test/test_ducklib.py (e.g. lines 156-158, 185-229, 1094-1117, 1926-2412): every call passes/consumes small literal Python ints (column indices 0-4, or counts used only in range()/comparisons), so no observed uint64-vs-intp typing friction is exercised by the current test suite -- consistent with characterizing this as a latent type-fidelity nit rather than an active, demonstrated bug. No refutation basis found: the defect is real, correctly scoped to exactly the 6 sites claimed, and low severity is appropriate given zero demonstrated runtime impact and the narrow realistic-value caveat.",
+  "citations": [
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:106",
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:156",
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:157",
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:158",
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:226",
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:234",
+    "/home/erik/projects/numbduck/CLAUDE.md:30",
+    "/home/erik/projects/numbox/numbox/core/bindings/call.py:79-116"
+  ]
+}

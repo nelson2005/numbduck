@@ -1,0 +1,63 @@
+{
+  "unit": "BLD-DES",
+  "results": [
+    {
+      "oldId": "BLD-DES-1",
+      "class": "covered",
+      "newIds": ["TST-cover-10"],
+      "justification": "Same root cause and impact: the macOS-specific library-acquisition/download path in the loader (standalone discovery, network download, double-load) has zero automated coverage, so a macOS-only loader/download regression ships undetected. TST-cover-10 states 'the macOS library-acquisition/download path in the loader are never hit by this suite' and that 'a macOS-only loader/download failure would not be caught by CI'. macOS is still absent from the matrix (numbduck_ci.yml:22) and utils.py still contains the untested paths. Reported at low (vs high) severity and from the test-suite angle; the current BLD-DES unit deliberately declined to score macOS absence (notes call it a documented intentional limitation), so TST-cover-10 is the only current finding capturing this defect.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "BLD-DES-2",
+      "class": "covered",
+      "newIds": ["BLD-DES-1"],
+      "justification": "Identical defect: the benchmark marker documents CI deselection (pyproject.toml:26) but CI runs bare pytest (numbduck_ci.yml:79) with no -m 'not benchmark' and no addopts, so test_udf_benchmark's 1M-row Python UDF runs on every matrix job. New BLD-DES-1 reports exactly this, same file/lines.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "BLD-DES-3",
+      "class": "covered",
+      "newIds": ["BLD-DES-3"],
+      "justification": "Identical defect: committed numbduck/__init__.py is __version__ = \"\", the dynamic version resolves it via attr (pyproject.toml:29-30), so an unstamped local pip install -e . / python -m build reads the empty string and yields an invalid PEP 440 version; only CI stamps it. New BLD-DES-3 is the same finding, same fix.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "BLD-DES-4",
+      "class": "covered",
+      "newIds": ["BLD-SEC-4", "BLD-DES-2"],
+      "justification": "Same root cause: numbox is left floating at CI install time (pip install -e ., numbduck_ci.yml:70) while numba/duckdb are pinned per matrix, over a floor-only, upper-bound-less numbox>=0.5.13 (pyproject.toml:13) - non-reproducible CI plus tight coupling to numbox internals. New BLD-SEC-4 reports the CI-install asymmetry verbatim ('numba/duckdb ARE explicitly pinned ... making numbox the odd one out'); BLD-DES-2 adds the pyproject upper-cap angle. (haversine_bench.yml's identical numbox-unpinning is not separately re-flagged but is the same defect.)",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "BLD-DES-5",
+      "class": "covered",
+      "newIds": ["DOC-acc-1"],
+      "justification": "Same defect: CLAUDE.md still states numbox~=0.5.6 while pyproject pins numbox much higher, so the documented floor is stale. The pyproject value has since moved (0.5.11 -> 0.5.13) but the CLAUDE.md drift persists; DOC-acc-1 reports it as 'CLAUDE.md numbox pin (~=0.5.6) contradicts pyproject (>=0.5.13)'.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "BLD-DES-6",
+      "class": "missed",
+      "newIds": [],
+      "justification": "The still-present, unmatched part is the duckdb dimension: the Windows-divergent struct ABI path is exercised only at duckdb 1.5.1, and the duckdb floor 1.3.2 plus 1.4.0 are never run on Windows (numbduck_ci.yml:39-42). The Python-only-3.11 half of the old finding is now stale (Windows also runs 3.14), and TST-cover-10 only touches 'Windows ABI branch exercised at all' (which CI now does); no current finding covers the duckdb-floor-never-on-Windows gap - the new BLD-DES unit explicitly deemed Windows coverage adequate.",
+      "currentEvidence": "",
+      "adopted": {
+        "id": "REC-BLD-DES-6",
+        "severity": "low",
+        "title": "Windows CI exercises the divergent struct ABI at a single duckdb version; the duckdb floor (1.3.2/1.4.0) is never run on Windows",
+        "file": "numbduck/.github/workflows/numbduck_ci.yml",
+        "line": 39,
+        "description": "The matrix excludes windows-latest from duckdb 1.3.2 (numbduck_ci.yml:39-40) and duckdb 1.4.0 (lines 41-42), leaving Windows to run only duckdb 1.5.1 (on Python 3.11 and 3.14, since 3.10/3.12/3.13 are excluded at lines 33-38). The Windows struct-by-value ABI lowering - by-pointer args and sret returns, now living in numbox (call.py / abi._current_platform) but reached through numbduck's wrappers - is the lowering that diverges most from SysV x86-64. numbduck's supported duckdb range is >=1.3.2,<1.6 (pyproject.toml:12), yet the lower bound of that range is never validated on the one platform whose ABI diverges, only on 1.5.1. The narrowing is deliberate (line 32 comment: 'reduce billable minutes').",
+        "impact": "A Windows-only regression tied to the duckdb floor 1.3.2 (or 1.4.0) on the divergent by-pointer/sret ABI would not be caught; the lower bound of the supported duckdb range is exercised on Linux/SysV only, never on Windows.",
+        "recommendation": "Accept the cost tradeoff if intended but document it explicitly, or add one Windows job at the duckdb floor (1.3.2) so the lower bound of the supported duckdb range is exercised at least once on the divergent Windows ABI.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

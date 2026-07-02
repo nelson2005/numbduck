@@ -1,0 +1,821 @@
+[
+  {
+    "id": "BLD-DES-1",
+    "unit": "BLD-DES",
+    "severity": "high",
+    "file": "numbduck/.github/workflows/numbduck_ci.yml",
+    "line": 79,
+    "title": "Benchmark test runs in CI despite marker documented as deselected",
+    "gist": "pyproject.toml:26 declares the marker `benchmark: slow benchmarks, run only locally (deselected in CI)`, and test/test_ducklib.py:2684 decorates `test_udf_benchmark` with `@pytest.mark.benchmark`. The CI test step is a bare `pytest` (numbduck_ci.yml:79) with no `-m \"not benchmark\"` filter, and pyproject.toml has no `addopts` (tool.pytest.ini_options"
+  },
+  {
+    "id": "BLD-DES-2",
+    "unit": "BLD-DES",
+    "severity": "medium",
+    "file": "numbduck/pyproject.toml",
+    "line": 13,
+    "title": "No upper cap on numbox while importing concrete internal modules",
+    "gist": "The runtime pin is `numbox>=0.5.13` with no upper bound (pyproject.toml:13). numbduck imports concrete, non-top-level internals of numbox: `from numbox.core.bindings.call import _call_lib_func, _call_lib_func_byval`, `from numbox.core.bindings.signatures import signatures`, and `from numbox.core.proxy.proxy import proxy, proxy_if_available` (ducklib.py:4-6). These are deep module paths and underscore-prefixed"
+  },
+  {
+    "id": "BLD-DES-3",
+    "unit": "BLD-DES",
+    "severity": "medium",
+    "file": "numbduck/numbduck/__init__.py",
+    "line": 1,
+    "title": "Committed __version__ is empty; local unstamped build produces an invalid version",
+    "gist": "The tracked `numbduck/__init__.py` is literally `__version__ = \"\"` (no newline). pyproject.toml:29-30 resolves the dynamic version via `attr = \"numbduck.__version__\"`, so an unstamped build reads the empty string. The build backend is pinned to setuptools~=75.3.0 (pyproject.toml:2), which validates versions against PEP"
+  },
+  {
+    "id": "BLD-DES-4",
+    "unit": "BLD-DES",
+    "severity": "low",
+    "file": "numbduck/.github/workflows/numbduck_ci.yml",
+    "line": 74,
+    "title": "flake8 excludes a path that does not exist in the tree",
+    "gist": "The hard flake8 pass excludes `test/core/random_image_ref.py` (`--exclude=test/core/random_image_ref.py`, numbduck_ci.yml:74). There is no `test/core/` directory in the repository; the path is a stale copy-paste leftover from another project. Excluding a nonexistent path is a no-op, so it is harmless today, but it"
+  },
+  {
+    "id": "BLD-DES-5",
+    "unit": "BLD-DES",
+    "severity": "low",
+    "file": "numbduck/.github/workflows/release.yml",
+    "line": 15,
+    "title": "release.yml drifts from other workflows: pinned-action lag, no sdist, inconsistent fallback minor",
+    "gist": "release.yml pins checkout@v4 (line 15), setup-python@v5 (line 17), and upload-artifact@v4 (line 40), while every other workflow uses @v6/@v7 (numbduck_ci.yml, doc-codeblock-flake8.yml, link-check.yml). It also builds only a wheel (`python -m build --wheel`, line 37) and never a source distribution, so the"
+  },
+  {
+    "id": "BLD-SEC-1",
+    "unit": "BLD-SEC",
+    "severity": "medium",
+    "file": ".github/workflows/release.yml",
+    "line": 25,
+    "title": "release.yml splices github.ref_name into run: shell and into __init__.py, feeding a PyPI-publish pipeline (script injection)",
+    "gist": "release.yml (NEW) interpolates GitHub expressions directly into the `run:` shell text of the `release-build` job. Line 25 `echo \"VERSION=${{ github.ref_name }}\" >> $GITHUB_ENV` places the tag name inside a double-quoted echo, and line 31 `echo \"__version__ = '${{ env.VERSION }}'\""
+  },
+  {
+    "id": "BLD-SEC-2",
+    "unit": "BLD-SEC",
+    "severity": "low",
+    "file": ".github/workflows/numbduck_ci.yml",
+    "line": 56,
+    "title": "numbduck_ci.yml splices github.ref_name into run: shell and into __init__.py on tag builds (script injection)",
+    "gist": "Same injection class as BLD-SEC-1, in the main CI workflow. Line 56 `echo \"VERSION=${{ github.ref_name }}\" >> $GITHUB_ENV` (reached only when `github.ref_type == 'tag'`) and line 63 `echo \"__version__ = '${{ env.VERSION }}'\" > numbduck/__init__.py` splice the tag name into"
+  },
+  {
+    "id": "BLD-SEC-3",
+    "unit": "BLD-SEC",
+    "severity": "medium",
+    "file": ".github/workflows/release.yml",
+    "line": 66,
+    "title": "PyPI-publish and other actions pinned to mutable refs; pypa/gh-action-pypi-publish uses a mutable BRANCH ref in the id-token:write job",
+    "gist": "Every third-party and first-party action in the workflows is pinned to a mutable ref (tag or branch), not a full commit SHA. The highest-value case is release.yml:66 `uses: pypa/gh-action-pypi-publish@release/v1` \u2014 `release/v1` is a moving BRANCH (not even an immutable tag),"
+  },
+  {
+    "id": "BLD-SEC-4",
+    "unit": "BLD-SEC",
+    "severity": "low",
+    "file": ".github/workflows/numbduck_ci.yml",
+    "line": 70,
+    "title": "CI pulls floating, upper-bound-less numbox (arbitrary latest) via pip install -e .",
+    "gist": "numbduck_ci.yml:70 `pip install -e .` resolves numbduck's runtime deps, and pyproject.toml:13 declares `numbox>=0.5.13` with NO upper cap and no lockfile/hash pinning. CI therefore installs whatever the newest numbox on PyPI is at run time and imports concrete internals from it"
+  },
+  {
+    "id": "CFG-COR-1",
+    "unit": "CFG-COR",
+    "severity": "medium",
+    "file": "numbduck/configurations.py",
+    "line": 14,
+    "title": "Valid-but-wrong-shape JSON (list/scalar/string) is accepted and silently disables caching",
+    "gist": "get_jit_options() returns json.loads(as_str) with no check that the parsed value is a dict. Any JSON that parses but is not an object -- e.g. NUMBDUCK_JIT_OPTIONS='[\"cache\"]', 'true', '5', or '\"cache\"' -- is returned as a list/bool/int/str. That value is then passed"
+  },
+  {
+    "id": "CFG-COR-2",
+    "unit": "CFG-COR",
+    "severity": "medium",
+    "file": "numbduck/configurations.py",
+    "line": 19,
+    "title": "Unknown/invalid jit option keys fail opaquely at import time with a numba error that never names the env var",
+    "gist": "jit_options = get_jit_options() runs at module import, and the dict is spread into njit(sig, **jit_options) inside proxy() for the very first @proxy-decorated wrapper in ducklib.py (line 276). A dict with a key numba's njit does not accept -- e.g. NUMBDUCK_JIT_OPTIONS='{\"cache\":"
+  },
+  {
+    "id": "CFG-COR-3",
+    "unit": "CFG-COR",
+    "severity": "low",
+    "file": "numbduck/configurations.py",
+    "line": 13,
+    "title": "Env var injects arbitrary keys into numba jit options without a whitelist",
+    "gist": "NUMBDUCK_JIT_OPTIONS is parsed and its keys flow unfiltered into njit(**jit_options) for every binding. This is not a code-execution vector (njit only accepts a fixed set of compilation flags, not callables/paths), so the practical security exposure is low and the env"
+  },
+  {
+    "id": "DBU-MEM-1",
+    "unit": "DBU-MEM",
+    "severity": "low",
+    "file": "numbduck/duckdb_utils.py",
+    "line": 39,
+    "title": "create_duckdb_result hard-codes a 48-byte buffer that libduckdb writes through by pointer",
+    "gist": "create_duckdb_result() returns allocate_buffer(6) = 6 x int64 = 48 bytes (duckdb_utils.py:36-39). This buffer's .ctypes.data is passed as the duckdb_result* out-param to duckdb_query / duckdb_execute_prepared, which memcpy the FULL duckdb_result struct through that pointer. The 48-byte size is pinned only against"
+  },
+  {
+    "id": "DCK-byval-MEM-1",
+    "unit": "DCK-byval-MEM",
+    "severity": "high",
+    "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+    "line": 946,
+    "title": "By-value duckdb_result args (fetch_chunk / result_return_type / result_statement_type) are lowered via _call_lib_func_byval (func(T*) semantics), which omits the SysV x86-64 byval stack copy so the 48-byte struct is read from uninitialized stack",
+    "gist": "ducklib.py:946, 1132, 1138 wrap three DuckDB C API functions with numbox's `_call_lib_func_byval`: duckdb_fetch_chunk, duckdb_result_return_type, duckdb_result_statement_type. Per duckdb.h 1.5.4 all three take the result struct BY VALUE, not by pointer: `duckdb_data_chunk duckdb_fetch_chunk(duckdb_result result)` (L4640), `duckdb_result_type duckdb_result_return_type(duckdb_result result)` (L1136), `duckdb_statement_type duckdb_result_statement_type(duckdb_result result)`"
+  },
+  {
+    "id": "DCK-proxy-COR-1",
+    "unit": "DCK-proxy-COR",
+    "severity": "low",
+    "file": "numbduck/configurations.py",
+    "line": 14,
+    "title": "get_jit_options accepts valid-but-non-object JSON, silently discarding config and disabling caching for all bindings",
+    "gist": "get_jit_options only guards json.JSONDecodeError; it does not assert that the parsed value is a dict. Valid JSON that is not an object (e.g. NUMBDUCK_JIT_OPTIONS='true', '5', '[1]', '\"x\"') passes json.loads and is returned as-is, so the module-level jit_options becomes a bool/int/list/str."
+  },
+  {
+    "id": "DCK-sig-COR-1",
+    "unit": "DCK-sig-COR",
+    "severity": "low",
+    "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+    "line": 106,
+    "title": "idx_t mapped to signed intp instead of uint64 in several count/size/index signatures (inconsistent with duckdb.h and with sibling entries)",
+    "gist": "duckdb.h defines idx_t as uint64_t, and CLAUDE.md states the mapping convention 'idx_t -> uint64_t -> uint64'. Most entries follow it: duckdb_nparams (:217), duckdb_get_list_size (:189), duckdb_rows_changed (:227), duckdb_struct_type_child_count (:228), duckdb_union_type_member_count (:231), duckdb_array_type_array_size (:78) all return uint64 for an idx_t; and idx_t"
+  },
+  {
+    "id": "DCK-sig-COR-2",
+    "unit": "DCK-sig-COR",
+    "severity": "low",
+    "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+    "line": 237,
+    "title": "duckdb_vector_get_validity return typed uint64 but the C return is a pointer (uint64_t *) \u2014 violates the 'all pointers are intp' invariant",
+    "gist": "duckdb.h declares 'uint64_t *duckdb_vector_get_validity(duckdb_vector vector);' \u2014 the return value is a POINTER to the validity bitmask (or NULL). The signature declares the return as uint64 (an unsigned integer value), not intp. Every other pointer-returning binding in the file uses intp"
+  },
+  {
+    "id": "DCK-sig-DES-1",
+    "unit": "DCK-sig-DES",
+    "severity": "medium",
+    "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+    "line": 1411,
+    "title": "Struct-by-value bind wrappers stranded at file end; wrapper/section grouping diverges from the signatures dict",
+    "gist": "The four struct-by-value bind wrappers duckdb_bind_hugeint (1411), duckdb_bind_uhugeint (1417), duckdb_bind_interval (1423) and duckdb_bind_decimal (1429) are defined at the very bottom of the file, after all scalar- and aggregate-function wrappers, whereas the other 18 duckdb_bind_* wrappers are grouped together at 288-411."
+  },
+  {
+    "id": "DCK-sig-DES-2",
+    "unit": "DCK-sig-DES",
+    "severity": "low",
+    "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+    "line": 14,
+    "title": "Dead code: _is_win and its sole enabling import sys are unused",
+    "gist": "_is_win = sys.platform == 'win32' (line 14) is never referenced anywhere in the module (grep confirms only the definition), and import sys (line 1) exists solely to compute it. All platform/ABI branching now lives in numbox (abi._current_platform / call.py), so"
+  },
+  {
+    "id": "DCK-sig-DES-3",
+    "unit": "DCK-sig-DES",
+    "severity": "low",
+    "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+    "line": 728,
+    "title": "Two varint wrappers use a divergent, versioned docstring URL instead of the mandated stable form",
+    "gist": "duckdb_create_varint (728) and duckdb_get_varint (1053) document themselves with 'https://duckdb.org/docs/1.3/clients/c/api#duckdb_create_varint' (and #duckdb_get_varint) \u2014 a version-pinned '/docs/1.3/...' path with no '.html' \u2014 whereas every other one of the 193 wrappers, including the third proxy_if_available-gated wrapper duckdb_scalar_function_set_init (1287), uses 'https://duckdb.org/docs/stable/clients/c/api.html#name'. numbduck/CLAUDE.md explicitly mandates"
+  },
+  {
+    "id": "DCK-wrap-COR-1",
+    "unit": "DCK-wrap-COR",
+    "severity": "low",
+    "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+    "line": 106,
+    "title": "idx_t returns/args inconsistently typed as signed intp instead of uint64 (and one uint64_t* return typed uint64)",
+    "gist": "duckdb.h declares idx_t as uint64_t (per CLAUDE.md 'Adding a New Binding' step 1: idx_t -> uint64_t -> uint64). The file follows this for most idx_t returns/args (duckdb_array_type_array_size L78 uint64, duckdb_get_list_size L189 uint64, duckdb_nparams L217 uint64, duckdb_struct_type_child_count L228 uint64), but declares"
+  },
+  {
+    "id": "DCK-wrap-COR-2",
+    "unit": "DCK-wrap-COR",
+    "severity": "low",
+    "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+    "line": 728,
+    "title": "varint wrapper docstrings use non-standard versioned doc links (violates api.html convention)",
+    "gist": "CLAUDE.md 'Adding a New Binding' step 5 mandates docstring links of the form https://duckdb.org/docs/stable/clients/c/api.html#func_name. All 191 other wrappers follow this exactly, including the sibling version-gated duckdb_scalar_function_set_init (L1287). The two varint wrappers deviate: duckdb_create_varint (L728) and duckdb_get_varint (L1053) link to https://duckdb.org/docs/1.3/clients/c/api#duckdb_create_varint"
+  },
+  {
+    "id": "DCK-wrap-DES-1",
+    "unit": "DCK-wrap-DES",
+    "severity": "high",
+    "file": "/home/erik/projects/numbduck/CLAUDE.md",
+    "line": 43,
+    "title": "CLAUDE.md Architecture/Follow-ups sections describe a since-completed migration and helpers/intrinsics that do not exist in the current @proxy tree",
+    "gist": "The current ducklib.py wraps every C function with @proxy(...)/@proxy_if_available(...) plus _call_lib_func/_call_lib_func_byval (imported from numbox), and contains NO @intrinsic definitions and NO local helper functions at all. Multiple concrete CLAUDE.md claims are now false: (1) L26 says wrappers use '@cres +"
+  },
+  {
+    "id": "DCK-wrap-DES-2",
+    "unit": "DCK-wrap-DES",
+    "severity": "low",
+    "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+    "line": 1411,
+    "title": "Four struct-by-value bind wrappers appended at EOF instead of in their sorted slot with the other duckdb_bind_* wrappers",
+    "gist": "duckdb_bind_hugeint (1411), duckdb_bind_uhugeint (1417), duckdb_bind_interval (1423), and duckdb_bind_decimal (1429) are defined at the very end of the file, after the entire scalar/aggregate-function section (1213-1408), whereas every other duckdb_bind_* wrapper is clustered at 288-411. These four are exactly the struct-by-value binds"
+  },
+  {
+    "id": "DCK-wrap-DES-3",
+    "unit": "DCK-wrap-DES",
+    "severity": "low",
+    "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+    "line": 276,
+    "title": "~190 near-identical 4-line wrappers each repeat the C function-name string three times",
+    "gist": "Every binding is the same 4-line shape: '@proxy(signatures.get(\"NAME\"), jit_options=jit_options)' / 'def NAME(args):' / docstring / 'return _call_lib_func(\"NAME\", (args,))'. The C name string 'NAME' is written three times per binding (decorator lookup key, def name, and the _call_lib_func literal) across ~190"
+  },
+  {
+    "id": "DOC-acc-1",
+    "unit": "DOC-acc",
+    "severity": "high",
+    "file": "numbduck/CLAUDE.md",
+    "line": 16,
+    "title": "CLAUDE.md numbox pin (~=0.5.6) contradicts pyproject (>=0.5.13)",
+    "gist": "CLAUDE.md 'Key dependencies' states `numbox~=0.5.6`, but pyproject.toml:13 pins `numbox>=0.5.13`. `~=0.5.6` means `>=0.5.6,<0.6` which is not even the same operator family, and the floor is 7 patch releases stale. The current @proxy tree depends on numbox APIs (proxy/proxy_if_available, the generic INT/INT"
+  },
+  {
+    "id": "DOC-acc-2",
+    "unit": "DOC-acc",
+    "severity": "high",
+    "file": "numbduck/CLAUDE.md",
+    "line": 34,
+    "title": "CLAUDE.md documents the removed @cres binding pattern; current tree uses @proxy",
+    "gist": "The 'Adding a New Binding' code example (lines 33-37) and the Architecture step (line 26, 'wraps each function with `@cres` + `_call_lib_func`') and Related-Projects (line 86, numbox 'Provides ... `@cres` decorator') all describe a `@cres(signatures.get(\"duckdb_func\"))` wrapper. The current ducklib.py imports"
+  },
+  {
+    "id": "DOC-acc-3",
+    "unit": "DOC-acc",
+    "severity": "high",
+    "file": "numbduck/CLAUDE.md",
+    "line": 43,
+    "title": "CLAUDE.md 'Struct-by-value helpers' section lists ducklib.py helpers that no longer exist",
+    "gist": "Lines 43-53 claim `ducklib.py` provides `_call_lib_func_struct_in`, `_call_lib_func_struct_out`, `_call_lib_func_byval`, `_emit_byval_call`, `_build_packed_interval`, and 'Custom `@intrinsic` functions ... for >16-byte structs'. In the current tree ducklib.py defines none of these: it imports only `_call_lib_func, _call_lib_func_byval` from numbox.core.bindings.call (ducklib.py:4), contains zero `@intrinsic` definitions, and"
+  },
+  {
+    "id": "DOC-acc-4",
+    "unit": "DOC-acc",
+    "severity": "high",
+    "file": "numbduck/CLAUDE.md",
+    "line": 57,
+    "title": "CLAUDE.md 'Follow-ups' cites nonexistent ducklib.py line range 1525-1640 and an already-completed migration",
+    "gist": "The Follow-ups item (lines 57-62) says to 'Migrate `_duckdb_bind_hugeint`/`_uhugeint`/`_interval` ... Three hand-rolled intrinsics at `ducklib.py:1525-1640` (~116 lines)' and references sibling wrappers at `ducklib.py:298-433`. ducklib.py is 1432 lines total, so lines 1525-1640 do not exist. Moreover the migration described as pending"
+  },
+  {
+    "id": "DOC-acc-5",
+    "unit": "DOC-acc",
+    "severity": "medium",
+    "file": "numbduck/CLAUDE.md",
+    "line": 30,
+    "title": "Adding-a-New-Binding steps 1/7 tell you to verify docstring links against duckdb.h, contradicting step 5 and the actual docstrings",
+    "gist": "Step 1 (line 30) says 'Verify all docstring links point to the correct line in `duckdb.h`' and step 7 (line 41) says 're-verify ... docstring links against `duckdb.h`'. But step 5 (line 39) mandates 'Docstring links must use `https://duckdb.org/docs/stable/clients/c/api.html#func_name`, not"
+  },
+  {
+    "id": "EX-common-1",
+    "unit": "EX-common",
+    "severity": "medium",
+    "file": "examples/_common.py",
+    "line": 73,
+    "title": "assert_results_match spuriously fails when all variants produce NaN",
+    "gist": "assert_results_match compares with `if first != other`. For IEEE-754 NaN, `NaN != NaN` is always True, so if every variant legitimately produces NaN the guard raises AssertionError claiming a mismatch even though the variants agree. This directly contradicts the docstring's"
+  },
+  {
+    "id": "EX-common-2",
+    "unit": "EX-common",
+    "severity": "medium",
+    "file": "examples/_common.py",
+    "line": 50,
+    "title": "format_table does not validate row length; wrong-width rows crash or silently truncate",
+    "gist": "format_table validates that headers and alignments are the same length (line 47) but never validates row length. `widths` has exactly len(headers) entries. The loop `for i, cell in enumerate(row): widths[i] = max(...)` (lines 50-52) indexes `widths[i]`, so any row longer"
+  },
+  {
+    "id": "EX-fraud-1",
+    "unit": "EX-fraud",
+    "severity": "low",
+    "file": "examples/fraud_score.py",
+    "line": 170,
+    "title": "func_p scalar-function handle leaked on the register-failure path",
+    "gist": "In register_jit_udf, the scalar-function builder handle func_p (created at line 154 by duckdb_create_scalar_function) is only destroyed at lines 172-173 (duckdb_destroy_scalar_function), which run AFTER the 'assert rc == ducklib.DuckDBSuccess' at line 171. If duckdb_register_scalar_function returns DuckDBError, the assert raises before the"
+  },
+  {
+    "id": "EX-hav-1",
+    "unit": "EX-hav",
+    "severity": "high",
+    "file": "examples/haversine.py",
+    "line": 101,
+    "title": "Kernel treats literal-constant argument vectors as flat n-element arrays (out-of-bounds read of args lat2/lon2)",
+    "gist": "The SQL calls the UDF as hv_jit(lat, lon, 37.7749, -122.4194) (haversine.py:152 via sql_py -> sql_jit at 155). Arguments 3 and 4 are SQL literal constants. In DuckDB, a BoundConstantExpression evaluates to a CONSTANT_VECTOR whose data buffer holds a SINGLE physical"
+  },
+  {
+    "id": "EX-hav-2",
+    "unit": "EX-hav",
+    "severity": "low",
+    "file": "examples/haversine.py",
+    "line": 135,
+    "title": "Scalar-function handle leaked if registration assertion fails",
+    "gist": "In register_jit_udf, func_p is created at line 125 and only destroyed at lines 136-137 (duckdb_destroy_scalar_function) AFTER assert rc == DuckDBSuccess (line 135). If duckdb_register_scalar_function returns DuckDBError, the assert raises before the destroy runs, so func_p is never freed. The logical-type"
+  },
+  {
+    "id": "EX-irr-COR-1",
+    "unit": "EX-irr-COR",
+    "severity": "medium",
+    "file": "examples/irr.py",
+    "line": 88,
+    "title": "Bisection uses an absolute NPV tolerance only; returns NaN for large-magnitude cashflows even after full convergence",
+    "gist": "irr_bisect (lines 78-94) exits successfully ONLY when abs(npv) < 1e-9 (line 88). It has no bracket-width fallback: if the tolerance is not met within the 100 iterations, it returns math.nan (line 94). The residual NPV that is achievable at the"
+  },
+  {
+    "id": "EX-irr-COR-2",
+    "unit": "EX-irr-COR",
+    "severity": "low",
+    "file": "examples/irr.py",
+    "line": 80,
+    "title": "Fixed bisection bracket [-0.99, 10.0]; roots outside the bracket silently return NaN",
+    "gist": "irr_bisect hard-codes r_lo = -0.99 and r_hi = 10.0 (lines 80-81). Bisection can only locate a root inside this bracket. Because the only successful-exit path is the absolute-tolerance test at line 88, a true monthly IRR above 10.0 (1000%/month) or"
+  },
+  {
+    "id": "EX-irr-MEM-1",
+    "unit": "EX-irr-MEM",
+    "severity": "low",
+    "file": "examples/irr.py",
+    "line": 156,
+    "title": "Borrowed structref ref leaks (and result is silently wrong) if an impl raises inside a @cfunc-wrapped callback",
+    "gist": "None of the five @cfunc-wrapped @njit impls (_irr_update_impl/_combine_impl/_finalize_impl, plus init/destroy) wraps its body in a try/except. Per the documented numba @cfunc contract (MEMORY 'numba @cfunc swallows exceptions'), a raise inside an impl called from a @cfunc returns the zero/void default"
+  },
+  {
+    "id": "EX-os-COR-1",
+    "unit": "EX-os-COR",
+    "severity": "low",
+    "file": "examples/online_scoring.py",
+    "line": 156,
+    "title": "Prepared statement leaked when duckdb_prepare fails (cleanup missing on error path)",
+    "gist": "score_jit() calls `rc = ducklib.duckdb_prepare(...)` then `assert rc == ducklib.DuckDBSuccess` (lines 155-156), and only reaches `duckdb_destroy_prepare(stmt.ctypes.data)` at line 161 if the assert passes. duckdb.h documents that a prepared statement must be destroyed with duckdb_destroy_prepare even when duckdb_prepare fails (a statement"
+  },
+  {
+    "id": "EX-os-COR-2",
+    "unit": "EX-os-COR",
+    "severity": "low",
+    "file": "examples/online_scoring.py",
+    "line": 123,
+    "title": "No chunk_p != 0 / empty-result guard before dereferencing the fetched chunk",
+    "gist": "The JIT loop calls `chunk_p = ducklib.duckdb_fetch_chunk(result_tup)` (line 123) and immediately passes chunk_p to duckdb_data_chunk_get_vector (lines 125-128) with no `chunk_p != 0` guard, and then reads `carray(..., (1,), float64)[0]` (lines 133-140) assuming exactly one row. Neither the duckdb_bind_int64 (line 117)"
+  },
+  {
+    "id": "EX-os-MEM-1",
+    "unit": "EX-os-MEM",
+    "severity": "medium",
+    "file": "examples/online_scoring.py",
+    "line": 156,
+    "title": "Prepared statement not destroyed on any error path (no try/finally)",
+    "gist": "score_jit (lines 150-162) allocates a DuckDB prepared statement via duckdb_prepare (line 155) and only frees it with duckdb_destroy_prepare at line 161, on the straight-line happy path. There is no try/finally. Two leak paths exist. (a) The `assert rc == ducklib.DuckDBSuccess`"
+  },
+  {
+    "id": "EX-os-MEM-2",
+    "unit": "EX-os-MEM",
+    "severity": "low",
+    "file": "examples/online_scoring.py",
+    "line": 123,
+    "title": "No NULL/size guard on fetched chunk before dereferencing it",
+    "gist": "Inside _score_jit_loop, duckdb_fetch_chunk (line 123) is called once per execute and its return (chunk_p) is immediately passed to duckdb_data_chunk_get_vector (lines 125-128) and the vector data is read as carray(..., (1,), float64) (lines 133-140) assuming exactly one chunk with exactly one"
+  },
+  {
+    "id": "EX-readme-DOC-1",
+    "unit": "EX-readme-DOC",
+    "severity": "medium",
+    "file": "examples/README.md",
+    "line": 33,
+    "title": "README presents irr.py as a runnable script but gives no way to actually run it; run_irr.py is never mentioned and irr.py exits(1) if run directly",
+    "gist": "The opening line calls these 'Runnable narrative-style scripts' (README.md:3) and the Scripts list links the IRR example as '[irr.py](irr.py)' (README.md:33). But irr.py is NOT directly runnable: its module-body guard `if __name__ == \"__main__\": ... sys.exit(1)` (examples/irr.py:33-39) refuses to run and"
+  },
+  {
+    "id": "EX-readme-DOC-2",
+    "unit": "EX-readme-DOC",
+    "severity": "low",
+    "file": "examples/README.md",
+    "line": 20,
+    "title": "numbox clock.py doc link pinned to tag 0.5.8, below the numbox>=0.5.13 dependency pin",
+    "gist": "The online_scoring bullet links `numbox.utils.clock.monotonic_ns` to https://github.com/Goykhman/numbox/blob/0.5.8/numbox/utils/clock.py (README.md:20). The project's actual numbox floor is `numbox>=0.5.13` (pyproject.toml dependencies), so the link references a source tree three minor releases older than the minimum supported numbox. This is inconsistent with the sibling make_structref"
+  },
+  {
+    "id": "EX-scalar-MEM-1",
+    "unit": "EX-scalar-MEM",
+    "severity": "low",
+    "file": "examples/haversine.py",
+    "line": 117,
+    "title": "Scalar-UDF @cfunc callbacks have no exception guard; a raise inside the impl is swallowed at numba's cfunc boundary, handing DuckDB a silent 'success' with a partially-written/garbage output vector and no error signalled",
+    "gist": "Both scalar chunk callbacks are thin @cfunc wrappers over a module-level @njit impl with no try/except: _haversine_chunk_cb (haversine.py:116-118) -> _haversine_chunk_impl (haversine.py:87-113), and _fraud_chunk_cb (fraud_score.py:147-149) -> _fraud_chunk_impl (fraud_score.py:102-144). Per the codebase's verified numba contract (MEMORY reference_numba_cfunc_swallows_exceptions; confirmed against numba's np_cfarray) a"
+  },
+  {
+    "id": "PBR-COR-1",
+    "unit": "PBR-COR",
+    "severity": "high",
+    "file": "numbduck/pybridge.py",
+    "line": 62,
+    "title": "No duckdb version guard although hard-coded pybind11/ABI offsets are validated only on 1.3.2 while the pin allows <1.6",
+    "gist": "extract_connection_ptr hard-codes two ABI offsets: id(conn)+16 (line 59) to read the DuckDBPyConnection C++ object pointer and cpp_obj_p+32 (line 62) to read the unique_ptr<Connection>. The docstring (lines 31-34) states these are 'Validated on duckdb 1.3.2 / Linux x86-64 / libstdc++' and"
+  },
+  {
+    "id": "PBR-COR-2",
+    "unit": "PBR-COR",
+    "severity": "medium",
+    "file": "numbduck/pybridge.py",
+    "line": 62,
+    "title": "Intermediate pointers (offset +16 and +32) are not NULL-checked before use",
+    "gist": "cpp_obj_p (line 59) and conn_ptr (line 62) are taken from ctypes.c_void_p.from_address(...).value, which returns Python None when the read word is 0. Neither is validated. Two concrete reachable failures: (a) If the +16 read yields 0 (cpp_obj_p is None), line 62"
+  },
+  {
+    "id": "PBR-COR-3",
+    "unit": "PBR-COR",
+    "severity": "low",
+    "file": "numbduck/pybridge.py",
+    "line": 28,
+    "title": "Docstring claims the pointer is 'validated' but the SELECT 1 check cannot detect a structurally-wrong pointer",
+    "gist": "The docstring (lines 28-29, 49-50) states the extracted pointer 'is validated by running SELECT 1 via the C API before it is returned' and documents RuntimeError 'If the extracted pointer fails the validation query'. The validation (lines 65-72) can only"
+  },
+  {
+    "id": "PBR-DES-1",
+    "unit": "PBR-DES",
+    "severity": "medium",
+    "file": "numbduck/pybridge.py",
+    "line": 28,
+    "title": "Docstring overstates what the SELECT 1 step validates; no graceful failure path for the layout-drift it warns about",
+    "gist": "The docstring promises that the extracted pointer 'is validated by running SELECT 1 via the C API before it is returned' (lines 28-29) and that a RuntimeError is raised 'if the extracted pointer fails the validation query' (lines 49-51). The"
+  },
+  {
+    "id": "PBR-DES-2",
+    "unit": "PBR-DES",
+    "severity": "medium",
+    "file": "numbduck/pybridge.py",
+    "line": 59,
+    "title": "Hard-coded ABI offsets with no named constants, no duckdb version guard, and no programmatic re-verify mechanism",
+    "gist": "The two load-bearing ABI offsets are inline magic numbers: `ctypes.c_void_p.from_address(py_obj_addr + 16)` (line 59) and `ctypes.c_void_p.from_address(cpp_obj_p + 32)` (line 62). The docstring validates them only against 'duckdb 1.3.2 / Linux x86-64 / libstdc++' and instructs a human to 'Re-verify offsets"
+  },
+  {
+    "id": "PBR-MEM-1",
+    "unit": "PBR-MEM",
+    "severity": "low",
+    "file": "numbduck/pybridge.py",
+    "line": 74,
+    "title": "Returned Connection* is a borrowed pointer with an undocumented keep-alive / use-after-close contract",
+    "gist": "extract_connection_ptr returns conn_ptr (line 74) as a bare Python int read from offset +32 inside the C++ DuckDBPyConnection (line 62). This int is a *borrowed* raw pointer: the underlying Connection is owned by the Python `conn` object (the unique_ptr<Connection> living"
+  },
+  {
+    "id": "PBR-MEM-2",
+    "unit": "PBR-MEM",
+    "severity": "medium",
+    "file": "numbduck/pybridge.py",
+    "line": 62,
+    "title": "No null/validity guard on the extracted pointer before it is dereferenced by the SELECT 1 validation",
+    "gist": "conn_ptr is read from `cpp_obj_p + 32` (line 62) and passed straight into ducklib.duckdb_query(conn_ptr, ...) (line 67) with no check that it is non-null or live. The sibling bridge explicitly guards this: `if db_ptr is None: raise RuntimeError('extracted null sqlite3*"
+  },
+  {
+    "id": "PBR-SEC-1",
+    "unit": "PBR-SEC",
+    "severity": "medium",
+    "file": "numbduck/pybridge.py",
+    "line": 67,
+    "title": "No library-coordination guard: a Connection* minted by the duckdb wheel is passed to a possibly-different libduckdb resolved by numbduck's JIT bindings (cross-library type confusion)",
+    "gist": "extract_connection_ptr recovers the raw Connection* out of the duckdb Python wheel's C++ DuckDBPyConnection object (id(conn)+16 then +32, lines 59/62) and then hands that pointer straight to ducklib.duckdb_query / ducklib.duckdb_destroy_result (lines 67-68). Those two symbols are NOT resolved from the wheel"
+  },
+  {
+    "id": "PBR-SEC-2",
+    "unit": "PBR-SEC",
+    "severity": "low",
+    "file": "numbduck/pybridge.py",
+    "line": 52,
+    "title": "isinstance guard is not an ABI-layout proof: a spoofed/subclassed object turns the two chained from_address reads into attacker-influenced pointer dereferences",
+    "gist": "The only gate before the raw pointer walk is isinstance(conn, duckdb.DuckDBPyConnection) (line 52). isinstance is not a proof of memory layout: it is satisfied by (a) a subclass of DuckDBPyConnection, (b) any object whose metaclass overrides __instancecheck__, or (c) an"
+  },
+  {
+    "id": "PBR-SEC-3",
+    "unit": "PBR-SEC",
+    "severity": "low",
+    "file": "numbduck/pybridge.py",
+    "line": 42,
+    "title": "Borrowed / use-after-free ownership contract of the returned pointer is undocumented (sibling documents it explicitly)",
+    "gist": "extract_connection_ptr returns a bare int (line 74) that is a pointer BORROWED from conn: it stays valid only while conn is alive and open, and it cannot keep conn referenced. The docstring (lines 41-51) documents only the int return and"
+  },
+  {
+    "id": "TMD-DOC-1",
+    "unit": "TMD-DOC",
+    "severity": "high",
+    "file": "test/test_ducklib.md",
+    "line": 80,
+    "title": "Bridge functions falsely claimed to be \"defined\" in test_ducklib.py at a wrong line range",
+    "gist": "The 'Bridge intrinsics' section states: 'Three functions transfer ownership between NRT and the DuckDB state slot. Defined at test_ducklib.py L2796-2874.' This is wrong on two counts. (1) export_meminfo, borrow_structref, and release_meminfo are NOT defined in test_ducklib.py at all -- they"
+  },
+  {
+    "id": "TMD-DOC-2",
+    "unit": "TMD-DOC",
+    "severity": "medium",
+    "file": "test/test_ducklib.md",
+    "line": 51,
+    "title": "Welford callback anchor (L3075-3176) points to the array UDAF, not the Welford callbacks",
+    "gist": "Two places cite the Welford callbacks at 'test_ducklib.py L3075-3176' (design-doc line 51 'callbacks defined at ... L3075-3176' and line 75 'Source: L3075-3176' for the @cfunc/@njit pattern). In the current test file the Welford callbacks (_welford_state_size_impl/_cb through _welford_destroy_impl/_cb) span L3205-3305. L3075-3176"
+  },
+  {
+    "id": "TMD-DOC-3",
+    "unit": "TMD-DOC",
+    "severity": "medium",
+    "file": "test/test_ducklib.md",
+    "line": 51,
+    "title": "Registration anchor (L3280-3304) points to Welford finalize/destroy defs, not the registration block",
+    "gist": "Design-doc lines 51 and 192 cite 'registered at test_ducklib.py L3280-3304' for the duckdb_aggregate_function_set_functions / set_destructor registration. In the current test file L3280-3304 is the body of _welford_finalize_cb and _welford_destroy_impl/_cb -- not registration code. The actual registration (`duckdb_aggregate_function_set_functions`) is at L3422"
+  },
+  {
+    "id": "TMD-DOC-4",
+    "unit": "TMD-DOC",
+    "severity": "medium",
+    "file": "test/test_ducklib.md",
+    "line": 199,
+    "title": "refcount ladder test link (L3179) is stale; test is at L2931",
+    "gist": "Line 199 links `test_structref_meminfo_bridge_refcount_ladder` to test_ducklib.py#L3179. The function is actually defined at L2931 (test_array_meminfo_bridge_refcount_ladder is at L2974). L3179 does not correspond to that test."
+  },
+  {
+    "id": "TMD-DOC-5",
+    "unit": "TMD-DOC",
+    "severity": "low",
+    "file": "test/test_ducklib.md",
+    "line": 197,
+    "title": "Commented-out intrinsic range (L2877-2914) is stale; it is at L2836-2851",
+    "gist": "Line 197 states 'The commented-out intrinsic at test_ducklib.py L2877-2914 attempted to read the NRT refcount...'. The commented `_refcount_of_meminfo` intrinsic (and its `refcount_of_meminfo` wrapper) is at L2836-2851 in the current file; the WARNING comment explaining it starts at L2814. L2877-2914 is"
+  },
+  {
+    "id": "TST-COR-1",
+    "unit": "TST-COR",
+    "severity": "low",
+    "file": "test/test_ducklib.py",
+    "line": 1691,
+    "title": "test_get_value_type asserts only non-null, never verifies the returned type id",
+    "gist": "test_get_value_type (lines 1687-1694) creates an INT32 value, calls duckdb_get_value_type(val_p), and asserts only `type_p != 0`. It never confirms the returned logical type is actually DUCKDB_TYPE_INTEGER (e.g. via duckdb_get_type_id). Any binding that returned a non-zero-but-wrong handle -- or a wrong type"
+  },
+  {
+    "id": "TST-COR-2",
+    "unit": "TST-COR",
+    "severity": "low",
+    "file": "test/test_ducklib.py",
+    "line": 1641,
+    "title": "test_create_array_value never reads back element contents",
+    "gist": "test_create_array_value (lines 1634-1647) builds a 3-element ARRAY value from three int32 values and asserts only `av != 0` before destroying it. Unlike test_create_get_list_value (line 1531), test_create_get_map_value (line 1563), and test_create_get_struct_value (line 1602) -- which read children back and assert their"
+  },
+  {
+    "id": "TST-MEM-1",
+    "unit": "TST-MEM",
+    "severity": "medium",
+    "file": "test/test_ducklib.py",
+    "line": 172,
+    "title": "aux_get_data_vector discards the out_result buffer, making the DuckDB result impossible to destroy",
+    "gist": "aux_get_data_vector() (172-182) does duckdb_result = tuple(out_result) at line 174 and returns that tuple plus data_chunk_p, but NOT the out_result numpy array. out_result is the buffer that physically backs the duckdb_result C struct and is the only handle duckdb_destroy_result can be"
+  },
+  {
+    "id": "TST-MEM-2",
+    "unit": "TST-MEM",
+    "severity": "medium",
+    "file": "test/test_ducklib.py",
+    "line": 212,
+    "title": "Several tests create result/data_chunk handles and never destroy them",
+    "gist": "Multiple tests allocate DuckDB handles and never call the matching destroy, unlike the surrounding tests that are careful to do so. Concrete cases: test_query (132-137) leaks out_result; test_duckdb_column_count_and_duckdb_row_count (153-160) leaks out_result; test_duckdb_fetch_chunk_exhausted (212-219) leaks BOTH the first fetched chunk (chunk_p"
+  },
+  {
+    "id": "TST-MEM-3",
+    "unit": "TST-MEM",
+    "severity": "medium",
+    "file": "test/test_ducklib.py",
+    "line": 3462,
+    "title": "No DuckDB C-handle leak accounting anywhere; only NRT (numba) allocations are tracked",
+    "gist": "The only leak accounting in the suite is rtsys.get_allocation_stats() asserting alloc==free in the two UDAF end-to-end tests (test_aggregate_function_structref_stddev:3439/3462-3466, test_aggregate_function_array_variance:3521/3544-3548) and the nested-heap dtor test (3344-3389). Those stats count ONLY numba-runtime (NRT/MemInfo) allocations \u2014 i.e. the structref/array UDAF state. They are"
+  },
+  {
+    "id": "TST-cover-1",
+    "unit": "TST-cover",
+    "severity": "medium",
+    "file": "test/test_ducklib.py",
+    "line": 1706,
+    "title": "test_struct_size_guard tests pure-Python arithmetic, never the ABI guard it names",
+    "gist": "test_struct_size_guard (1706-1724) claims to 'Verify the size computation used by _call_lib_func_struct_in/out.' but its body only computes sum(t.bitwidth for t in <numba tuple type>)/8 and asserts the resulting integers (16, 8, 18, 19, 24). It never imports or calls _call_lib_func_struct_in /"
+  },
+  {
+    "id": "TST-cover-2",
+    "unit": "TST-cover",
+    "severity": "medium",
+    "file": "test/test_ducklib.py",
+    "line": 212,
+    "title": "Multi-chunk (>2048 row) results and the fetch_chunk loop are never exercised",
+    "gist": "Every result in the suite comes from aux_query_1 (107-129, 3 rows) or single-value SELECTs. Chunk exhaustion is validated only for a single 3-row chunk: test_duckdb_fetch_chunk_exhausted (212-219) fetches one non-null chunk then asserts the next is null. DuckDB's standard vector size"
+  },
+  {
+    "id": "TST-cover-3",
+    "unit": "TST-cover",
+    "severity": "medium",
+    "file": "test/test_ducklib.py",
+    "line": 891,
+    "title": "High-precision decimal (width>18 / 128-bit value) never bound or created",
+    "gist": "test_bind_decimal (891-906) binds DECIMAL(10,2) with value tuple (10, 2, 12345, 0) and reads back an INT64 physical storage; test_create_get_decimal (1319-1327) uses the same (10,2,12345,0). Both are width<=18 (INT64 physical) and always pass the hugeint value's upper 64 bits as 0."
+  },
+  {
+    "id": "TST-cover-4",
+    "unit": "TST-cover",
+    "severity": "medium",
+    "file": "test/test_ducklib.py",
+    "line": 3229,
+    "title": "UDF/UDAF callbacks never read validity; NULL input rows are untested by design",
+    "gist": "Every UDF/UDAF update/scalar callback reads duckdb_vector_get_data and iterates all n rows without ever calling duckdb_vector_get_validity (_add_one_impl 1924, _double_it_* 2083/2100, _isqrt_impl 2538, _triple_impl 2602, _welford_update_impl 3229, _arr_update_impl 3064, _agg_update_impl 2226). The NOTE at 3227-3228 makes this explicit: 'skips NULL validity checks"
+  },
+  {
+    "id": "TST-cover-5",
+    "unit": "TST-cover",
+    "severity": "low",
+    "file": "test/test_ducklib.py",
+    "line": 1165,
+    "title": "Destroy of value/logical-type/function handles is never verified (no slot-zero or leak assert)",
+    "gist": "Handle liveness-after-destroy is asserted only for database/connection/prepared/data_chunk via buf[0]==0 (98, 208, 287). For the ~150 value, logical-type, and scalar/aggregate-function tests, teardown calls aux_destroy_value (1165-1170), duckdb_destroy_logical_type, or duckdb_destroy_scalar_function on a scratch buffer and never re-reads the slot, never asserts alloc==free, and"
+  },
+  {
+    "id": "TST-cover-6",
+    "unit": "TST-cover",
+    "severity": "low",
+    "file": "test/test_ducklib.py",
+    "line": 934,
+    "title": "test_column_logical_type executes but never asserts the type is correct",
+    "gist": "test_column_logical_type (934-943) fetches the column's logical type pointer, asserts only logical_type_p != 0, then destroys it. It never calls duckdb_get_type_id on the returned logical type to confirm it is DUCKDB_TYPE_INTEGER, unlike test_create_logical_type_integer (1727-1733) and the type-constructor tests which all verify"
+  },
+  {
+    "id": "TST-cover-7",
+    "unit": "TST-cover",
+    "severity": "low",
+    "file": "test/test_ducklib.py",
+    "line": 1634,
+    "title": "test_create_array_value asserts only non-null; array value contents are never read back",
+    "gist": "test_create_array_value (1634-1648) builds a 3-element array value, asserts av != 0, and destroys everything. Unlike the sibling container tests -- list (get_list_size + get_list_child at 1538-1543), map (get_map_size/key/value at 1576-1588), struct (get_struct_child at 1617-1621) -- it never reads back the"
+  },
+  {
+    "id": "TST-cover-8",
+    "unit": "TST-cover",
+    "severity": "low",
+    "file": "test/test_ducklib.py",
+    "line": 2376,
+    "title": "test_scalar_function_set_init never verifies the init callback runs; init impl is a no-op",
+    "gist": "test_scalar_function_set_init (2376-2420) registers a UDF with duckdb_scalar_function_set_init whose callback (_init_cb -> _init_cb_impl, 2362-2369) is a bare 'pass'. The test only asserts the ordinary add_one result is 43. Nothing observes that the init callback was invoked or mutated any state, so"
+  },
+  {
+    "id": "TST-cover-9",
+    "unit": "TST-cover",
+    "severity": "low",
+    "file": "test/test_ducklib.py",
+    "line": 1029,
+    "title": "JIT (@njit) tests assert Success only; no in-JIT error/edge branch is covered",
+    "gist": "The JIT section (993-1160) only exercises happy paths: jit_open_close (1013) and jit_connect_query_disconnect (1029) assert DuckDBSuccess and non-null pointers; jit_prepare_bind_execute (1061) reads back values but only for a successful prepare/bind/execute. No @njit test drives an error return code (invalid SQL, failed"
+  },
+  {
+    "id": "TST-cover-10",
+    "unit": "TST-cover",
+    "severity": "low",
+    "file": "test/test_ducklib.py",
+    "line": 835,
+    "title": "Windows sret/by-pointer struct ABI and macOS library-download branches are unexercised",
+    "gist": "All struct-by-value tests (hugeint 835, uhugeint 853, interval 871, decimal 891, and the create/get value equivalents 1263-1327) plus every UDF/UDAF path run only on SysV x86-64 (Linux/WSL2, confirmed by the benchmark docstring at 2693). The Windows branches of _call_lib_func_struct_in/out (arg-by-pointer"
+  },
+  {
+    "id": "TST-cover-11",
+    "unit": "TST-cover",
+    "severity": "low",
+    "file": "test/test_ducklib.py",
+    "line": 267,
+    "title": "Only the short (inline) string_t layout is read back; long (>12 char, out-of-line) strings untested",
+    "gist": "aux_read_inline_string (267-272) decodes DuckDB string_t as a uint32 length at data_p followed by inline chars at data_p+4, and BLOB reads use the same inline layout (778-782). Every string/blob tested is short: 'hello', 'hello world'[:5], '42', 4-byte blob -- all within"
+  },
+  {
+    "id": "UTL-COR-1",
+    "unit": "UTL-COR",
+    "severity": "low",
+    "file": "numbduck/utils.py",
+    "line": 98,
+    "title": "find_duckdb_shared_lib regex is not end-anchored, so a sidecar can trip the len==1 invariant and hide a valid lib (or select the wrong file)",
+    "gist": "Both discovery regexes use re.match without a trailing '$': `re.match(r\"duckdb[\\w.-]*\\.(so|dll|dylib|pyd)\", file_)` (line 98) and `_duckdb[\\w.-]*\\.(so|dll|dylib|pyd)` (line 104). re.match anchors only at the start, so any name that merely CONTAINS a valid extension as a substring also matches, e.g. `duckdb.cpython-312-x86_64-linux-gnu.so.debug` or"
+  },
+  {
+    "id": "UTL-COR-2",
+    "unit": "UTL-COR",
+    "severity": "low",
+    "file": "numbduck/utils.py",
+    "line": 40,
+    "title": "Legacy-cache os.remove is an unconditional filesystem mutation inside a discovery ('find') function and can crash import",
+    "gist": "_find_standalone_libduckdb (a lookup) unconditionally deletes the old unversioned cache: `if os.path.isfile(old_cached): os.remove(old_cached)` (lines 38-40). os.remove is unguarded \u2014 a read-only $HOME, root-owned legacy file, or a concurrent process racing the same delete will raise PermissionError/FileNotFoundError, which propagates out of load_duckdb"
+  },
+  {
+    "id": "UTL-COR-3",
+    "unit": "UTL-COR",
+    "severity": "low",
+    "file": "numbduck/utils.py",
+    "line": 121,
+    "title": "macOS fallback leaves a dual DuckDB runtime (symbol-less wheel + standalone) globally loaded with no guard against symbol shadowing",
+    "gist": "On the macOS stripped-wheel path load_duckdb first loads the wheel RTLD_GLOBAL at line 115 (and the wheel is already resident from `import duckdb` at line 1), then loads the standalone/downloaded dylib RTLD_GLOBAL at line 121/130. Two independent DuckDB engines are"
+  },
+  {
+    "id": "UTL-DES-1",
+    "unit": "UTL-DES",
+    "severity": "medium",
+    "file": "numbduck/utils.py",
+    "line": "38, 41, 87, 88",
+    "title": "Cache dylib path and filename literal duplicated across two functions",
+    "gist": "The bare filename literal \"libduckdb.dylib\" is repeated four times (old_cached :38, cached :41, dest :87, zf.open member :88), and the *cached destination path* `os.path.join(_LIBDUCKDB_CACHE_DIR, \"libduckdb.dylib\")` is independently reconstructed in two different functions: `_find_standalone_libduckdb` (:41, the path it looks for) and"
+  },
+  {
+    "id": "UTL-DES-2",
+    "unit": "UTL-DES",
+    "severity": "medium",
+    "file": "numbduck/utils.py",
+    "line": "129",
+    "title": "Downloaded library is returned without the _has_capi_symbols re-check applied to every other path",
+    "gist": "Every other load path validates the handle with `_has_capi_symbols` before trusting it: the wheel (:116) and the standalone (:122). The download branch alone returns `load_lib_path(downloaded)` directly (:129-130) with no symbol probe. A stripped, truncated, or wrong-architecture download (the universal zip"
+  },
+  {
+    "id": "UTL-DES-3",
+    "unit": "UTL-DES",
+    "severity": "medium",
+    "file": "numbduck/utils.py",
+    "line": "67",
+    "title": "input() consent prompt crashes library import with EOFError under non-interactive stdin",
+    "gist": "When the macOS fallback is reached and `NUMBDUCK_LIBDUCKDB_DOWNLOAD != \"1\"`, the flow calls `input(\"Download now? [y/N] \")` (:67). Under CI, a piped/closed stdin, a subprocess, or any non-TTY context, `input()` raises `EOFError`, which is uncaught. Because this whole subsystem runs"
+  },
+  {
+    "id": "UTL-DES-4",
+    "unit": "UTL-DES",
+    "severity": "low",
+    "file": "numbduck/utils.py",
+    "line": "37",
+    "title": "Read-flavoured _find_standalone_libduckdb performs an unconditional os.remove side effect",
+    "gist": "`_find_standalone_libduckdb` is named and used as a pure discovery function (its result feeds an `if standalone:` at :119-120), but it embeds an unconditional filesystem mutation: it `os.remove`s the legacy unversioned cache `~/.numbduck/lib/libduckdb.dylib` if present (:37-40). Hiding a destructive migration inside"
+  },
+  {
+    "id": "UTL-DES-5",
+    "unit": "UTL-DES",
+    "severity": "medium",
+    "file": "numbduck/utils.py",
+    "line": "121",
+    "title": "macOS fallback loads two full DuckDB runtimes RTLD_GLOBAL, enabling cross-runtime handle mismatch",
+    "gist": "On the macOS fallback path the symbol-less wheel is first loaded RTLD_GLOBAL (:115) and then the standalone/downloaded dylib is loaded RTLD_GLOBAL as well (:121 / :130). Two complete DuckDB runtimes are now resident in one process with global state (allocator,"
+  },
+  {
+    "id": "UTL-DES-6",
+    "unit": "UTL-DES",
+    "severity": "low",
+    "file": "numbduck/utils.py",
+    "line": "83",
+    "title": "Download failures (404 / missing zip member) surface as raw urllib/zipfile errors, and version-range comment is rot-prone",
+    "gist": "The download assumes the wheel's `duckdb.__version__` string is exactly a DuckDB GitHub release tag that ships an asset literally named `libduckdb-osx-universal.zip` containing a member literally named `libduckdb.dylib` (:52-56, :88). If the wheel version has a pre/post-release suffix, or the asset/member"
+  },
+  {
+    "id": "UTL-SEC-1",
+    "unit": "UTL-SEC",
+    "severity": "medium",
+    "file": "numbduck/utils.py",
+    "line": 88,
+    "title": "Downloaded and cached libduckdb.dylib is dlopen'd RTLD_GLOBAL with no checksum/signature verification (supply-chain + cache poisoning \u2192 native code execution)",
+    "gist": "_download_libduckdb fetches libduckdb-osx-universal.zip over HTTPS from the DuckDB GitHub release (url built at lines 52-56), reads the whole body (line 84: data = resp.read()), opens the zip in memory (line 85), and writes the extracted member straight to the on-disk"
+  },
+  {
+    "id": "UTL-SEC-2",
+    "unit": "UTL-SEC",
+    "severity": "low",
+    "file": "numbduck/utils.py",
+    "line": 83,
+    "title": "urlopen has no timeout: a hung/slow network path blocks library import indefinitely (availability)",
+    "gist": "The download at line 83 (`with urlopen(url) as resp:`) passes no timeout= argument, so it inherits the global default socket timeout, which is None unless the process set one. A stalled TCP connection, a slowloris-style trickle from a malicious/misbehaving endpoint"
+  },
+  {
+    "id": "XC-numbox-COR-1",
+    "unit": "XC-numbox-COR",
+    "severity": "medium",
+    "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+    "line": 237,
+    "title": "duckdb_vector_get_validity return typed uint64 instead of intp, breaking the all-pointers-are-intp contract",
+    "gist": "signatures[\"duckdb_vector_get_validity\"] = uint64(intp) (ducklib.py:237; wrapper ducklib.py:1207-1210). Per duckdb.h the function is `uint64_t *duckdb_vector_get_validity(duckdb_vector vector)` \u2014 it returns a POINTER (uint64_t*) to the validity bitmask, not a scalar. numbduck's documented contract is that every pointer is carried as `intp` (CLAUDE.md UDF"
+  },
+  {
+    "id": "XC-numbox-MEM-1",
+    "unit": "XC-numbox-MEM",
+    "severity": "low",
+    "file": "examples/irr.py",
+    "line": 165,
+    "title": "UDAF @cfunc callbacks have no exception guard; a raise inside an impl is swallowed by numba's cfunc boundary, leaking the borrow_structref incref and handing DuckDB a silent zero/void default",
+    "gist": "Every DuckDB aggregate callback is a thin @cfunc wrapper that forwards to a module-level @njit impl with no try/except: _irr_state_size_cb (109-111), _irr_init_cb (124-126), _irr_update_cb (165-167), _irr_combine_cb (188-190), _irr_finalize_cb (209-211), _irr_destroy_cb (223-225). Per the codebase's own numba contract (MEMORY reference_numba_cfunc_swallows_exceptions: numba"
+  },
+  {
+    "id": "XC-ver-1",
+    "unit": "XC-ver",
+    "severity": "high",
+    "file": "numbduck/utils.py",
+    "line": 44,
+    "title": "No version-coordination check between the loaded standalone libduckdb and the Python duckdb wheel before pybridge hands it wheel-owned Connection* pointers",
+    "gist": "On the macOS (and env-override) fallback path, load_duckdb() loads a SECOND copy of libduckdb to supply the C API symbols the Python wheel strips (utils.py:113-130). _find_standalone_libduckdb() returns a lib from three sources: the NUMBDUCK_LIBDUCKDB env override (utils.py:34-36), the versioned cache"
+  },
+  {
+    "id": "XC-ver-2",
+    "unit": "XC-ver",
+    "severity": "medium",
+    "file": "numbduck/pybridge.py",
+    "line": 62,
+    "title": "pybridge Connection* extraction uses hardcoded pybind11/DuckDBPyConnection offsets validated only on duckdb 1.3.2/Linux, guarded only by an rc check that a wrong offset can bypass",
+    "gist": "extract_connection_ptr() reads the C++ object pointer at id(conn)+16 (pybind11 instance header) and the Connection* at DuckDBPyConnection+32 (pybridge.py:59-62). The docstring states these offsets were 'Validated on duckdb 1.3.2 / Linux x86-64 / libstdc++' and 'may change with major duckdb releases.' numbduck's"
+  }
+]

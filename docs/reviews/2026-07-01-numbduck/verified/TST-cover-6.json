@@ -1,0 +1,6 @@
+{
+  "findingId": "TST-cover-6",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Read test/test_ducklib.py:934-943 directly. test_column_logical_type fetches out_result_p, calls duckdb_column_logical_type(out_result_p, 0), asserts only logical_type_p != 0, then destroys the logical type buffer and closes the DB. It never calls duckdb_get_type_id on the returned pointer to confirm the column's logical type is DUCKDB_TYPE_INTEGER (the known schema of aux_query_1's column 0, 'i'). By contrast, ducklib.duckdb_get_type_id is a real binding used pervasively elsewhere in the same file (test_create_logical_type_integer at 1727-1748, list/array/map/struct/union/enum logical-type tests at 1780-1902) specifically to assert the correct type id after construction. Nothing in ducklib.py or numbox's proxy/call machinery makes the non-null check equivalent to a correctness check -- duckdb_column_logical_type could return a valid-but-wrong logical-type handle (e.g. a caching/aliasing bug, or wrong column index math) and this test would still pass. The gap is real and narrowly scoped (a single metadata-accessor test), matching the claimed severity of low."
+}

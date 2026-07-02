@@ -1,0 +1,44 @@
+{
+  "unit": "UTL-COR",
+  "target": "utils.py loader",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "UTL-COR-1",
+      "severity": "low",
+      "title": "find_duckdb_shared_lib regex is not end-anchored, so a sidecar can trip the len==1 invariant and hide a valid lib (or select the wrong file)",
+      "file": "numbduck/utils.py",
+      "line": 98,
+      "category": "cross-version/packaging",
+      "description": "Both discovery regexes use re.match without a trailing '$': `re.match(r\"duckdb[\\w.-]*\\.(so|dll|dylib|pyd)\", file_)` (line 98) and `_duckdb[\\w.-]*\\.(so|dll|dylib|pyd)` (line 104). re.match anchors only at the start, so any name that merely CONTAINS a valid extension as a substring also matches, e.g. `duckdb.cpython-312-x86_64-linux-gnu.so.debug` or a versioned soname `duckdb....so.1`. The `.` in the character class `[\\w.-]` and the un-anchored tail both widen the match. The loader then enforces `len(pkg_libs) == 1` (line 99) / `len(site_libs) == 1` (line 105); a second matching sidecar makes len==2 and the function raises RuntimeError at line 107 even though a perfectly loadable library is present. On Windows the duckdb package can ship both the engine `duckdb.dll` and the binding `duckdb*.pyd` in the same package dir, and both extensions are in the alternation, which independently produces len>1 and picks neither. Conversely, with exactly one over-broad match the wrong file (e.g. a .pyd binding rather than the C-API-exporting .dll) could be returned.",
+      "impact": "Import of ducklib fails with a hard 'could not find unambiguous duckdb shared library' error, or loads a non-C-API file, on layouts that carry a debug/soname sidecar or (Windows) a separate .dll + .pyd — a valid lib is missed even though it exists.",
+      "recommendation": "Anchor the extension at end of string (add '$' or use re.fullmatch), and prefer selecting the actual C-API-exporting object explicitly (e.g. verify with _has_capi_symbols before accepting a candidate) rather than relying solely on a len==1 count over a broad regex.",
+      "confidence": "low"
+    },
+    {
+      "id": "UTL-COR-2",
+      "severity": "low",
+      "title": "Legacy-cache os.remove is an unconditional filesystem mutation inside a discovery ('find') function and can crash import",
+      "file": "numbduck/utils.py",
+      "line": 40,
+      "category": "robustness/side-effect-in-read-path",
+      "description": "_find_standalone_libduckdb (a lookup) unconditionally deletes the old unversioned cache: `if os.path.isfile(old_cached): os.remove(old_cached)` (lines 38-40). os.remove is unguarded — a read-only $HOME, root-owned legacy file, or a concurrent process racing the same delete will raise PermissionError/FileNotFoundError, which propagates out of load_duckdb and turns 'import numbduck.ducklib' into a crash on the very macOS-stripped-wheel path this fallback is meant to service.",
+      "impact": "On the macOS fallback path, a non-writable or racing legacy cache file converts a recoverable library-discovery step into an import-time exception.",
+      "recommendation": "Wrap the removal in try/except (swallow/log OSError), or move the one-time migration cleanup out of the read-flavoured discovery function entirely so a failed unlink cannot abort loading.",
+      "confidence": "medium"
+    },
+    {
+      "id": "UTL-COR-3",
+      "severity": "low",
+      "title": "macOS fallback leaves a dual DuckDB runtime (symbol-less wheel + standalone) globally loaded with no guard against symbol shadowing",
+      "file": "numbduck/utils.py",
+      "line": 121,
+      "category": "dual-runtime",
+      "description": "On the macOS stripped-wheel path load_duckdb first loads the wheel RTLD_GLOBAL at line 115 (and the wheel is already resident from `import duckdb` at line 1), then loads the standalone/downloaded dylib RTLD_GLOBAL at line 121/130. Two independent DuckDB engines are now in-process. Correct today only because the wheel exports none of the duckdb_* C-API symbols (only PyInit__duckdb + duckdb_adbc_init), so RTLD_DEFAULT resolves the JIT's extern duckdb_* refs to the standalone. If a future wheel exported even a partial C API, first-in-load-order symbol resolution would silently bind the JIT to the wheel copy; and any handle created via the Python `duckdb` module (wheel engine) passed into numbduck njit code (standalone engine) is cross-runtime UB. The loader neither re-checks which copy backs the resolved symbols nor documents/guards the constraint.",
+      "impact": "Latent (not active on current wheels): a partial-C-API wheel or user-mixed handles between the Python duckdb module and numbduck would cause wrong-copy binding or crashes, surfacing only at JIT-call time, not at load.",
+      "recommendation": "Document the single-engine constraint; consider asserting the resolved duckdb_open address belongs to the standalone (e.g. via dladdr) when taking the fallback path, and warn if the wheel also exports C-API symbols.",
+      "confidence": "low"
+    }
+  ],
+  "notes": "duckdb is not installed in the review environment (no venv python with duckdb), so package-layout-dependent claims (UTL-COR-1 Windows .dll+.pyd, sidecar files) are reasoned from the understanding notes/CLAUDE.md, not verified against a real wheel; confidence set accordingly. load_lib_path (numbox bindings/utils.py:167-183) confirmed to dlopen RTLD_GLOBAL (Linux/Darwin) / winmode=0 (Windows) and is uncached; lifetime is held by ducklib.duckdb_lib. _has_capi_symbols probes `duckdb_open`, which is the correct choice because that symbol is stripped on macOS while duckdb_adbc_init is not (per CLAUDE.md), so the probe is sound. The versioned cache path and download URL are both keyed on duckdb.__version__ consistently. No hard signature/type or return-code correctness defect was found in the loader; findings are robustness/packaging-edge and mostly low confidence."
+}

@@ -1,0 +1,68 @@
+{
+  "unit": "TMD-DOC",
+  "target": "test/test_ducklib.md",
+  "dimension": "DOC",
+  "findings": [
+    {
+      "id": "TMD-DOC-1",
+      "severity": "high",
+      "title": "Bridge functions falsely claimed to be \"defined\" in test_ducklib.py at a wrong line range",
+      "file": "test/test_ducklib.md",
+      "line": 80,
+      "category": "stale-reference/misattribution",
+      "description": "The 'Bridge intrinsics' section states: 'Three functions transfer ownership between NRT and the DuckDB state slot. Defined at test_ducklib.py L2796-2874.' This is wrong on two counts. (1) export_meminfo, borrow_structref, and release_meminfo are NOT defined in test_ducklib.py at all -- they are imported from numbox at test/test_ducklib.py:11-14 (`from numbox.utils.meminfo import (borrow_structref, export_meminfo, _incref_meminfo, release_meminfo, structref_meminfo)`) and their real definitions live in /home/erik/projects/numbox/numbox/utils/meminfo.py (export_meminfo L144, borrow_structref L132, release_meminfo L156). (2) Lines 2794-2874 of the current test file contain only a comment block plus the commented-out `_refcount_of_meminfo` intrinsic -- no bridge-function definitions. The link (test_ducklib.py#L2796-L2874) therefore points a reader to code that does not contain the described functions, and misattributes ownership of the numbox contract to the test file.",
+      "impact": "A maintainer following the link finds no such definitions and cannot locate the actual incref/deref/release logic (which lives in numbox and governs the whole pattern). Also obscures that borrow_structref/export_meminfo are @njit wrappers over numbox @intrinsics (_incref_meminfo, _deref_structref_raw_ptr, _release_meminfo), not intrinsics defined here.",
+      "recommendation": "State that the three functions are imported from numbox.utils.meminfo (cite test_ducklib.py:11-14) and link the definitions to the numbox source (numbox/utils/meminfo.py: export_meminfo, borrow_structref, release_meminfo). Remove the false 'Defined at test_ducklib.py L2796-2874' claim.",
+      "confidence": "high"
+    },
+    {
+      "id": "TMD-DOC-2",
+      "severity": "medium",
+      "title": "Welford callback anchor (L3075-3176) points to the array UDAF, not the Welford callbacks",
+      "file": "test/test_ducklib.md",
+      "line": 51,
+      "category": "stale-line-reference",
+      "description": "Two places cite the Welford callbacks at 'test_ducklib.py L3075-3176' (design-doc line 51 'callbacks defined at ... L3075-3176' and line 75 'Source: L3075-3176' for the @cfunc/@njit pattern). In the current test file the Welford callbacks (_welford_state_size_impl/_cb through _welford_destroy_impl/_cb) span L3205-3305. L3075-3176 lands squarely inside the DIFFERENT array-backed UDAF (_arr_state_size_impl at L3039, _arr_init_impl at L3049, etc.). The linked range shows the wrong aggregate implementation.",
+      "impact": "Readers following either link land on the array UDAF (which uses inline _incref_meminfo + carray) while the prose describes the structref Welford callbacks (export_meminfo/borrow_structref) -- directly contradicting the surrounding explanation.",
+      "recommendation": "Update both anchors to L3205-3305 (Welford state_size/init/update/combine/finalize/destroy).",
+      "confidence": "high"
+    },
+    {
+      "id": "TMD-DOC-3",
+      "severity": "medium",
+      "title": "Registration anchor (L3280-3304) points to Welford finalize/destroy defs, not the registration block",
+      "file": "test/test_ducklib.md",
+      "line": 51,
+      "category": "stale-line-reference",
+      "description": "Design-doc lines 51 and 192 cite 'registered at test_ducklib.py L3280-3304' for the duckdb_aggregate_function_set_functions / set_destructor registration. In the current test file L3280-3304 is the body of _welford_finalize_cb and _welford_destroy_impl/_cb -- not registration code. The actual registration (`duckdb_aggregate_function_set_functions`) is at L3422 and `duckdb_aggregate_function_set_destructor` at L3430 (register call at L3433), inside the end-to-end test.",
+      "impact": "Both 'registration' links resolve to callback definitions, misleading anyone trying to see how the UDAF is registered with DuckDB.",
+      "recommendation": "Point the registration anchors to ~L3409-3433 (the set_name/add_parameter/set_return_type/set_functions/set_destructor/register_aggregate_function block).",
+      "confidence": "high"
+    },
+    {
+      "id": "TMD-DOC-4",
+      "severity": "medium",
+      "title": "refcount ladder test link (L3179) is stale; test is at L2931",
+      "file": "test/test_ducklib.md",
+      "line": 199,
+      "category": "stale-line-reference",
+      "description": "Line 199 links `test_structref_meminfo_bridge_refcount_ladder` to test_ducklib.py#L3179. The function is actually defined at L2931 (test_array_meminfo_bridge_refcount_ladder is at L2974). L3179 does not correspond to that test.",
+      "impact": "The link jumps to unrelated code (the array UDAF region) rather than the cited refcount-ladder test.",
+      "recommendation": "Change the anchor to #L2931.",
+      "confidence": "high"
+    },
+    {
+      "id": "TMD-DOC-5",
+      "severity": "low",
+      "title": "Commented-out intrinsic range (L2877-2914) is stale; it is at L2836-2851",
+      "file": "test/test_ducklib.md",
+      "line": 197,
+      "category": "stale-line-reference",
+      "description": "Line 197 states 'The commented-out intrinsic at test_ducklib.py L2877-2914 attempted to read the NRT refcount...'. The commented `_refcount_of_meminfo` intrinsic (and its `refcount_of_meminfo` wrapper) is at L2836-2851 in the current file; the WARNING comment explaining it starts at L2814. L2877-2914 is past the commented block (inside WelfordStateType / getter definitions). The prose description of the intrinsic's behavior remains accurate; only the line range is wrong.",
+      "impact": "Reader following the reference lands after the commented block, not on it.",
+      "recommendation": "Update the range to L2836-2851 (or L2814-2851 to include the explanatory WARNING).",
+      "confidence": "high"
+    }
+  ],
+  "notes": "Scope: accuracy of test/test_ducklib.md vs current test/test_ducklib.py (3548 lines) and the numbox meminfo contract. The technical substance of the doc is SOUND: the removerefctpass all-or-nothing stripping rationale, why release_meminfo uses NRT_MemInfo_release (matches numbox _release_meminfo docstring, numbox/utils/meminfo.py:90-111), the export/borrow/release refcount reasoning, the @cfunc-wrapper/@njit-impl pattern, state_size=8 (verified _welford_state_size_impl returns uint64(8)), and the array-bridge inline-incref rationale all match the code. All defects found are STALE ANCHORS after the test file changed (every cited L#### range is off) plus one misattribution (TMD-DOC-1: the bridge functions are imported from numbox.utils.meminfo, not defined in the test file). Not flagged: the doc mixes numba version refs (removerefctpass/nrt.cpp pinned to 0.61.2 while the datamodel link uses 0.65); those are external links whose line targets I could not verify read-only, so no finding. Terminology nit (section titled 'Bridge intrinsics' though export_meminfo/borrow_structref/release_meminfo are @njit wrappers, only the underlying _incref_meminfo/_deref_structref_raw_ptr/_release_meminfo are @intrinsic) folded into TMD-DOC-1's recommendation."
+}

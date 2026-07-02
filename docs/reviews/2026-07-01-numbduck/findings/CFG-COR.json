@@ -1,0 +1,44 @@
+{
+  "unit": "CFG-COR",
+  "target": "configurations.py (NEW)",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "CFG-COR-1",
+      "severity": "medium",
+      "title": "Valid-but-wrong-shape JSON (list/scalar/string) is accepted and silently disables caching",
+      "file": "numbduck/configurations.py",
+      "line": 14,
+      "category": "correctness/robustness",
+      "description": "get_jit_options() returns json.loads(as_str) with no check that the parsed value is a dict. Any JSON that parses but is not an object -- e.g. NUMBDUCK_JIT_OPTIONS='[\"cache\"]', 'true', '5', or '\"cache\"' -- is returned as a list/bool/int/str. That value is then passed to numbox.core.proxy.proxy as jit_options=..., where proxy.py normalizes it with `jit_options = isinstance(jit_options, dict) and jit_options or {}` (proxy.py line ~69). A non-dict therefore silently collapses to {} and the wrappers are JIT-compiled with NO options at all -- in particular cache is silently off. There is no error and no warning: the user believes they configured jit options but every binding recompiles cold on every import. This defeats the whole point of the default {\"cache\": True} and is exactly the kind of misconfiguration a config parser should catch.",
+      "impact": "Silent, hard-to-diagnose loss of the compile cache (and any other intended option) for the entire ducklib binding set whenever the env var holds valid-but-non-object JSON; no error surfaces to the operator.",
+      "recommendation": "Validate the parsed shape in get_jit_options(): after json.loads, `if not isinstance(as_json, dict): raise ValueError(\"NUMBDUCK_JIT_OPTIONS must be a JSON object, e.g. {\\\"cache\\\": false}\")`. Fail loudly at import rather than letting proxy silently coerce to {}.",
+      "confidence": "high"
+    },
+    {
+      "id": "CFG-COR-2",
+      "severity": "medium",
+      "title": "Unknown/invalid jit option keys fail opaquely at import time with a numba error that never names the env var",
+      "file": "numbduck/configurations.py",
+      "line": 19,
+      "category": "design/error-reporting",
+      "description": "jit_options = get_jit_options() runs at module import, and the dict is spread into njit(sig, **jit_options) inside proxy() for the very first @proxy-decorated wrapper in ducklib.py (line 276). A dict with a key numba's njit does not accept -- e.g. NUMBDUCK_JIT_OPTIONS='{\"cache\": true, \"foobar\": 1}' -- surfaces as a numba/njit error (unexpected keyword / option) raised the instant ducklib.py is imported. Because get_jit_options() performs no key validation and the failure happens deep inside proxy->njit, the traceback points at numba internals and never mentions NUMBDUCK_JIT_OPTIONS, so the operator gets no hint that an env var caused it. Blast radius is total: ducklib is the package's core module, so ANY import of numbduck bindings dies at import time. A config helper that json-validates but not key-validates trades one clear error (bad JSON -> 'must be valid JSON') for an opaque one (bad key -> numba internals).",
+      "impact": "A single typo'd option key in the env var renders the entire library unimportable with an error that does not identify the misconfiguration source; every consumer import fails.",
+      "recommendation": "Either whitelist the accepted keys in get_jit_options() and raise a ValueError naming NUMBDUCK_JIT_OPTIONS and the offending key, or wrap the njit application so the env-var provenance is included in the error message. At minimum document that only njit-accepted keys are permitted.",
+      "confidence": "medium"
+    },
+    {
+      "id": "CFG-COR-3",
+      "severity": "low",
+      "title": "Env var injects arbitrary keys into numba jit options without a whitelist",
+      "file": "numbduck/configurations.py",
+      "line": 13,
+      "category": "security/hardening",
+      "description": "NUMBDUCK_JIT_OPTIONS is parsed and its keys flow unfiltered into njit(**jit_options) for every binding. This is not a code-execution vector (njit only accepts a fixed set of compilation flags, not callables/paths), so the practical security exposure is low and the env var sits inside the same trust boundary as the code. The relevant hardening gap is that flags like boundscheck=false or parallel=true could be injected process-wide via an env var an operator may not realize alters compilation semantics of the numbduck bindings. Worth a whitelist for defense-in-depth and clearer intent, not because it enables an attack.",
+      "impact": "An operator (or an env inherited from a parent process) can silently alter compilation flags (e.g. disable bounds checking) for all bindings; low severity because it requires control of the process environment and cannot execute arbitrary code.",
+      "recommendation": "Restrict get_jit_options() to an explicit allowed-key set (e.g. {'cache','nogil','parallel','boundscheck','fastmath','error_model'}) and reject unknown keys with a clear ValueError; this simultaneously fixes CFG-COR-2's opaque failure.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "configurations.py is a small NEW helper. The JSON-parse/default logic itself is correct: unset env -> {\"cache\": True}; malformed JSON (including empty string) -> caught json.JSONDecodeError re-raised as a clear ValueError; json.loads is only ever fed a str so the TypeError path is unreachable. The exception mapping (JSONDecodeError subclasses ValueError; task's 'ValueError on bad JSON' is satisfied) is fine. All real findings concern SHAPE/KEY validation the helper omits: wrong-shape JSON is silently swallowed downstream by proxy's `isinstance(...) and ... or {}` coercion (CFG-COR-1), and bad keys blow up opaquely at import inside njit (CFG-COR-2), with a minor injection-hardening angle (CFG-COR-3). Root cause is common to all three: get_jit_options() does not assert dict shape or validate keys. Verified proxy behavior in /home/erik/projects/numbox/numbox/core/proxy/proxy.py (proxy line ~69 coercion, njit(sig, **jit_options) at line ~74; proxy_if_available at line 136 also funnels through proxy). Import-time execution confirmed: jit_options = get_jit_options() at module top level, consumed by @proxy/@proxy_if_available decorators starting at ducklib.py:276 (import numbduck.configurations.jit_options at ducklib.py:8)."
+}

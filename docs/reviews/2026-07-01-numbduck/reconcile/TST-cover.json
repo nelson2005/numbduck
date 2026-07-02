@@ -1,0 +1,81 @@
+{
+  "unit": "TST-cover",
+  "results": [
+    {
+      "oldId": "TST-cover-1",
+      "class": "covered",
+      "newIds": ["TST-cover-1"],
+      "justification": "Current TST-cover-1 reports the identical defect: test_struct_size_guard (test_ducklib.py:1706-1724) computes sum(bitwidth)/8 pure-Python arithmetic and never invokes any ducklib binding / _call_lib_func / the ABI classification gate it claims to cover. Same root cause, same test, same line.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "TST-cover-2",
+      "class": "covered",
+      "newIds": ["TST-cover-2"],
+      "justification": "Current TST-cover-2 (line 212) reports the same gap: every result is <=3 rows (single DuckDB vector), only fetch_chunk exhaustion is tested, and no test selects >2048 rows and loops duckdb_fetch_chunk until null. Same root cause.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "TST-cover-3",
+      "class": "covered",
+      "newIds": ["TST-cover-3"],
+      "justification": "Current TST-cover-3 (line 891) reports the same gap: DECIMAL bind/create only exercise width<=18 (int64 physical) with the hugeint upper half always 0; the width 19..38 int128-physical readback and non-zero hugeint upper packing are untested. Same root cause.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "TST-cover-4",
+      "class": "missed",
+      "newIds": [],
+      "justification": "Still present on the current tree and no current finding covers it. The current TST-cover set addresses validity/NULL (4), handle-destroy (5), logical-type (6), array-value (7), init-callback (8), JIT error branches (9), platform ABI (10) and string_t layout (11) - none is the bind out-of-range-index error branch. Verified: grep shows invalid_param_index tests exist only for int32 (388), boolean (507), float (541), date (577), timestamp (613); int8/int16/uint8/uint16/uint32/uint64/time/timestamp_tz/varchar_length/blob and the four struct-by-value binds (hugeint 835, uhugeint 853, interval 871, decimal 891) have none.",
+      "currentEvidence": "",
+      "adopted": {
+        "id": "REC-TST-cover-4",
+        "severity": "low",
+        "title": "Bind out-of-range param-index error branch tested for only 5 of ~19 bind_* wrappers",
+        "file": "test/test_ducklib.py",
+        "line": 628,
+        "description": "Only int32 (test_bind_invalid_param_index:388), boolean (:507), float (:541), date (:577) and timestamp (:613) have an out-of-range-index negative test asserting DuckDBError. The remaining bind wrappers are exercised only on the success path: int8 (:628), int16 (:643), uint8 (:658), uint16 (:673), uint32 (:688), uint64 (:703), time (:718), timestamp_tz (:734), varchar_length (:750), blob (:767), and notably the four struct-by-value binds hugeint (:835), uhugeint (:853), interval (:871) and decimal (:891). test_bind_int8_negative (:788) and test_bind_int16_negative (:803) test negative values, not out-of-range indices. The DuckDBError-returning branch (index 999) is uncovered for these, so an ABI/argument-marshaling regression that corrupted the index argument for the struct-by-value binds would not surface as an error-code mismatch.",
+        "impact": "Asymmetric negative coverage: the error-return protocol is assumed uniform but unverified for most binds, including the load-bearing struct-by-value ones (hugeint/uhugeint/interval/decimal) that go through custom ABI marshaling.",
+        "recommendation": "Parametrize a single invalid-param-index check (index 999 -> assert DuckDBError) across all bind_* wrappers, or at minimum add the missing variants for the four struct-by-value binds.",
+        "confidence": "high"
+      }
+    },
+    {
+      "oldId": "TST-cover-5",
+      "class": "covered",
+      "newIds": ["TST-cover-7", "TST-COR-2"],
+      "justification": "Two current findings report the identical defect: TST-cover-7 (line 1634) and TST-COR-2 (line 1641) both note test_create_array_value asserts only av != 0 and never reads back the three element values, unlike the sibling list/map/struct value tests. Same root cause.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "TST-cover-6",
+      "class": "covered",
+      "newIds": ["TST-COR-1"],
+      "justification": "Current TST-COR-1 (line 1691) reports the same defect: test_get_value_type asserts only type_p != 0 and never verifies duckdb_get_type_id(type_p) == DUCKDB_TYPE_INTEGER. Same root cause, same test.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "TST-cover-7",
+      "class": "missed",
+      "newIds": [],
+      "justification": "Still present on the current tree and no current finding covers it. The current TST-cover-11 concerns short vs long string_t layout, not the BIT value payload; no current finding mentions the bit get/create payload. Verified against test_ducklib.py:1359-1367: test_create_get_bit asserts only result[1] == 2 (size) and passes result[0] straight to duckdb_free, whereas the sibling test_create_get_blob (:1257-1258) and test_create_get_varint (:1353-1354) read (ctypes.c_char * size).from_address(ptr) and assert the bytes round-trip.",
+      "currentEvidence": "",
+      "adopted": {
+        "id": "REC-TST-cover-7",
+        "severity": "low",
+        "title": "test_create_get_bit asserts only the byte length, not the bit payload",
+        "file": "test/test_ducklib.py",
+        "line": 1359,
+        "description": "test_create_get_bit (1359-1367) creates a BIT value from b\"\\x05\\xA0\", then asserts only result[1] == 2 (size). It reads result[0] purely to free it (duckdb_free at :1366) and never compares the returned bytes against the input, unlike test_create_get_blob (:1257-1258) and test_create_get_varint (:1353-1354) which assert the raw bytes round-trip via (ctypes.c_char * size).from_address(ptr). The data-payload correctness of the bit get/create struct-by-value path is unverified.",
+        "impact": "A corruption of the BIT data pointer/contents that preserved the size field would not be caught.",
+        "recommendation": "Read raw = (ctypes.c_char * size).from_address(result[0]) and assert it equals the input bytes, matching the blob/varint tests.",
+        "confidence": "medium"
+      }
+    }
+  ]
+}

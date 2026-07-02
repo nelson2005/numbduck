@@ -1,0 +1,32 @@
+{
+  "unit": "EX-readme-DOC",
+  "target": "examples/README.md",
+  "dimension": "DOC",
+  "findings": [
+    {
+      "id": "EX-readme-DOC-1",
+      "severity": "medium",
+      "title": "README presents irr.py as a runnable script but gives no way to actually run it; run_irr.py is never mentioned and irr.py exits(1) if run directly",
+      "category": "misleading-guidance",
+      "file": "examples/README.md",
+      "line": 33,
+      "confidence": "high",
+      "description": "The opening line calls these 'Runnable narrative-style scripts' (README.md:3) and the Scripts list links the IRR example as '[irr.py](irr.py)' (README.md:33). But irr.py is NOT directly runnable: its module-body guard `if __name__ == \"__main__\": ... sys.exit(1)` (examples/irr.py:33-39) refuses to run and instructs the user to run examples/run_irr.py instead — the launcher exists specifically so IRRStateType keeps a stable `__module__` for numba warm-cache type inference (run_irr.py:1-18, irr.py:24-29). The 'Running' section (README.md:49-61) lists only haversine.py, online_scoring.py, and fraud_score.py; it gives no command for the IRR example at all, and the word 'run_irr' appears nowhere in the README (verified via grep). So the README documents no correct way to run the UDAF example, and a reader who infers `python examples/irr.py` from the Scripts link hits the exit(1) guard.",
+      "impact": "A user following the README cannot run the IRR/UDAF tutorial as documented; the Scripts link points at a file that immediately errors out. The failure is self-explaining (irr.py's stderr names run_irr.py), which limits severity, but the documentation is inaccurate and incomplete for one of the four advertised examples.",
+      "recommendation": "Add `python examples/run_irr.py` to the 'Running' section, and change the Scripts entry to link/run run_irr.py (or note that irr.py is imported by run_irr.py and must not be run directly). Mirror the launcher rationale already in run_irr.py:1-8."
+    },
+    {
+      "id": "EX-readme-DOC-2",
+      "severity": "low",
+      "title": "numbox clock.py doc link pinned to tag 0.5.8, below the numbox>=0.5.13 dependency pin",
+      "category": "stale-link",
+      "file": "examples/README.md",
+      "line": 20,
+      "confidence": "medium",
+      "description": "The online_scoring bullet links `numbox.utils.clock.monotonic_ns` to https://github.com/Goykhman/numbox/blob/0.5.8/numbox/utils/clock.py (README.md:20). The project's actual numbox floor is `numbox>=0.5.13` (pyproject.toml dependencies), so the link references a source tree three minor releases older than the minimum supported numbox. This is inconsistent with the sibling make_structref link at README.md:36 which uses /blob/main/. If the pinned line/symbol shifted between 0.5.8 and current numbox, the reference points a reader at outdated source.",
+      "impact": "Reader clicking through lands on an out-of-support numbox revision rather than the version numbduck actually depends on; low functional impact since the file/symbol likely still exists at 0.5.8.",
+      "recommendation": "Repin the URL to the supported numbox version (e.g. /blob/0.5.13/... or a tag matching the pin), consistent with the other numbox links."
+    }
+  ],
+  "notes": "Verified all quantitative claims in README.md against the source docstrings/discussion blocks: haversine ~400x (10K, Py/JIT) and ~100x (1M, Arr/JIT) match haversine.py:21-24 and its discussion; fraud ~60x (Py-vs-Arrow), ~16x (10K) and ~1750x (1M) match fraud_score.py:27-30,266-278; online_scoring ~2.2x median latency and ~2.4x @ T=8 with Python ~1x plateau match online_scoring.py:36-38 and its discussion. pyarrow requirement (README.md:44-47) is accurate — both haversine.py and fraud_score.py register an Arrow baseline via create_function(..., type=\"arrow\"). NUMBDUCK_BENCH_BIG (README.md:57) and NUMBDUCK_BENCH_REPEATS (README.md:60) both match the code (haversine.py:53, _common.py:34). 'six aggregate lifecycle callbacks' (README.md:36-37) is correct: state_size/init/update/combine/finalize + destroy in irr.py. The two findings above are the only substantive doc-accuracy defects; the primary one (EX-readme-DOC-1) is the missing/wrong run instruction for the IRR example."
+}

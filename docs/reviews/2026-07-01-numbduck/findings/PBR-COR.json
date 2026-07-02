@@ -1,0 +1,44 @@
+{
+  "unit": "PBR-COR",
+  "target": "pybridge.py",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "PBR-COR-1",
+      "severity": "high",
+      "title": "No duckdb version guard although hard-coded pybind11/ABI offsets are validated only on 1.3.2 while the pin allows <1.6",
+      "file": "numbduck/pybridge.py",
+      "line": 62,
+      "category": "cross-version-fragility",
+      "description": "extract_connection_ptr hard-codes two ABI offsets: id(conn)+16 (line 59) to read the DuckDBPyConnection C++ object pointer and cpp_obj_p+32 (line 62) to read the unique_ptr<Connection>. The docstring (lines 31-34) states these are 'Validated on duckdb 1.3.2 / Linux x86-64 / libstdc++' and that the layout 'may change with major duckdb releases'. However the project pin is duckdb>=1.3.2,<1.6 (CLAUDE.md / pyproject), so 1.4.x and 1.5.x are permitted at runtime, and grep confirms there is no runtime version check anywhere in pybridge.py (no reference to duckdb.__version__, duckdb_library_version, etc.). If any in-range release changes the pybind11 holder layout or the DuckDBPyConnection field order, cpp_obj_p+32 reads a wrong word. The sibling contract this bridge is modeled on, numbox pysqlite_bridge.extract_connection_ptr, explicitly refuses to hand out the pointer when the underlying library is not coordinated (libraries_coordinated() check, pysqlite_bridge.py:159-161); numbduck has no analogous gate.",
+      "impact": "On a permitted-but-unvalidated duckdb (1.4.x/1.5.x) or a non-libstdc++/non-x86-64 build, the offsets can silently resolve to a wrong pointer. Best case the SELECT 1 validation returns DuckDBError and a clean RuntimeError is raised; worst case duckdb_query(conn_ptr, ...) dereferences garbage and segfaults the interpreter before any rc can be inspected. Silent-wrong-pointer / crash risk that the current 'validated before returned' wording understates.",
+      "recommendation": "Add a runtime guard that the offsets are only trusted on a known-good duckdb version/platform, e.g. check duckdb.__version__ against the validated set (or at minimum against the <1.6 pin ceiling) and raise a clear RuntimeError instructing the user to re-verify offsets when it does not match, mirroring numbox's libraries_coordinated() refuse-to-proceed pattern.",
+      "confidence": "high"
+    },
+    {
+      "id": "PBR-COR-2",
+      "severity": "medium",
+      "title": "Intermediate pointers (offset +16 and +32) are not NULL-checked before use",
+      "file": "numbduck/pybridge.py",
+      "line": 62,
+      "category": "null-pointer",
+      "description": "cpp_obj_p (line 59) and conn_ptr (line 62) are taken from ctypes.c_void_p.from_address(...).value, which returns Python None when the read word is 0. Neither is validated. Two concrete reachable failures: (a) If the +16 read yields 0 (cpp_obj_p is None), line 62 evaluates None + 32, raising 'unsupported operand type(s) for +: NoneType and int' — an opaque TypeError, not the documented TypeError('expected duckdb.DuckDBPyConnection...') nor the documented RuntimeError. (b) A closed connection: after conn.close(), the DuckDBPyConnection's unique_ptr<Connection> is reset to null, so the +32 read yields 0 and conn_ptr is None; that None is then passed to ducklib.duckdb_query at line 67 as an intp argument, which either raises a numba typing error or (if coerced to a null address) invokes duckdb_query on a NULL connection (undefined behavior / crash). The sibling numbox bridge explicitly handles this: pysqlite_bridge.py:169-170 does 'if db_ptr is None: raise RuntimeError(\"extracted null sqlite3* from sqlite3.Connection\")'. numbduck has no equivalent check.",
+      "impact": "A closed or otherwise null-backed connection produces a confusing TypeError or a NULL-connection C call instead of a clean, documented RuntimeError; in the coerced-null case it is a potential crash rather than a catchable error.",
+      "recommendation": "After reading cpp_obj_p and conn_ptr, raise RuntimeError with a clear message when either is falsy (None/0), before doing pointer arithmetic on cpp_obj_p or passing conn_ptr into duckdb_query — mirroring the numbox null-pointer guard.",
+      "confidence": "high"
+    },
+    {
+      "id": "PBR-COR-3",
+      "severity": "low",
+      "title": "Docstring claims the pointer is 'validated' but the SELECT 1 check cannot detect a structurally-wrong pointer",
+      "file": "numbduck/pybridge.py",
+      "line": 28,
+      "category": "validation-guarantee",
+      "description": "The docstring (lines 28-29, 49-50) states the extracted pointer 'is validated by running SELECT 1 via the C API before it is returned' and documents RuntimeError 'If the extracted pointer fails the validation query'. The validation (lines 65-72) can only distinguish 'live connection whose query failed' (rc != DuckDBSuccess) from success. A structurally-wrong conn_ptr arising from any offset/layout drift is undefined behavior inside duckdb_query (likely a segfault), which is not a value rc can report — so the check cannot actually catch the failure mode it most needs to. The rc-check-after-unconditional-destroy ordering itself is correct (duckdb_query populates the result even on error, so destroying on both paths at line 68 is right), but the guarantee the docstring advertises is stronger than what the code can deliver.",
+      "impact": "Callers may trust the 'validated' guarantee and assume a returned pointer is safe on any in-pin duckdb, when in reality a wrong-layout pointer would have crashed rather than raised. Documentation overstates the safety net.",
+      "recommendation": "Soften the docstring to state the validation only confirms a live connection responds to a trivial query and cannot detect a wrong pointer from ABI/layout drift; pair it with the version guard from PBR-COR-1 so the trusted-offset precondition is enforced up front.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "pybridge.py:65-72 destroy/rc ordering is correct: duckdb_destroy_result is called unconditionally before the rc != DuckDBSuccess (==0, ducklib.py:19) check, matching the DuckDB C API contract that duckdb_query populates (and thus requires destroying) the result on both success and error. DuckDBSuccess comparison and the returned Python int (intp-compatible) are correct. The get_unicode_data_p(\"SELECT 1\") pointer at line 66 is not a lifetime bug here because the string literal is held in the function's co_consts. Findings 1 and 2 are directly grounded in the sibling numbox contract (pysqlite_bridge.extract_connection_ptr: libraries_coordinated() gate at pysqlite_bridge.py:159 and null-pointer raise at 169-170), both of which numbduck's pybridge omits. Sizes/offset arithmetic (create_duckdb_result 48B vs v1.3.2 duckdb_result) belong to duckdb_utils.py and are out of this unit's scope."
+}

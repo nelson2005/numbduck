@@ -1,0 +1,6 @@
+{
+  "findingId": "TMD-DOC-5",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Verified against current tree. test/test_ducklib.md:197 cites 'test_ducklib.py L2877-2914' for the commented-out refcount_of_meminfo intrinsic. Reading test/test_ducklib.py directly: the actual commented block (`# @intrinsic` / `# def _refcount_of_meminfo` / `# @njit` / `# def refcount_of_meminfo`) spans L2836-2851, with the explanatory WARNING comment starting at L2814. The cited range L2877-2914 instead falls inside live (uncommented) code -- WelfordStateType property getters (`m2` property at L2875-2876), the `_welford_get_mean/_count/_m2` njit functions (L2879-2891), `structref.define_proxy` (L2894-2895), `welford_type` definition (L2897-2900), and `_read_refcount` (L2903-2909) -- confirming the reviewer's claim that the reference lands past the commented block into unrelated code. The prose description of the intrinsic's behavior (refcount reads 1 instead of 2 due to removerefctpass stripping) is accurate and unaffected; only the line-range citation is stale. Severity of low is appropriate: it's a doc cross-reference drift with no functional/behavioral impact, just misdirects a reader following the link."
+}

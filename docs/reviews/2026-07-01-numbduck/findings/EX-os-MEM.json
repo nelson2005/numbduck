@@ -1,0 +1,32 @@
+{
+  "unit": "EX-os-MEM",
+  "target": "examples/online_scoring.py",
+  "dimension": "MEM",
+  "findings": [
+    {
+      "id": "EX-os-MEM-1",
+      "severity": "medium",
+      "title": "Prepared statement not destroyed on any error path (no try/finally)",
+      "file": "examples/online_scoring.py",
+      "line": 156,
+      "category": "resource-leak/error-path",
+      "description": "score_jit (lines 150-162) allocates a DuckDB prepared statement via duckdb_prepare (line 155) and only frees it with duckdb_destroy_prepare at line 161, on the straight-line happy path. There is no try/finally. Two leak paths exist. (a) The `assert rc == ducklib.DuckDBSuccess` at line 156 sits BETWEEN prepare and destroy; if prepare fails the assert raises and duckdb_destroy_prepare is never reached. Per duckdb.h, duckdb_prepare allocates a prepared-statement object that must be freed with duckdb_destroy_prepare EVEN WHEN THE PREPARE FAILS (that object is also where the error message lives) — so the assert-fail path leaks the statement. (b) If _score_jit_loop raises (e.g. a bounds error inside the nogil njit loop, or a NULL-chunk deref per EX-os-MEM-2), the exception propagates out of score_jit and line 161 is skipped, leaking the statement; additionally any in-flight chunk/result inside the loop iteration that raised is leaked because their destroy calls (lines 143-144) run only at the end of a completed iteration. The task focus explicitly calls for prepared-statement cleanup via try/finally, which the current code does not have.",
+      "impact": "On any prepare failure or exception in the JIT loop the prepared statement (and possibly one chunk + one result) leaks. In the parallel-scaling block score_jit is invoked once per worker per T (many times), so a recurring error would accumulate leaked DuckDB handles. As the canonical usage contract for prepared-statement execution, the missing try/finally teaches an unsafe pattern.",
+      "recommendation": "Wrap the body from just after create_duckdb_prepared_statement() through the loop in try/finally, calling duckdb_destroy_prepare(stmt.ctypes.data) in the finally. Move the destroy so it runs even when the assert or _score_jit_loop raises; keep the assert inside the try.",
+      "confidence": "high"
+    },
+    {
+      "id": "EX-os-MEM-2",
+      "severity": "low",
+      "title": "No NULL/size guard on fetched chunk before dereferencing it",
+      "file": "examples/online_scoring.py",
+      "line": 123,
+      "category": "null-deref/use-of-invalid-handle",
+      "description": "Inside _score_jit_loop, duckdb_fetch_chunk (line 123) is called once per execute and its return (chunk_p) is immediately passed to duckdb_data_chunk_get_vector (lines 125-128) and the vector data is read as carray(..., (1,), float64) (lines 133-140) assuming exactly one chunk with exactly one row. Per duckdb.h, duckdb_fetch_chunk returns NULL once the result is exhausted (i.e. a query that matched zero rows yields a NULL chunk on the first fetch). If the point lookup returns no row, chunk_p == 0 and duckdb_data_chunk_get_vector(0, 0) dereferences a NULL handle inside a nogil njit region — an unrecoverable segfault, not a Python exception. There is also no duckdb_data_chunk_get_size check, so even a non-NULL empty chunk would read row 0 of a zero-length vector (out-of-bounds read). In this example the ids are drawn from range(0, N_FEATURES) and the features table has exactly ids range(N_FEATURES), so every lookup matches and the path is never hit, which is why it is low severity — but the kernel is presented as the canonical prepared-execute reading pattern and carries no guard.",
+      "impact": "Latent: any adaptation with a non-matching key (or a genuinely empty result) segfaults the process from inside the GIL-free loop with no traceback. Not triggered by the example's own data.",
+      "recommendation": "After duckdb_fetch_chunk, guard on chunk_p != 0 and on duckdb_data_chunk_get_size(chunk_p) >= 1 before reading vectors; skip/emit NaN and still destroy the (empty or NULL-safe) result when no row is present. At minimum document the one-row precondition at the fetch site.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Happy-path lifecycle is sound: result_buf (6xint64, 48B duckdb_result) and chunk_buf (1xint64) are allocated once (lines 109-112) and stay live for the whole kernel because they are indexed later, so their .ctypes.data addresses remain valid; each iteration destroys the chunk then the result (lines 142-144, correct order, destroy funcs take pointer-to-handle via the scratch buffers) before the next execute overwrites result_buf, so there is no per-iteration leak and no double-free on the normal path. The stmt handle buffer, ids/x/scores/latencies numpy arrays all outlive the JIT call. The only memory-safety gaps are the error-path statement leak (MEM-1) and the unguarded NULL/empty-chunk deref (MEM-2). The parallel-scaling temp db is cleaned up in a finally (lines 279-281) and each worker uses its own connection/statement (no shared-handle race)."
+}

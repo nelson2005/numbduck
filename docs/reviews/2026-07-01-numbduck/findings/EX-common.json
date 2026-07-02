@@ -1,0 +1,32 @@
+{
+  "unit": "EX-common",
+  "target": "examples/_common.py + run_irr.py",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "EX-common-1",
+      "severity": "medium",
+      "title": "assert_results_match spuriously fails when all variants produce NaN",
+      "file": "examples/_common.py",
+      "line": 73,
+      "category": "numeric/math logic",
+      "description": "assert_results_match compares with `if first != other`. For IEEE-754 NaN, `NaN != NaN` is always True, so if every variant legitimately produces NaN the guard raises AssertionError claiming a mismatch even though the variants agree. This directly contradicts the docstring's promise to let floats 'compare equal at full precision'. The IRR example's finalize explicitly returns NaN for empty/no-root states (irr.py finalize, per examples.md:238), and IRR is a float-returning UDAF whose differential check is exactly the kind of caller this helper serves. Any float result of NaN triggers a false positive.",
+      "impact": "A correct fast/slow variant that both yield NaN (empty group, non-convergent bisection, division-by-zero baseline) is reported as a correctness failure, aborting the example and masking the fact that the variants actually agree. False alarm undermines the differential-test purpose.",
+      "recommendation": "Handle NaN before the inequality, e.g. treat two values equal when both are NaN: `if first != other and not (isinstance(first,float) and isinstance(other,float) and math.isnan(first) and math.isnan(other))`, or use `numpy.array_equal(a, b, equal_nan=True)` for numeric results. Document that NaN==NaN is intentionally treated as a match.",
+      "confidence": "high"
+    },
+    {
+      "id": "EX-common-2",
+      "severity": "medium",
+      "title": "format_table does not validate row length; wrong-width rows crash or silently truncate",
+      "file": "examples/_common.py",
+      "line": 50,
+      "category": "buffer/index bounds",
+      "description": "format_table validates that headers and alignments are the same length (line 47) but never validates row length. `widths` has exactly len(headers) entries. The loop `for i, cell in enumerate(row): widths[i] = max(...)` (lines 50-52) indexes `widths[i]`, so any row longer than headers raises IndexError. Conversely a row shorter than headers is silently accepted, and fmt_row's `zip(cells, alignments, widths)` (line 55) truncates to the shortest, dropping trailing columns with no error. The focus of this review calls out row-length validation, and it is absent.",
+      "impact": "A caller passing a malformed row gets either an opaque IndexError far from the mistake, or a silently mis-rendered table with dropped columns, rather than a clear ValueError. Low blast radius (example harness only) but a real correctness gap in the stated contract.",
+      "recommendation": "Add an explicit check, e.g. `for row in rows: if len(row) != len(headers): raise ValueError('each row must match headers length')`, before computing widths.",
+      "confidence": "high"
+    }
+  ],
+  "notes": "run_irr.py (18 lines) is a pure module-identity launcher: inserts examples/ dir onto sys.path and calls irr.main(). No signature/type/enum/buffer logic, no leaked or duplicated setup; it is sound as written. The sys.path.insert at index 0 is intentional and necessary for the stable `__module__ == 'irr'` requirement described in its docstring. Both findings are in _common.py. Neither is a duckdb.h signature issue (this unit has no C-API bindings); they are numeric-logic and bounds-validation defects in shared helpers."
+}

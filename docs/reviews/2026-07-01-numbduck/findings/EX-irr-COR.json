@@ -1,0 +1,32 @@
+{
+  "unit": "EX-irr-COR",
+  "target": "examples/irr.py",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "EX-irr-COR-1",
+      "severity": "medium",
+      "title": "Bisection uses an absolute NPV tolerance only; returns NaN for large-magnitude cashflows even after full convergence",
+      "category": "numeric/math logic",
+      "file": "examples/irr.py",
+      "line": 88,
+      "description": "irr_bisect (lines 78-94) exits successfully ONLY when abs(npv) < 1e-9 (line 88). It has no bracket-width fallback: if the tolerance is not met within the 100 iterations, it returns math.nan (line 94). The residual NPV that is achievable at the best representable double near the true root is on the order of |dNPV/dr| * ulp(r), and |dNPV/dr| scales linearly with the cashflow magnitude. For large-magnitude cashflows the achievable residual floor exceeds the fixed 1e-9 absolute tolerance, so the loop can never satisfy abs(npv) < 1e-9 no matter how tightly r converges, and the function returns NaN despite r_mid having already resolved to the true root to machine precision. I reproduced this by simulating the exact algorithm on the Test-3 sparse case (single cashflow at period 12): at the tested scale (investment 10,000 / cashflow 13,000) it returns the correct 0.022104, but scaling all amounts by 1,000 (investment 10,000,000 / cashflow 13,000,000) already returns NaN, and every larger scale (1e6, 1e8, 1e9) also returns NaN. The correct IRR is identical (0.022104) at every scale since it is scale-invariant, so this is a pure convergence-criterion defect, not a real change in the answer.",
+      "impact": "Any GROUP BY key whose cashflow magnitudes reach the ~10-million range (routine for portfolio/enterprise financial data) silently produces NaN instead of the correct IRR. The example's own three tests all use small amounts (<=10,000) and so pass, masking the bug; a user copying this UDAF onto realistic data gets wrong (NaN) results with no error.",
+      "recommendation": "Add a bracket-width convergence exit so the solver returns the converged rate regardless of residual scale, e.g. after computing r_mid, return r_mid when (r_hi - r_lo) < 1e-12 (or return the final r_mid after the loop instead of NaN). Alternatively make the tolerance relative to the NPV scale (e.g. abs(npv) < 1e-9 * max(1.0, abs(investment) + abs(target_npv))). A bracket-width test is the standard robust choice for bisection and fixes the NaN-on-large-magnitude case without changing the small-magnitude results.",
+      "confidence": "high"
+    },
+    {
+      "id": "EX-irr-COR-2",
+      "severity": "low",
+      "title": "Fixed bisection bracket [-0.99, 10.0]; roots outside the bracket silently return NaN",
+      "category": "numeric/math logic",
+      "file": "examples/irr.py",
+      "line": 80,
+      "description": "irr_bisect hard-codes r_lo = -0.99 and r_hi = 10.0 (lines 80-81). Bisection can only locate a root inside this bracket. Because the only successful-exit path is the absolute-tolerance test at line 88, a true monthly IRR above 10.0 (1000%/month) or a loss scenario with IRR below -0.99 leaves npv the same sign at both ends, the tolerance is never met, and the function returns NaN (line 94) rather than signalling out-of-range. The routine also implicitly assumes NPV is monotonically decreasing in r (true only when all cashflows are positive, which the docstring formula at lines 9-11 does not require); a group mixing positive and negative cashflows can have multiple sign changes and the sign-driven bracket update (lines 90-93) may converge to the wrong root.",
+      "impact": "Edge-case correctness: legitimate high-return or mixed-sign groups return NaN or a wrong root. Lower severity than EX-irr-COR-1 because typical monthly IRRs fall inside the bracket and the documented per-group contract uses positive cashflows, but it is an undocumented silent-failure boundary of the example.",
+      "recommendation": "Document the [-0.99, 10.0] monthly-rate bracket and the all-positive-cashflow (single sign change) assumption in the irr_bisect docstring, and/or widen the bracket. At minimum this limitation should be stated so users porting the example understand when it silently yields NaN.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Signatures/types were cross-checked against the DuckDB C-API aggregate typedefs and are correct: state_size returns uint64(8) for the 8-byte pointer slot (line 106); init void(intp,intp) single state (line 124); update void(intp,intp,intp) info/chunk/states (line 165); combine void(intp,intp,intp,uint64) with idx_t count (line 188); finalize void(intp,intp,intp,uint64,uint64) with idx_t count/offset (line 209); destroy void(intp,uint64) (line 223). Finalize writes at offset+i into an out buffer sized offset+count (lines 197-206) - correct. The sparse-period exponent correctly uses periods[iu] (not i+1) at lines 87 and 206 - the Test-3 'i+1 trap' is genuinely avoided. NULL/validity handling (lines 146-153) correctly guards on val != 0. Memory protocol (export/borrow/release) is out of COR scope and is leak-checked by main(). The one substantive correctness defect is the bisection convergence criterion (EX-irr-COR-1), which was empirically reproduced."
+}

@@ -1,0 +1,13 @@
+{
+  "unit": "DCK-wrap-SEC",
+  "results": [
+    {
+      "oldId": "DCK-wrap-SEC-1",
+      "class": "covered",
+      "newIds": ["UTL-SEC-1"],
+      "justification": "Same defect: the downloaded/cached macOS libduckdb.dylib is dlopen'd RTLD_GLOBAL with no SHA-256/signature verification, giving supply-chain / cache-poisoning native code execution. The old finding itself notes it 'lives in utils.py but is reachable through this unit's import side effect'; current UTL-SEC-1 reports the identical root cause, file (numbduck/utils.py), impact, and pin-a-digest recommendation.",
+      "currentEvidence": "",
+      "adopted": null
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "unit": "DCK-wrap-COR",
+  "target": "ducklib @proxy wrappers",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "DCK-wrap-COR-1",
+      "severity": "low",
+      "title": "idx_t returns/args inconsistently typed as signed intp instead of uint64 (and one uint64_t* return typed uint64)",
+      "category": "type-signedness",
+      "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+      "line": 106,
+      "description": "duckdb.h declares idx_t as uint64_t (per CLAUDE.md 'Adding a New Binding' step 1: idx_t -> uint64_t -> uint64). The file follows this for most idx_t returns/args (duckdb_array_type_array_size L78 uint64, duckdb_get_list_size L189 uint64, duckdb_nparams L217 uint64, duckdb_struct_type_child_count L228 uint64), but declares four idx_t returns as signed intp: duckdb_column_count (L106), duckdb_data_chunk_get_column_count (L156), duckdb_data_chunk_get_size (L157), duckdb_row_count (L226). The idx_t 'row' argument of duckdb_validity_row_is_valid is also intp (L234), and duckdb_vector_get_validity (L237) returns a uint64_t* pointer typed uint64 rather than the module's all-pointers-are-intp convention. All are 64-bit and classify as INTEGER on every supported ABI, so the register-passed bit pattern is identical to the correct type; this is a labeling/consistency defect, not a data-corruption one.",
+      "impact": "No runtime corruption for realistic values. The signed-vs-unsigned label only diverges for counts >= 2^63 (never produced by DuckDB) and could surprise numba callers that do unsigned comparisons on the returned count. Primary cost is convention drift from the documented idx_t->uint64 mapping and internal inconsistency between sibling functions.",
+      "recommendation": "Normalize all idx_t returns/args to uint64 (change L106, L156, L157, L226, and the second arg of L234 to uint64) and, if the all-pointers-are-intp convention is intended, change duckdb_vector_get_validity (L237) return to intp. Purely a signature-dict edit; wrapper bodies are unaffected.",
+      "confidence": "medium"
+    },
+    {
+      "id": "DCK-wrap-COR-2",
+      "severity": "low",
+      "title": "varint wrapper docstrings use non-standard versioned doc links (violates api.html convention)",
+      "category": "docstring-link",
+      "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+      "line": 728,
+      "description": "CLAUDE.md 'Adding a New Binding' step 5 mandates docstring links of the form https://duckdb.org/docs/stable/clients/c/api.html#func_name. All 191 other wrappers follow this exactly, including the sibling version-gated duckdb_scalar_function_set_init (L1287). The two varint wrappers deviate: duckdb_create_varint (L728) and duckdb_get_varint (L1053) link to https://duckdb.org/docs/1.3/clients/c/api#duckdb_create_varint / #duckdb_get_varint (a pinned 1.3 path with no .html suffix).",
+      "impact": "Documentation-only. Links point at a version-pinned page rather than the canonical stable api.html and break the file-wide convention; no effect on generated code or ABI.",
+      "recommendation": "Change both to https://duckdb.org/docs/stable/clients/c/api.html#duckdb_create_varint and ...#duckdb_get_varint (or verify the anchor exists on the stable page; if varint is absent from stable docs, keep a versioned link but at minimum use the .html form consistently and note the reason).",
+      "confidence": "high"
+    }
+  ],
+  "notes": "Reviewed all 193 @proxy/@proxy_if_available wrappers (lines 275-1432) plus the signature dict (78-274) and enum/type-alias block (17-75). A mechanical cross-check confirmed every wrapper's def name, decorator signatures.get(...) key, _call_lib_func(...) name literal, def-param count, and arg-tuple arity all agree with the registered signature arity, with no orphan signatures and no orphan wrappers -- ruling out the typo/arity/wrong-signature class of bug. Special cases are correct: the three by-value duckdb_result functions (duckdb_fetch_chunk L943, duckdb_result_return_type L1129, duckdb_result_statement_type L1135) correctly use _call_lib_func_byval (48-byte struct -> SysV MEMORY-class pointer pass), while all duckdb_result* pointer-taking functions (duckdb_column_count/name/type/logical_type, duckdb_row_count, duckdb_rows_changed, duckdb_result_error/_type, and duckdb_destroy_result L775) correctly pass the pointer as a scalar intp via _call_lib_func. Struct-by-value aliases were checked against duckdb.h layouts and match: duckdb_result 48B (UniTuple(intp,6)), hugeint/uhugeint/blob/bit 16B, interval {i32,i32,i64} 16B (non-canonical INT/INT, handled by numbox repack), decimal 24B, varint 24B. The DUCKDB_TYPE_* enum values match duckdb.h including the out-of-sequence UHUGEINT=32/ARRAY=33/ANY=34 and VARINT=BIGNUM=35 dual-name. Symbol-existence for plain-@proxy functions (e.g. duckdb_create_enum_value, duckdb_bind_decimal) was NOT independently verifiable without duckdb.h/runtime; because @proxy eager-compiles at import and _call_lib_func does a symbol-presence check, any truly-absent plain-@proxy symbol would fail module import, so on a CI-green branch these are assumed present and were not flagged. No duckdb.h was available on the system; type checks rely on knowledge of the DuckDB C API. Only the two low-severity issues above survived verification."
+}

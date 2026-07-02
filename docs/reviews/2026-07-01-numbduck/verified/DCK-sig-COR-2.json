@@ -1,0 +1,15 @@
+{
+  "findingId": "DCK-sig-COR-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Verified against current tree. duckdb.h (queried via scratchpad copy) declares 'uint64_t *duckdb_vector_get_validity(duckdb_vector vector);' -- the return is a pointer. /home/erik/projects/numbduck/numbduck/ducklib.py:237 declares signatures['duckdb_vector_get_validity'] = uint64(intp), while every other pointer-returning binding in the file uses intp for the return, including the directly adjacent duckdb_vector_get_data at :236 (intp(intp)) and duckdb_data_chunk_get_vector at :158 (intp(intp)). CLAUDE.md:97 states the project convention explicitly: 'numbduck uses intp for all pointers'. This is a genuine, verifiable inconsistency with that convention. Checked numbox's ABI dispatcher (/home/erik/projects/numbox/numbox/core/bindings/call.py): scalar-return classification and LLVM value-type selection depend only on size/struct-ness, not signedness, so uint64 vs intp (int64) produce byte-identical LLVM i64 codegen for this scalar return -- confirming the reviewer's own 'zero runtime impact / byte-identical at ABI level' claim. However, the description's elaboration that the uint64 result is 'normally passed straight into duckdb_validity_row_is_valid... forcing an implicit unsigned->signed cast' overstates the actual current-tree risk: every real call site already inserts an explicit cast before that call -- examples/irr.py:140-143 (numpy.intp(...)) and test/test_ducklib.py:1116-1117 (intp(v3_validity_p)) both explicitly cast to intp first; test/test_ducklib.py:227,380 call from plain Python (dispatcher boundary unboxes/reboxes there, not a jit-to-jit call), so no consumer in the current tree actually relies on or is exposed to an implicit uint64->intp cast. That nuance aside, the core defect -- the signature declaration itself is typed inconsistently with the module's stated pointer convention, at the exact cited location -- is real, correctly located (ducklib.py:237), and correctly assessed as cosmetic/low severity with no runtime impact, matching the reviewer's own conclusion. Confirmed at low severity; not higher, since no call site is actually affected and the ABI is provably identical.",
+  "citations": [
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:234",
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:236",
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:237",
+    "/home/erik/projects/numbduck/CLAUDE.md:97",
+    "/home/erik/projects/numbduck/examples/irr.py:140-152",
+    "/home/erik/projects/numbduck/test/test_ducklib.py:1116-1117",
+    "/home/erik/projects/numbduck/test/test_ducklib.py:227-229"
+  ]
+}

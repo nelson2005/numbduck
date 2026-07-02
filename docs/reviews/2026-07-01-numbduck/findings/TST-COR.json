@@ -1,0 +1,32 @@
+{
+  "unit": "TST-COR",
+  "target": "test/test_ducklib.py",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "TST-COR-1",
+      "severity": "low",
+      "title": "test_get_value_type asserts only non-null, never verifies the returned type id",
+      "file": "test/test_ducklib.py",
+      "line": 1691,
+      "category": "too-loose-assertion",
+      "description": "test_get_value_type (lines 1687-1694) creates an INT32 value, calls duckdb_get_value_type(val_p), and asserts only `type_p != 0`. It never confirms the returned logical type is actually DUCKDB_TYPE_INTEGER (e.g. via duckdb_get_type_id). Any binding that returned a non-zero-but-wrong handle -- or a wrong type id -- would still pass. Contrast with the sibling logical-type tests (e.g. test_create_logical_type_integer line 1730) which do assert duckdb_get_type_id == DUCKDB_TYPE_INTEGER.",
+      "impact": "The test cannot distinguish a correct duckdb_get_value_type binding from one returning the wrong (but non-null) type handle; a real signature/return-value regression in this wrapper would go undetected.",
+      "recommendation": "Add `assert ducklib.duckdb_get_type_id(type_p) == ducklib.DUCKDB_TYPE_INTEGER` after the non-null check (do not destroy type_p separately -- the existing comment correctly notes it aliases the value for scalar types).",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-COR-2",
+      "severity": "low",
+      "title": "test_create_array_value never reads back element contents",
+      "file": "test/test_ducklib.py",
+      "line": 1641,
+      "category": "too-loose-assertion",
+      "description": "test_create_array_value (lines 1634-1647) builds a 3-element ARRAY value from three int32 values and asserts only `av != 0` before destroying it. Unlike test_create_get_list_value (line 1531), test_create_get_map_value (line 1563), and test_create_get_struct_value (line 1602) -- which read children back and assert their integer values -- the array test verifies nothing about size or element contents.",
+      "impact": "A duckdb_create_array_value binding that produced an empty/garbage-but-non-null value would pass; the array-value path is effectively only smoke-tested.",
+      "recommendation": "Read back and assert at least the array size and one element (e.g. via duckdb_array_type / list-child accessors on the value or its type), matching the depth of the list/map/struct value tests.",
+      "confidence": "high"
+    }
+  ],
+  "notes": "Primary focus areas are all CORRECT: (1) Welford stddev math -- welford_update (lines 3166-3172) is textbook Welford, welford_combine (3175-3192) is the correct Chan et al. parallel formula, welford_finalize (3195-3199) returns sqrt(m2/(count-1)) = sample stddev; end-to-end (line 3452) and numba-only (line 3330) compare to numpy.std(ddof=1). Verified numerically: both give 2.160246899469287 exactly. (2) Array-variance UDAF (_arr_finalize_impl lines 3135-3141) computes population variance (sum_sq/n - mean^2) and compares to numpy.var (ddof=0) at line 3534; verified both = 4.0 exactly for [1..7]; internally consistent (population vs population). The n<2 -> NaN guard matches count semantics. (3) All Python-side `from_address` reads have correct C types and byte offsets vs duckdb.h: BOOLEAN->int8, TINYINT->int8, SMALLINT->int16, U{TINY,SMALL,,BIG}INT->u{8,16,32,64}, DATE->int32, TIME/TIMESTAMP/TIMESTAMPTZ->int64(micros), FLOAT->c_float, DOUBLE->c_double, hugeint {uint64 lower@0, int64 upper@8} (lines 844-845), uhugeint {uint64@0, uint64@8} (862-863), interval {i32 months@0, i32 days@4, i64 micros@8} (880-882), DECIMAL(10,2)->int64 unscaled@0 (902). Inline string_t reader (aux_read_inline_string 267-272: uint32 len@0 + chars@4) is correct for all tested <=12-char strings/blobs. Result-vector reads in UDF tests (c_int32/int64/double at data_p) match declared INTEGER/BIGINT/DOUBLE return types. (4) Scalar/aggregate function-set name setting is encoded correctly: test_scalar_function_set_overloads (2117) and test_aggregate_function_set_overloads (2427) call *_set_name on EACH member function AND create the set with the same name, matching CLAUDE.md note #7. Enum expectations verified against duckdb.h: DUCKDB_RESULT_TYPE_QUERY_RESULT=3 (line 977), DUCKDB_STATEMENT_TYPE_SELECT=1 (987), DUCKDB_ERROR_INVALID=0 (967). No wrong or tautological-in-a-harmful-way assertions found in the focus areas; the value create/get round-trip tests (test_create_get_*) are round-trips by nature but exercise the C boundary legitimately. The two reported items are genuine too-loose assertions outside the four focus areas."
+}

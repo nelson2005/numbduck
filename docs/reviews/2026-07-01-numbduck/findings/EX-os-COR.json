@@ -1,0 +1,32 @@
+{
+  "unit": "EX-os-COR",
+  "target": "examples/online_scoring.py",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "EX-os-COR-1",
+      "severity": "low",
+      "title": "Prepared statement leaked when duckdb_prepare fails (cleanup missing on error path)",
+      "file": "examples/online_scoring.py",
+      "line": 156,
+      "category": "resource-cleanup / error-path",
+      "description": "score_jit() calls `rc = ducklib.duckdb_prepare(...)` then `assert rc == ducklib.DuckDBSuccess` (lines 155-156), and only reaches `duckdb_destroy_prepare(stmt.ctypes.data)` at line 161 if the assert passes. duckdb.h documents that a prepared statement must be destroyed with duckdb_destroy_prepare even when duckdb_prepare fails (a statement object is allocated to carry the error message). On a failed prepare the AssertionError unwinds out of score_jit before line 161, so the failed statement handle in stmt[0] is never freed.",
+      "impact": "One prepared-statement handle (and its attached error message) is leaked whenever prepare fails. Impact is minor: it is an error path in a benchmark/demo that aborts the process anyway, and cannot occur for the example's own fixed SQL. But as a canonical usage contract that users copy, it teaches an incomplete cleanup pattern that violates the documented duckdb_destroy_prepare-even-on-failure rule.",
+      "recommendation": "Destroy the statement before asserting, e.g. capture rc, and on failure call duckdb_destroy_prepare(stmt.ctypes.data) before raising (or wrap the loop + destroy in try/finally). This mirrors the numpy-buffer destroy idiom already used at line 161.",
+      "confidence": "high"
+    },
+    {
+      "id": "EX-os-COR-2",
+      "severity": "low",
+      "title": "No chunk_p != 0 / empty-result guard before dereferencing the fetched chunk",
+      "file": "examples/online_scoring.py",
+      "line": 123,
+      "category": "robustness / return-value check",
+      "description": "The JIT loop calls `chunk_p = ducklib.duckdb_fetch_chunk(result_tup)` (line 123) and immediately passes chunk_p to duckdb_data_chunk_get_vector (lines 125-128) with no `chunk_p != 0` guard, and then reads `carray(..., (1,), float64)[0]` (lines 133-140) assuming exactly one row. Neither the duckdb_bind_int64 (line 117) nor duckdb_execute_prepared (line 118) return codes are checked. duckdb_fetch_chunk returns NULL (0) when the result is drained/empty or when execute failed; duckdb_data_chunk_get_vector(0, ...) then dereferences a NULL chunk (segfault), and even a valid-but-empty vector would have carray read row 0 of a zero-length vector.",
+      "impact": "No live bug for this example: ids are generated with rng.integers(0, k_features) and the features table holds ids range(k_features), so every `WHERE id = $1` lookup matches exactly one row / one chunk. The defect surfaces only if a reader ports this canonical pattern to a lookup that can miss (or to nullable/multi-row queries), where it would crash or read garbage. Worth flagging because the file is explicitly the usage contract for prepared-statement execution in a JIT loop.",
+      "recommendation": "Add `if chunk_p == 0: continue`/handle-miss after fetch, and check `duckdb_data_chunk_get_size(chunk_p) > 0` before reading; optionally check the bind/execute duckdb_state == DuckDBSuccess. At minimum add a comment stating the one-chunk/one-row invariant the loop relies on so copiers know to add the guards.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Hot-loop types verified against duckdb.h and ducklib.py signatures: duckdb_bind_int64(intp, uint64, int64) with the 1-indexed uint64(1) param and int64 ids[i] value is correct; duckdb_execute_prepared(intp, intp) writes into the 6-int64/48-byte result_buf, which matches the deprecated duckdb_result struct (6 x 8 bytes) reconstructed field-by-field into a 6-tuple and passed by-value to duckdb_fetch_chunk (_call_lib_func_byval over duckdb_result_ty). Destruction order (store chunk_p into chunk_buf, destroy chunk via chunk_pp, then destroy result via result_p) is correct and both handles are freed every iteration. Scoring math matches the Python baseline column-for-column (vectors 0-3 = w0-w3, dot with x[i,0..3]); cross-check asserts rounded sums. No signature/enum/struct-size/offset defects found. The two findings are error-path/robustness gaps that do not fire for the example's own fixed inputs."
+}

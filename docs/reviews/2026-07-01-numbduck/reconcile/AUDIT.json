@@ -1,0 +1,50 @@
+{
+  "oldConfirmed": 89,
+  "classified": 89,
+  "missingIds": [],
+  "doubleClassified": [],
+  "suspectCovered": [
+    {
+      "oldId": "PBR-COR-1",
+      "why": "Old PBR-COR-1 (medium, confirmed: hardcoded +16/+32 pybind11/ABI offsets validated only on duckdb 1.3.2 while the pin allows <1.6, with no runtime version/layout guard) is mapped 'covered' SOLELY to new PBR-COR-1, which was REFUTED -- its version-drift risk was empirically disproven across the pinned/tested range 1.3.2/1.4.0/1.5.1 on Linux x86-64 + Windows (green CI + direct reproduction) and recharacterized as a low nice-to-have hardening. No REC-PBR-COR-1 adoption exists, so per the audit rule the covered-claim is unresolved. Not a genuine loss of substance, though: the surviving 'no version guard / no re-verify mechanism' substance IS carried by confirmed current findings PBR-DES-2 and XC-ver-2 (same offsets, lines 59/62), which the mapper attributed to old PBR-DES-1 (PBR-COR-1's near-duplicate) instead. This is a broken bookkeeping row that points PBR-COR-1's coverage at a now-refuted finding rather than at its confirmed twins; the audit-adoptions round caught the analogous BLD-DES-1/BLD-DES-3 sole-cover-by-refuted cases but missed this one."
+    }
+  ],
+  "adoptedConfirmed": [
+    "REC-BLD-DES-1",
+    "REC-BLD-DES-3",
+    "REC-BLD-DES-6",
+    "REC-DCK-sig-DES-2",
+    "REC-EX-fraud-1",
+    "REC-EX-fraud-MEM-1",
+    "REC-EX-hav-1",
+    "REC-EX-irr-MEM-1",
+    "REC-TST-COR-1",
+    "REC-TST-cover-4",
+    "REC-TST-cover-7",
+    "REC-UTL-DES-2",
+    "REC-UTL-DES-4",
+    "REC-XC-err-2"
+  ],
+  "adoptedRefuted": [
+    "REC-DBU-MEM-1",
+    "REC-DCK-sig-DES-1",
+    "REC-PBR-DES-4"
+  ],
+  "unverifiedRecIds": [],
+  "oldVerifiedTotalFiles": 92,
+  "oldRefuted": ["TMD-DOC-5", "TST-cover-8", "XC-numbox-MEM-2"],
+  "supersedesPriorAuditNote": "This overwrites an earlier AUDIT.json draft (classified:59, 30 'missing') that was written before the 14 remaining unit-mapper files existed, before audit-adoptions.json rescued BLD-DES-1/BLD-DES-3, and before the REC-* verdicts landed. Against the current complete reconcile state, all 89 confirmed old findings are classified exactly once and every recommended REC has a verdict file.",
+  "highSeverityAudit": [
+    {"oldId": "BLD-DES-1", "sev": "high", "cover": ["TST-cover-10 (refuted)"], "resolvedBy": "REC-BLD-DES-1 (confirmed)", "genuine": true, "note": "macOS absent from CI -> macOS acquisition subsystem unexercised; confirmed adoption carries the exact substance."},
+    {"oldId": "BLD-DES-2", "sev": "high", "cover": ["BLD-DES-1 (confirmed)"], "genuine": true, "note": "benchmark marker documented as deselected but bare pytest runs the 1M-row benchmark in every CI job; same root cause."},
+    {"oldId": "DOC-acc-2", "sev": "high", "cover": ["DOC-acc-4 (confirmed)", "DCK-wrap-DES-1 (confirmed)"], "genuine": true, "note": "stale CLAUDE.md Follow-ups citing nonexistent ducklib.py:1525-1640 / already-completed migration; same root cause."},
+    {"oldId": "PBR-DES-1", "sev": "high", "cover": ["PBR-COR-1 (refuted)", "PBR-DES-2 (confirmed)", "XC-ver-2 (confirmed)"], "genuine": true, "note": "no runtime duckdb version guard for hardcoded offsets; confirmed PBR-DES-2/XC-ver-2 carry the substance."},
+    {"oldId": "XC-ver-3", "sev": "high", "cover": ["UTL-COR-3 (confirmed)", "UTL-DES-5 (confirmed)", "PBR-SEC-1 (confirmed)"], "genuine": true, "note": "macOS dual-runtime handle mixing / cross-library type confusion; same root cause."}
+  ],
+  "refutedRecDisposition": [
+    {"rec": "REC-DCK-sig-DES-1", "oldId": "DCK-sig-DES-1", "disposition": "not-a-gap: old substance already fully covered by confirmed current DCK-sig-DES-1; the mapper read only the truncated new-index gist and wrongly flagged 'missed'."},
+    {"rec": "REC-PBR-DES-4", "oldId": "PBR-DES-4", "disposition": "not-a-gap: old substance (version/offset-drift diagnostic in the validation-error path) already covered in combination by confirmed PBR-DES-1/PBR-DES-2."},
+    {"rec": "REC-DBU-MEM-1", "oldId": "DBU-MEM-1", "disposition": "assessed-and-declined: the create_duckdb_*().ctypes.data lifetime hazard is a caller responsibility with no live in-repo defect; the current review explicitly analyzes it in findings/DBU-MEM.json notes and consciously declined to elevate it. Present as a reasoned exclusion, not carried as a formal finding."}
+  ],
+  "summary": "COMPLETENESS is clean: all 89 confirmed old findings (of 92; 3 old refuted = TMD-DOC-5, TST-cover-8, XC-numbox-MEM-2 correctly excluded) are classified exactly once across the mapper files. No missing IDs and no true double-classification -- BLD-DES-1 and BLD-DES-3 each appear as 'covered' in their unit mapper AND 'missed' in audit-adoptions.json, but the supersede rule counts each once (their covering current finding was refuted, so the adoption supersedes). COVERED-CLAIM AUDIT: all 5 high-severity old findings are genuinely covered (same root cause + >=1 confirmed covering finding), with BLD-DES-1 resolved via confirmed REC-BLD-DES-1; a 12-finding medium/low spot-check spread across DCK-sig, DCK-wrap, DCK-wrap-SEC, TST-cover, TST-MEM, EX-common, EX-os, EX-irr, TMD-DOC, UTL-SEC, XC-numbox and DOC-acc all check out as genuine root-cause matches (incl. file-relocations DCK-wrap-SEC-1->UTL-SEC-1 and UTL-SEC-2->UTL-SEC-1, and the many-to-many EX-os remap). ONE suspect surfaced: PBR-COR-1 is sole-covered by the REFUTED new PBR-COR-1 with no REC-PBR-COR-1 adoption, so it is strictly unresolved -- but its surviving substance is in fact carried by confirmed PBR-DES-2/XC-ver-2 (the mapper attributed it to old PBR-DES-1 instead), making it a broken bookkeeping row rather than a genuine loss. ADOPTIONS: 14 REC-* confirmed, 3 refuted (REC-DBU-MEM-1, REC-DCK-sig-DES-1, REC-PBR-DES-4); every recommended REC has a verdict file (unverifiedRecIds empty). The 3 refuted adoptions create no real gaps: REC-DCK-sig-DES-1 and REC-PBR-DES-4 were refuted as duplicates whose substance is already carried by confirmed current DCK-sig-DES-1 and PBR-DES-1/PBR-DES-2 respectively (mapper attribution errors), and REC-DBU-MEM-1 was refuted because the current review had already consciously assessed that ctypes.data lifetime hazard as a caller-responsibility non-defect (documented in findings/DBU-MEM.json notes). CONCLUSION: the current review plus the 14 CONFIRMED REC-* adoptions IS effectively a complete superset of everything still-valid from the old review -- every still-valid old finding's substance is present in some confirmed current finding or confirmed adoption. The only blemishes are attribution/bookkeeping (PBR-COR-1's cover row points at a refuted finding rather than its confirmed twins; two refuted RECs were really already-covered duplicates) plus the single low-severity DBU-MEM-1 ctypes.data hazard that the current review deliberately downgraded to a documented non-issue. No substantive old defect is left uncovered."
+}

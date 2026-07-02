@@ -1,0 +1,21 @@
+{
+  "unit": "EX-irr-COR",
+  "results": [
+    {
+      "oldId": "EX-irr-COR-1",
+      "class": "covered",
+      "newIds": ["EX-irr-COR-1"],
+      "justification": "Same defect, same root cause. Old and new both identify irr_bisect's absolute-only NPV tolerance (abs(npv) < 1e-9) with no bracket-width fallback, returning math.nan on loop exhaustion for large-magnitude cashflows even after r has converged. Current code (examples/irr.py:78-94) is unchanged from the old tree, and the new finding reproduces it empirically (NaN at 1e7+ scale). Recommendation (bracket-width exit / scale-relative tolerance) is identical.",
+      "currentEvidence": "examples/irr.py:88 (abs(npv) < 1e-9 sole success exit), examples/irr.py:94 (return math.nan)",
+      "adopted": null
+    },
+    {
+      "oldId": "EX-irr-COR-2",
+      "class": "covered",
+      "newIds": ["EX-irr-COR-2"],
+      "justification": "Same defect, same root cause. Both flag the hard-coded bracket r_lo=-0.99 / r_hi=10.0 with no sign-change pre-check, so a root outside [-0.99, 10.0] yields NaN indistinguishable from the empty-group sentinel. Current code (examples/irr.py:80-81) is unchanged. The new finding is a superset (adds the mixed-sign/non-monotonic-NPV wrong-root case), so nothing in the old finding is left unmatched.",
+      "currentEvidence": "examples/irr.py:80-81 (r_lo=-0.99, r_hi=10.0 hard-coded), examples/irr.py:94 (return math.nan)",
+      "adopted": null
+    }
+  ]
+}

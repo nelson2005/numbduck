@@ -1,0 +1,29 @@
+{
+  "unit": "PBR-SEC",
+  "results": [
+    {
+      "oldId": "PBR-SEC-1",
+      "class": "covered",
+      "newIds": ["PBR-SEC-2"],
+      "justification": "Same defect: the sole pre-walk gate isinstance(conn, duckdb.DuckDBPyConnection) (pybridge.py:52) is spoofable (via __class__/__instancecheck__/subclass), so a layout-mismatched object reaches the chained from_address reads at lines 59/62 and drives attacker-influenced pointer dereferences. New PBR-SEC-2 reports this exact root cause and likewise recommends tightening to an exact-type check (type(conn) is duckdb.DuckDBPyConnection).",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "PBR-SEC-2",
+      "class": "covered",
+      "newIds": ["PBR-COR-2"],
+      "justification": "Same root cause: no NULL/liveness check on the +16/+32 reads before use. New PBR-COR-2 (pybridge.py:62) reports that after conn.close() the unique_ptr<Connection> is reset so conn_ptr becomes None (ctypes c_void_p(0).value is None), producing an opaque TypeError or a None passed into duckdb_query instead of the contract's RuntimeError, and cites the sibling numbox null guard. The old finding's dangling-non-NULL use-after-free sub-claim was judged theoretical in its own verification, so the confirmed core (null-after-close, no guard) is fully covered.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "PBR-SEC-3",
+      "class": "covered",
+      "newIds": ["PBR-COR-1", "PBR-COR-3"],
+      "justification": "Same defect split across two current findings: PBR-COR-1 reports the hand-derived +16/+32 offsets validated only on duckdb 1.3.2/Linux/libstdc++ with no runtime version guard despite the >=1.3.2,<1.6 pin (layout-drift -> wrong-but-non-NULL pointer), and PBR-COR-3 reports that the SELECT 1 step cannot detect a structurally-wrong pointer (a wild deref inside duckdb_query is UB, not a returnable rc) and that the 'validated before returned' docstring overstates the guarantee. Together these are exactly the old SEC-3 (SELECT 1 is a smoke test, not a memory-safety check; version-pinned offsets are the fragility).",
+      "currentEvidence": "",
+      "adopted": null
+    }
+  ]
+}

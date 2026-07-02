@@ -1,0 +1,44 @@
+{
+  "unit": "TST-MEM",
+  "target": "test/test_ducklib.py",
+  "dimension": "MEM",
+  "findings": [
+    {
+      "id": "TST-MEM-1",
+      "severity": "medium",
+      "title": "aux_get_data_vector discards the out_result buffer, making the DuckDB result impossible to destroy",
+      "file": "test/test_ducklib.py",
+      "line": 172,
+      "category": "resource leak / lifetime",
+      "description": "aux_get_data_vector() (172-182) does duckdb_result = tuple(out_result) at line 174 and returns that tuple plus data_chunk_p, but NOT the out_result numpy array. out_result is the buffer that physically backs the duckdb_result C struct and is the only handle duckdb_destroy_result can be called on (via out_result.ctypes.data). Because it is a local that is not returned, it is refcount-dropped and freed the moment aux_get_data_vector returns, while every consumer (test_duckdb_data_chunk_get_column_count:185, test_duckdb_data_chunk_get_size:192, test_duckdb_destroy_data_chunk:199, test_duckdb_fetch_chunk_data_chunk_get_vector_get_data_vector:222) only receives the value-copied tuple. The tuple carries the internal_data pointer so DuckDB's materialized result stays allocated (never destroyed), but no caller can ever reach duckdb_destroy_result — the result is structurally leaked in all four consumer tests. It also means the numpy buffer backing a C struct is freed while a chunk derived from that result is still in use (safe here only because duckdb_fetch_chunk returns an independently-owned chunk).",
+      "impact": "Four tests unconditionally leak a DuckDB result each; more importantly they can never exercise the duckdb_destroy_result teardown path, so a real result-leak or destroy-time regression in the bindings would not be caught by any of them.",
+      "recommendation": "Return out_result (the numpy buffer) from aux_get_data_vector and have each consumer call duckdb_destroy_result(out_result.ctypes.data) (and duckdb_destroy_data_chunk on data_chunk_p) before aux_close_db, as the other result tests already do.",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-MEM-2",
+      "severity": "medium",
+      "title": "Several tests create result/data_chunk handles and never destroy them",
+      "file": "test/test_ducklib.py",
+      "line": 212,
+      "category": "resource leak",
+      "description": "Multiple tests allocate DuckDB handles and never call the matching destroy, unlike the surrounding tests that are careful to do so. Concrete cases: test_query (132-137) leaks out_result; test_duckdb_column_count_and_duckdb_row_count (153-160) leaks out_result; test_duckdb_fetch_chunk_exhausted (212-219) leaks BOTH the first fetched chunk (chunk_p at 215, an independently-owned data chunk that must be duckdb_destroy_data_chunk'd) and the result; the aux_get_data_vector consumers (185, 192, 222) additionally leak the fetched chunk. Only aux_close_db is called, and closing the connection/database does not free outstanding results or fetched chunks in the DuckDB C API.",
+      "impact": "Per-test leaks of DuckDB-owned memory, and — because these tests never touch the destroy path — they cannot detect a leak regression in the bindings they nominally cover (fetch_chunk exhaustion, chunk get_size/column_count, column/row count).",
+      "recommendation": "Destroy every result (duckdb_destroy_result) and every fetched chunk (duckdb_destroy_data_chunk) before aux_close_db in each of these tests; in test_duckdb_fetch_chunk_exhausted, destroy the first chunk before fetching the second.",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-MEM-3",
+      "severity": "medium",
+      "title": "No DuckDB C-handle leak accounting anywhere; only NRT (numba) allocations are tracked",
+      "file": "test/test_ducklib.py",
+      "line": 3462,
+      "category": "test coverage gap",
+      "description": "The only leak accounting in the suite is rtsys.get_allocation_stats() asserting alloc==free in the two UDAF end-to-end tests (test_aggregate_function_structref_stddev:3439/3462-3466, test_aggregate_function_array_variance:3521/3544-3548) and the nested-heap dtor test (3344-3389). Those stats count ONLY numba-runtime (NRT/MemInfo) allocations — i.e. the structref/array UDAF state. They are completely blind to DuckDB-side malloc: a leaked duckdb_result, duckdb_data_chunk, duckdb_value, or logical_type would pass alloc==free unchanged. No test wraps DuckDB handle create/destroy in any counting harness, and the handle destroys are verified only by asserting handle[0]==0 in isolated cases (e.g. test_duckdb_destroy_data_chunk:208, test_prepare_and_destroy:287). Consequently the many value/logical_type tests (1173-1918) and the scalar/aggregate registration tests would not catch a binding regression that leaks a DuckDB handle, and the destroy paths are only ever checked for a null-out side effect, never for cumulative balance.",
+      "impact": "Handle-lifetime regressions on the DuckDB side (result/chunk/value/logical_type leaks, or a bind wrapper that fails to copy and drops a handle) are undetectable by the current suite; the leak-clean claims are only proven for the numba-managed UDAF state, not for the C API surface that the file mostly tests.",
+      "recommendation": "Add a C-handle accounting harness (e.g. wrap the DuckDB allocator, or at minimum add per-test create/destroy balance assertions or a loop-N-times-and-watch-RSS/handle-count check) for at least the value and logical_type families, so that missing/extra destroys are caught rather than silently leaking.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Value/logical_type/string-getter families (1173-1918) correctly pair create/destroy and free duckdb_malloc'd char* via duckdb_free; test_get_value_type (1687) correctly avoids the get_value_type alias double-free. The two UDAF end-to-end tests and the refcount-ladder/nested-heap tests do correctly release meminfo (release_meminfo in the destructor callbacks 3293-3305, 3150-3163) and would catch a missing destructor or a meminfo leak via alloc==free. Cross-statement get_unicode_data_p(...) address handoffs are safe only because the strings involved are either held in a live variable (query_txt) or are interned identifier/single-char literals; this is fragile but not currently a defect. The main gaps are DuckDB C-handle leaks in the result/chunk tests and the total absence of C-handle (non-NRT) leak accounting."
+}

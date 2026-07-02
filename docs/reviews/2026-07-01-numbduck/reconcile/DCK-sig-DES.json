@@ -1,0 +1,59 @@
+{
+  "unit": "DCK-sig-DES",
+  "results": [
+    {
+      "oldId": "DCK-sig-DES-1",
+      "class": "missed",
+      "newIds": ["DCK-sig-DES-1", "DCK-wrap-DES-2"],
+      "justification": "Old DES-1 flags SIX wrappers orphaned at EOF: four struct-by-value bind wrappers (hugeint/uhugeint/interval/decimal) AND two scalar wrappers (duckdb_scalar_function_get_extra_info, duckdb_scalar_function_set_error). The current-review findings DCK-sig-DES-1 and DCK-wrap-DES-2 cover ONLY the four bind wrappers; neither mentions the two orphaned scalar wrappers. That is a distinct extra defect beyond the matched part, so per the partial-overlap rule this is classified by the unmatched part = missed.",
+      "currentEvidence": "Bind-wrapper portion is covered on the current tree (DCK-sig-DES-1/DCK-wrap-DES-2 both cite duckdb_bind_hugeint at ducklib.py:1411 etc.). The UNMATCHED scalar-wrapper defect is still present: duckdb_scalar_function_get_extra_info (ducklib.py:1399) and duckdb_scalar_function_set_error (ducklib.py:1405) are defined at EOF between the aggregate block (ends 1396) and the bind wrappers (1411+), far from the scalar block at 1213-1312; their signature keys are likewise appended at ducklib.py:272-273 after the aggregate sig block (257-270) instead of in the scalar sig block (239-255).",
+      "adopted": {
+        "id": "REC-DCK-sig-DES-1",
+        "severity": "low",
+        "title": "Two scalar-function wrappers (get_extra_info / set_error) stranded at EOF, separated from the scalar block",
+        "file": "numbduck/ducklib.py",
+        "line": "1399-1408",
+        "description": "duckdb_scalar_function_get_extra_info (wrapper at ducklib.py:1399, sig key at 272) and duckdb_scalar_function_set_error (wrapper at 1405, sig key at 273) sit appended at the very end of the file, after the aggregate-function wrapper block (ends 1396) and immediately before the four struct-by-value bind wrappers (1411+). Every other scalar-function wrapper is grouped in the scalar block at 1213-1312, and every other scalar sig key is in the scalar sig block at 239-255. These two are the residue of a later append. (The four orphaned bind wrappers that share this EOF cluster are already reported by current findings DCK-sig-DES-1 and DCK-wrap-DES-2; this covers only the two scalar wrappers those findings omit.)",
+        "impact": "A maintainer scanning the scalar-function wrapper run (1213-1312) sees the block as complete and may re-add a duplicate get_extra_info/set_error wrapper, or edit one copy. The grouping invariant erodes silently; 'is this scalar function bound?' scans and diff review become unreliable. No runtime effect — all @proxy decorators look up by name and the signatures dict is complete.",
+        "recommendation": "Relocate the two scalar wrappers into the scalar block (1213-1312) and move sig keys 272-273 up into the scalar sig block (239-255), alongside the bind-wrapper relocation already recommended.",
+        "confidence": "high"
+      }
+    },
+    {
+      "oldId": "DCK-sig-DES-2",
+      "class": "missed",
+      "newIds": [],
+      "justification": "Old DES-2 flags the signatures dict being otherwise-alphabetical but with duckdb_connect wedged inside the create_* run, plus the secondary numeric-vs-lexicographic bind_int8 ordering. No current-review finding addresses signatures-dict ordering / duckdb_connect placement; the closest current findings (DCK-sig-DES-1, DCK-wrap-DES-2) are about wrapper-at-EOF grouping, a different defect. Still present on the current tree, uncovered = missed.",
+      "currentEvidence": "duckdb_connect is at ducklib.py:122, inserted between duckdb_create_timestamp_tz (121) and duckdb_create_array_type (123) — i.e. splitting the two create_* runs (110-121 and 123-155), even though 'connect' sorts before every 'create_*' key. Secondary: bind_int8 (87) precedes bind_int16/32/64 (88-90), i.e. numeric not lexicographic order.",
+      "adopted": {
+        "id": "REC-DCK-sig-DES-2",
+        "severity": "low",
+        "title": "signatures dict ordering inconsistent: duckdb_connect wedged inside the create_* run",
+        "file": "numbduck/ducklib.py",
+        "line": 122,
+        "description": "The signatures dict is otherwise alphabetical (e.g. the bind_* run 80-104, the column_* run 105-109). But duckdb_connect (122) is placed between two runs of duckdb_create_* (110-121 and 123-155), even though 'connect' sorts before every 'create_*' key — the create block is effectively split in two by connect. Minor secondary: bind_int8 (87) precedes bind_int16/32/64 (88-90), numeric rather than lexicographic order.",
+        "impact": "No runtime effect (dict insertion order is irrelevant to lookup), but it defeats the alphabetical scan/diff convention the rest of the dict follows, so there is no rule a contributor can apply when inserting a new key — invites further drift.",
+        "recommendation": "Move duckdb_connect to its alphabetical slot (before the create_* keys) and keep the dict consistently sorted; mirror that order in the wrapper section.",
+        "confidence": "high"
+      }
+    },
+    {
+      "oldId": "DCK-sig-DES-3",
+      "class": "covered",
+      "newIds": ["DCK-sig-DES-2"],
+      "justification": "Same defect, same root cause: current DCK-sig-DES-2 reports 'Dead code: _is_win and its sole enabling import sys are unused' at ducklib.py:14 — identical to old DES-3. Confirmed still present on the current tree (import sys at ducklib.py:1, _is_win = sys.platform == 'win32' at ducklib.py:14, referenced nowhere else)."
+    },
+    {
+      "oldId": "DCK-sig-DES-4",
+      "class": "covered",
+      "newIds": ["DCK-sig-DES-3", "DCK-wrap-COR-2"],
+      "justification": "Same defect, same root cause: the two varint wrappers (duckdb_create_varint at ducklib.py:728, duckdb_get_varint at 1053) use the version-pinned 'docs/1.3/clients/c/api#' URL instead of the mandated 'docs/stable/clients/c/api.html#' form. Both current findings DCK-sig-DES-3 and DCK-wrap-COR-2 report exactly this."
+    },
+    {
+      "oldId": "DCK-sig-DES-5",
+      "class": "covered",
+      "newIds": ["DCK-wrap-DES-3"],
+      "justification": "Same root cause (per-binding name-string duplication with no single source of truth). Current DCK-wrap-DES-3 reports the ~190 near-identical wrappers each repeating the C name string three times (decorator lookup key, def name, _call_lib_func literal). The old finding said 'up to five times' because it counted the @cres lookup and the docstring anchor too; the @cres->@proxy migration and the fact that the docstring-anchor drift is separately captured by DES-4/DCK-sig-DES-3 reduce the count, but the duplication defect DES-5 raised is the same one DCK-wrap-DES-3 reports."
+    }
+  ]
+}

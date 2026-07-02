@@ -1,0 +1,13 @@
+{
+  "findingId": "XC-ver-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "medium",
+  "reasoning": "Confirmed against current tree. numbduck/pybridge.py:58-62 performs two chained raw pointer-offset reads via ctypes.c_void_p.from_address(py_obj_addr + 16) and .from_address(cpp_obj_p + 32) with zero runtime gating on duckdb version or platform before the walk. Grep of pybridge.py and utils.py confirms no reference to duckdb.__version__, hasattr(), or any hardware/ABI check anywhere in the extraction path — the only downstream check is the SELECT 1 rc validation at pybridge.py:64-69, which architecturally can only catch a wrong-but-still-dereferenceable pointer; it cannot prevent a segfault when the offset walk itself lands on unmapped/garbage memory before duckdb_query is even called, exactly as the finding describes. The docstring (pybridge.py:31-34) self-admits 'Validated on duckdb 1.3.2 / Linux x86-64 / libstdc++ ... may change with major duckdb releases,' while pyproject.toml pins duckdb>=1.3.2,<1.6 — a range spanning 1.3.x/1.4.x/1.5.x — so the finding's framing (offsets relied on across a wider range than validated) is accurate. Checked numbduck_ci.yml: CI does exercise duckdb 1.3.2/1.4.0/1.5.1 on ubuntu-latest (x86-64) and ubuntu-24.04-arm (ARM64), and duckdb 1.5.1 on windows-latest — broader than the docstring implies, which somewhat tempers real-world risk for those exact combos — but macOS is completely absent from the CI matrix despite numbduck's own standalone-libduckdb loader existing specifically to support macOS (utils.py), Windows is never tested with 1.3.2/1.4.0, and the locally installed dev venv here (numbduck/venv/bin/python -c 'import duckdb; print(duckdb.__version__)' -> 1.5.4) is itself a version CI has never exercised yet the <1.6 pin silently accepts it — concretely demonstrating the gap between 'pinned/supported' and 'actually validated' that the finding calls out. Severity: medium is appropriate — pybridge is an opt-in bridging feature (only invoked by callers who explicitly import extract_connection_ptr to bridge an existing Python connection), not a default code path, so 'high' would overstate blast radius; but the risk of an unrecoverable process crash on any (duckdb version, platform) combination outside the narrow CI/docstring-validated set is real and understated by relying on an rc check alone, so it is more than a documentation nit.",
+  "citations": [
+    "numbduck/pybridge.py:52-62",
+    "numbduck/pybridge.py:31-34",
+    "numbduck/pybridge.py:64-69",
+    "pyproject.toml (duckdb>=1.3.2,<1.6)",
+    ".github/workflows/numbduck_ci.yml:19-43"
+  ]
+}

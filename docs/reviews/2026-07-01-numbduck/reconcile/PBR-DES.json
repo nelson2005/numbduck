@@ -1,0 +1,47 @@
+{
+  "unit": "PBR-DES",
+  "results": [
+    {
+      "oldId": "PBR-DES-1",
+      "class": "covered",
+      "newIds": ["PBR-COR-1", "PBR-DES-2", "XC-ver-2"],
+      "justification": "Same root cause: extract_connection_ptr hard-codes the +16/+32 offsets validated only on duckdb 1.3.2 while the pin allows >=1.3.2,<1.6, with no runtime duckdb.__version__ guard. Current PBR-COR-1 (high) is the direct match ('No duckdb version guard although hard-coded pybind11/ABI offsets are validated only on 1.3.2'); new PBR-DES-2 and XC-ver-2 also call out the missing version guard.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "PBR-DES-2",
+      "class": "covered",
+      "newIds": ["PBR-DES-2"],
+      "justification": "Same defect: the two load-bearing offsets are bare inline literals (pybridge.py:59,62) with no named module-level constants. The current PBR-DES-2 (note: same id string, different review) explicitly reports 'there are no named module-level constants (e.g. CPYTHON_OBJ_HEADER = 16, DUCKDBPY_CONNECTION_OFFSET = 32)' and recommends promoting them, subsuming the old magic-number finding.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "PBR-DES-3",
+      "class": "covered",
+      "newIds": ["PBR-COR-2", "PBR-DES-1", "PBR-MEM-2"],
+      "justification": "Same defect: no NULL/sanity guard on cpp_obj_p (line 59) or conn_ptr (line 62) before dereference/duckdb_query, so layout drift crashes instead of raising. Current PBR-COR-2 gives the exact fix ('raise RuntimeError when either is falsy before pointer arithmetic on cpp_obj_p or passing conn_ptr into duckdb_query'); PBR-MEM-2 restates the null/validity guard, and new PBR-DES-1 covers the 'no graceful failure path for the drift it warns about' framing.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "PBR-DES-4",
+      "class": "missed",
+      "newIds": [],
+      "justification": "Still present verbatim on the current tree: pybridge.py:69-72 raises RuntimeError('extracted connection pointer failed validation') with no duckdb version, no offsets, and no layout-drift hint. No current finding covers this specific defect: PBR-COR-1 and new PBR-DES-2 recommend adding a NEW error at a would-be version-guard site (a different, not-yet-existing code path), while PBR-COR-3 and new PBR-DES-1 only recommend rewording the docstring. None recommend enriching the existing validation RuntimeError message. Adopting.",
+      "currentEvidence": "numbduck/pybridge.py:69-72 (rc != ducklib.DuckDBSuccess -> raise RuntimeError with a context-free message); duckdb imported at line 3 so duckdb.__version__ is available at the raise site; offsets at lines 59 (+16) and 62 (+32); docstring lines 31-34 name version-dependent layout as the primary failure mode.",
+      "adopted": {
+        "id": "REC-PBR-DES-4",
+        "severity": "low",
+        "confidence": "high",
+        "title": "Validation RuntimeError lacks diagnostic context (no duckdb version, offsets, or layout-drift hint)",
+        "file": "numbduck/pybridge.py",
+        "line": 70,
+        "description": "When the round-trip SELECT 1 validation fails, the helper raises RuntimeError('extracted connection pointer failed validation') (pybridge.py:70-72) with no context: it does not report the running duckdb.__version__ (duckdb is already imported at line 3), the offsets used (+16 at line 59, +32 at line 62), or the most likely root cause on an in-pin-range (>=1.3.2,<1.6) 1.4/1.5 wheel — an unvalidated/drifted pybind11/DuckDBPyConnection layout. The function's own docstring (lines 31-34) identifies version-dependent layout as the primary failure mode, so this error is the natural place to surface that hypothesis.",
+        "impact": "A user hitting this on a newer, permitted-but-unvalidated duckdb gets a generic message and no pointer toward the actual root cause (offset/layout drift), slowing diagnosis of precisely the fragility this code is most exposed to.",
+        "recommendation": "Include duckdb.__version__ and a hint to re-verify the pybind11/DuckDBPyConnection offsets in the RuntimeError message (e.g. note the validated version 1.3.2 and that the layout may have changed for the running version)."
+      }
+    }
+  ]
+}

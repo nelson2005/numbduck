@@ -1,0 +1,19 @@
+{
+  "unit": "EX-os-COR",
+  "results": [
+    {
+      "oldId": "EX-os-COR-1",
+      "class": "covered",
+      "newIds": ["EX-os-COR-2", "EX-os-MEM-2"],
+      "justification": "Old COR-1's defect is that duckdb_bind_int64 (line 117) and duckdb_execute_prepared (line 118) return codes are silently discarded, violating the C-style return-code contract and feeding fetch_chunk on an indeterminate result. Current EX-os-COR-2 reports the same root cause verbatim ('Neither the duckdb_bind_int64 (line 117) nor duckdb_execute_prepared (line 118) return codes are checked') and recommends checking bind/execute duckdb_state == DuckDBSuccess; EX-os-MEM-2 ties the same unchecked-execute path to the NULL chunk. Same root cause, reported.",
+      "currentEvidence": "examples/online_scoring.py:117-118 — return values of ducklib.duckdb_bind_int64 and ducklib.duckdb_execute_prepared are still discarded; only duckdb_prepare is checked at line 156. Defect still present but covered by current EX-os-COR-2 / EX-os-MEM-2."
+    },
+    {
+      "oldId": "EX-os-COR-2",
+      "class": "covered",
+      "newIds": ["EX-os-COR-2", "EX-os-MEM-2"],
+      "justification": "Old COR-2 (chunk_p from duckdb_fetch_chunk dereferenced by duckdb_data_chunk_get_vector with no chunk_p != 0 / row-count guard; a zero-row probe segfaults in nogil JIT) is matched one-to-one by current EX-os-COR-2 (same title, line 123) and EX-os-MEM-2, which report the identical NULL/empty-chunk deref and recommend a chunk_p != 0 + duckdb_data_chunk_get_size guard.",
+      "currentEvidence": "examples/online_scoring.py:123-136 — chunk_p is still passed straight to duckdb_data_chunk_get_vector (125-128) and read via carray(..., (1,), float64)[0] (133-136) with no null/size guard. Defect present and covered."
+    }
+  ]
+}

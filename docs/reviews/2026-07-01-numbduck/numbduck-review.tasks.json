@@ -1,0 +1,621 @@
+{
+  "meta": {
+    "review": "2026-07-01-numbduck",
+    "date": "2026-07-02",
+    "repo": "numbduck",
+    "branch": "review/numbduck-2026-06-29",
+    "findings": {
+      "total": 108,
+      "confirmed": 99,
+      "refuted": 9,
+      "bySeverity": {
+        "critical": 0,
+        "high": 6,
+        "medium": 33,
+        "low": 60
+      }
+    },
+    "coverageCheck": {
+      "confirmedMapped": 99,
+      "unmappedConfirmed": [],
+      "refutedLeaked": []
+    }
+  },
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Route by-value duckdb_result functions through numbox's ABI-aware _call_lib_func",
+      "priority": "high",
+      "resolves": [
+        "DCK-byval-MEM-1"
+      ],
+      "files": [
+        "numbduck/ducklib.py",
+        "test/test_ducklib.py"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "duckdb_fetch_chunk, duckdb_result_return_type, and duckdb_result_statement_type call _call_lib_func (not _call_lib_func_byval), passing the 48-byte duckdb_result_ty value; no signature changes are needed.",
+        "_call_lib_func_byval remains used only for genuine func(T*) pointer parameters.",
+        "A round-trip test fetches a chunk and validates column data with inlining disabled / low optimization so the fix does not rely on stack-layout coincidence.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
+      ],
+      "rationale": "_call_lib_func_byval lowers func(T*) semantics and omits the SysV x86-64 byval stack copy, so the 48-byte result is read from stale stack; today it works only by coincidence and can silently corrupt the core result-fetch path."
+    },
+    {
+      "id": "T2",
+      "title": "Add a duckdb library-coordination / single-runtime guard for the standalone fallback",
+      "priority": "high",
+      "resolves": [
+        "XC-ver-1",
+        "PBR-SEC-1",
+        "XC-ver-2",
+        "PBR-DES-2",
+        "UTL-DES-5",
+        "UTL-COR-3"
+      ],
+      "files": [
+        "numbduck/utils.py",
+        "numbduck/pybridge.py"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "Before a standalone/Homebrew/NUMBDUCK_LIBDUCKDB-sourced libduckdb is trusted, its duckdb_library_version() is compared against duckdb.__version__ and a mismatch raises a clear RuntimeError with remediation guidance (mirroring numbox libraries_coordinated()); the check covers the env-override and brew branches, not just the version-keyed cache/download.",
+        "pybridge extraction is gated on the coordinated (version, platform) set and refuses an unvalidated combination rather than dereferencing a wheel-minted Connection* in a possibly-different libduckdb.",
+        "The +16/+32 offsets become named module constants with their derivation comments.",
+        "The macOS dual-runtime seam is documented (single-runtime invariant) at the load site, and a test asserts a simulated version mismatch is refused.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest.",
+        "Affected docs are updated and doc code-blocks stay flake8-clean at --max-line-length=120 (doc-codeblock-flake8 CI passes)."
+      ],
+      "rationale": "On the macOS/standalone fallback a second, possibly version-mismatched libduckdb is loaded RTLD_GLOBAL and pybridge hands it a Connection* minted by the wheel, which is undefined behavior; numbox already guards this exact hazard and numbduck has no equivalent."
+    },
+    {
+      "id": "T3",
+      "title": "Fix the CI matrix and test step (deselect benchmark, add macOS, tidy matrix)",
+      "priority": "high",
+      "resolves": [
+        "BLD-DES-1",
+        "REC-BLD-DES-1",
+        "REC-BLD-DES-6",
+        "BLD-DES-4"
+      ],
+      "files": [
+        ".github/workflows/numbduck_ci.yml",
+        "pyproject.toml"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "The CI pytest step deselects benchmarks (-m 'not benchmark' in the step or addopts) and adds --durations=20; a CI run shows test_udf_benchmark deselected.",
+        "If deselection lands in pyproject.toml addopts (which changes every local pytest invocation), the local suite is re-validated: after clearing __pycache__ and ~/.cache/numba, /home/erik/projects/numbduck/venv/bin/python -m pytest is green and shows the benchmark deselected.",
+        "At least one macos-latest (ARM64) job exercises load_duckdb end-to-end (e.g. NUMBDUCK_LIBDUCKDB pointing at a brew libduckdb) and is green.",
+        "A Windows job at the duckdb floor (1.3.2) is added, or the single-version Windows coverage is documented in a workflow comment.",
+        "The non-existent flake8 --exclude path is removed (or replaced with a real exclude).",
+        "The full CI matrix is green."
+      ],
+      "rationale": "Every matrix job wastes ~2 minutes running the 1M-row benchmark the marker claims is deselected, the macOS acquisition subsystem has zero CI coverage, and the flake8 exclude points at a path that does not exist."
+    },
+    {
+      "id": "T4",
+      "title": "Rewrite CLAUDE.md to match the current @proxy tree",
+      "priority": "high",
+      "resolves": [
+        "DOC-acc-2",
+        "DOC-acc-3",
+        "DCK-wrap-DES-1",
+        "DOC-acc-1",
+        "DOC-acc-4",
+        "DOC-acc-5"
+      ],
+      "files": [
+        "CLAUDE.md"
+      ],
+      "model": "sonnet",
+      "effort": "high",
+      "acceptanceCriteria": [
+        "The Architecture text, 'Adding a New Binding' template, and Related-Projects entry describe @proxy/@proxy_if_available + jit_options + _call_lib_func/_call_lib_func_byval; @cres appears nowhere.",
+        "The 'Struct-by-value helpers' section no longer claims ducklib.py-local helpers/intrinsics (_call_lib_func_struct_in/out, _emit_byval_call, _build_packed_interval, custom @intrinsic); it states ABI lowering lives in numbox.",
+        "The stale 'Follow-ups' migration item and the ducklib.py:1525-1640 / :298-433 line references are removed (the migration is complete); no line reference points past EOF.",
+        "The numbox pin reads numbox>=0.5.13 (matching pyproject.toml), and 'Adding a New Binding' steps 1/7 no longer contradict step 5 on docstring link targets.",
+        "Affected docs are updated and doc code-blocks stay flake8-clean at --max-line-length=120 (doc-codeblock-flake8 CI passes)."
+      ],
+      "rationale": "CLAUDE.md is the core onboarding doc yet describes a removed @cres pattern, nonexistent helpers/intrinsics, an already-completed migration at past-EOF line numbers, and a wrong numbox pin, so a contributor following it writes non-matching code."
+    },
+    {
+      "id": "T5",
+      "title": "Fix stale line/anchor citations in the UDAF design doc",
+      "priority": "high",
+      "resolves": [
+        "TMD-DOC-1",
+        "TMD-DOC-2",
+        "TMD-DOC-3",
+        "TMD-DOC-4",
+        "TMD-DOC-5"
+      ],
+      "files": [
+        "test/test_ducklib.md"
+      ],
+      "model": "sonnet",
+      "effort": "high",
+      "acceptanceCriteria": [
+        "The bridge-intrinsics section states export_meminfo/borrow_structref/release_meminfo are imported from numbox.utils.meminfo (cite test_ducklib.py:11-14) and links their definitions to numbox, dropping the false 'Defined at test_ducklib.py L2796-2874' claim.",
+        "The Welford callback anchors resolve to the Welford callbacks (~L3205-3305), and the registration anchors to the register block (~L3409-3433), not the array UDAF or callback bodies.",
+        "The refcount-ladder test link resolves to L2931 and the commented-intrinsic range to ~L2836-2851.",
+        "doc-codeblock-flake8 and link-check CI pass."
+      ],
+      "rationale": "Several design-doc cites point at unrelated code (the array UDAF, callback bodies) or a range with no definitions, breaking the doc's traceability into the implementation."
+    },
+    {
+      "id": "T6",
+      "title": "Validate NUMBDUCK_JIT_OPTIONS in get_jit_options (shape + key whitelist)",
+      "priority": "medium",
+      "resolves": [
+        "CFG-COR-1",
+        "CFG-COR-2",
+        "CFG-COR-3",
+        "DCK-proxy-COR-1"
+      ],
+      "files": [
+        "numbduck/configurations.py",
+        "test/test_ducklib.py"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "get_jit_options() raises a clear ValueError naming NUMBDUCK_JIT_OPTIONS when the parsed JSON is not an object.",
+        "get_jit_options() restricts keys to an explicit njit-accepted allow-list and raises a ValueError naming NUMBDUCK_JIT_OPTIONS and the offending key, instead of an opaque numba error at import.",
+        "Tests cover a non-object value, an unknown key, and a valid object.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
+      ],
+      "rationale": "Non-object JSON silently collapses to {} (caching silently off for every binding) and an unknown key kills any import of the package with a numba error that never names the env var."
+    },
+    {
+      "id": "T7",
+      "title": "Harden release.yml against script injection and unpinned actions",
+      "priority": "medium",
+      "resolves": [
+        "BLD-SEC-1",
+        "BLD-SEC-3",
+        "BLD-DES-5"
+      ],
+      "files": [
+        ".github/workflows/release.yml"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "github.ref_name / env.VERSION are passed through an env: map and referenced as quoted shell variables (or written via a small python -c), never interpolated into run: script text or into numbduck/__init__.py.",
+        "Every action is pinned to a full 40-char commit SHA with a version comment, prioritizing pypa/gh-action-pypi-publish (currently a mutable release/v1 branch in the id-token:write job) and the third-party lychee-action.",
+        "release.yml action pins and build steps are reconciled with the other workflows (build produces the intended sdist/wheel), and CI is green."
+      ],
+      "rationale": "release.yml splices an attacker-influenceable tag name into shell and into __init__.py feeding a Trusted-Publishing PyPI pipeline, and pins the publish action to a moving branch."
+    },
+    {
+      "id": "T8",
+      "title": "Cap and pin numbox",
+      "priority": "medium",
+      "resolves": [
+        "BLD-DES-2",
+        "BLD-SEC-4"
+      ],
+      "files": [
+        "pyproject.toml",
+        ".github/workflows/numbduck_ci.yml"
+      ],
+      "model": "opus",
+      "effort": "xhigh",
+      "acceptanceCriteria": [
+        "pyproject.toml pins numbox with an upper cap reflecting the tested range (e.g. numbox>=0.5.13,<0.6), mirroring the duckdb pin discipline.",
+        "The CI install pins numbox explicitly (alongside numba/duckdb) or uses a hash-pinned constraints file so the matrix tests a known numbox.",
+        "CI is green.",
+        "Affected docs are updated and doc code-blocks stay flake8-clean at --max-line-length=120 (doc-codeblock-flake8 CI passes)."
+      ],
+      "rationale": "numbduck imports deep, private numbox internals under an uncapped numbox>=0.5.13, so a future numbox reshuffle breaks it with a bare ImportError, and CI floats to arbitrary-latest numbox."
+    },
+    {
+      "id": "T9",
+      "title": "Verify integrity of the downloaded/cached libduckdb",
+      "priority": "medium",
+      "resolves": [
+        "UTL-SEC-1",
+        "UTL-SEC-2",
+        "UTL-DES-2",
+        "UTL-DES-6"
+      ],
+      "files": [
+        "numbduck/utils.py",
+        "test/test_ducklib.py"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "Downloaded bytes are verified against a pinned per-version SHA-256 (or DuckDB's published checksums) before extract/persist/load, and the pinned digest is re-verified on every cache hit; NUMBDUCK_LIBDUCKDB_DOWNLOAD=1 does not bypass the check.",
+        "The freshly downloaded handle is re-checked with _has_capi_symbols before it is returned (mirroring the standalone branch), and the cache dir/file are created with restrictive perms (0o700/0o600).",
+        "urlopen uses a bounded timeout and download/extract failures (HTTPError/URLError/KeyError/timeout) re-raise a branded RuntimeError with brew/NUMBDUCK_LIBDUCKDB guidance and the attempted URL.",
+        "A test asserts a tampered/wrong-digest cached dylib is rejected.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
+      ],
+      "rationale": "The macOS download/cache path dlopens unverified native code RTLD_GLOBAL (arbitrary-code-execution and cache-poisoning surface), skips the symbol re-check, has no timeout, and surfaces raw urllib/zip errors."
+    },
+    {
+      "id": "T10",
+      "title": "Refactor the loader for testability and robustness",
+      "priority": "medium",
+      "resolves": [
+        "REC-UTL-DES-2",
+        "UTL-DES-3",
+        "UTL-COR-1",
+        "UTL-COR-2",
+        "UTL-DES-1",
+        "UTL-DES-4",
+        "REC-UTL-DES-4"
+      ],
+      "files": [
+        "numbduck/utils.py",
+        "test/test_ducklib.py"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "_download_libduckdb is split into a pure consent-policy function and a _fetch_and_cache(url, dest) that a unit test drives against a local file:// archive and a tmp dest.",
+        "The consent prompt is EOF/non-TTY safe (raises the branded instructional RuntimeError instead of an EOFError at import).",
+        "_find_standalone_libduckdb is side-effect free: the legacy-cache cleanup moves to an explicit, OSError-guarded migration step; the dylib filename/path is a single shared constant; and the locator regex is end-anchored and picks deterministically.",
+        "The non-Darwin error distinguishes unset vs set-but-missing NUMBDUCK_LIBDUCKDB (echoing the path) and states the macOS-only download asymmetry.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
+      ],
+      "rationale": "The download path fuses consent/fetch/unzip/write into one untestable body, the locator mutates the filesystem (an unguarded os.remove can abort import), input() crashes headless imports, and the non-Darwin guidance is circular. Sequence after T9, which hardens the same download/cache body in utils.py, to avoid conflicting edits."
+    },
+    {
+      "id": "T11",
+      "title": "Harden pybridge input validation and correct its docstring",
+      "priority": "medium",
+      "resolves": [
+        "PBR-COR-2",
+        "PBR-MEM-2",
+        "PBR-SEC-2",
+        "PBR-DES-1",
+        "PBR-COR-3",
+        "PBR-SEC-3",
+        "PBR-MEM-1"
+      ],
+      "files": [
+        "numbduck/pybridge.py",
+        "test/test_ducklib.py"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "cpp_obj_p and conn_ptr are checked for None/0 and a null read raises the documented RuntimeError before any pointer arithmetic or duckdb_query call; a test exercises conn.close() then extract_connection_ptr and asserts RuntimeError (not a numba TypeError/segfault).",
+        "The type guard uses exact-type identity (type(conn) is duckdb.DuckDBPyConnection) and the docstring notes a non-canonical object is undefined behavior.",
+        "The docstring describes the SELECT 1 step as a best-effort liveness smoke-test (not offset/ABI validation) and documents the borrowed-pointer lifetime contract (caller must keep conn alive and open; invalid after close/GC).",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest.",
+        "Affected docs are updated and doc code-blocks stay flake8-clean at --max-line-length=120 (doc-codeblock-flake8 CI passes)."
+      ],
+      "rationale": "A closed/null-backed connection yields a confusing TypeError or a NULL C call instead of the documented RuntimeError, the isinstance guard is spoofable, and the docstring overstates the SELECT 1 guarantee and omits the borrowed-pointer lifetime coupling. Sequence after T2, which edits the same pybridge.py sites (offset constants and the extraction guard), to avoid conflicting edits."
+    },
+    {
+      "id": "T12",
+      "title": "Fix DuckDB handle leaks in tests and add C-handle leak accounting",
+      "priority": "medium",
+      "resolves": [
+        "TST-MEM-1",
+        "TST-MEM-2",
+        "TST-MEM-3"
+      ],
+      "files": [
+        "test/test_ducklib.py"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "aux_get_data_vector returns the out_result buffer and every consumer destroys the result (duckdb_destroy_result) and fetched chunk (duckdb_destroy_data_chunk) before aux_close_db.",
+        "test_query, the column/row-count test, and test_duckdb_fetch_chunk_exhausted destroy their result and any fetched chunk (the first chunk is destroyed before the second fetch).",
+        "A C-handle balance harness (or per-test create/destroy balance assertions) guards at least the result/chunk and value/logical_type families so a missing-destroy or double-free regression fails the suite.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
+      ],
+      "rationale": "Several tests leak duckdb_result/data_chunk handles and the DuckDB C-handle side has no leak accounting (only the NRT side does), so handle-lifetime regressions pass silently."
+    },
+    {
+      "id": "T13",
+      "title": "Strengthen high-value test coverage (ABI guard, multi-chunk, wide decimal, NULLs)",
+      "priority": "medium",
+      "resolves": [
+        "TST-cover-1",
+        "TST-cover-2",
+        "TST-cover-3",
+        "TST-cover-4"
+      ],
+      "files": [
+        "test/test_ducklib.py"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "test_struct_size_guard is replaced by (or supplemented with) a behavioral test that round-trips a 16-byte and a >16-byte (24-byte decimal/varint) struct through the real wrappers, or renamed so it is not mistaken for an ABI guard.",
+        "A multi-chunk test selects >2048 rows, loops duckdb_fetch_chunk until null, asserts the row total and values across a chunk boundary, and drives a UDF/UDAF so finalize runs with offset != 0.",
+        "A DECIMAL(width>18) case binds/creates a value whose magnitude needs the upper 64 bits and asserts both int128 halves round-trip.",
+        "At least one scalar-UDF and one UDAF test run over a NULL-containing column with a validity-aware callback and assert a NULL-aware reference result.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
+      ],
+      "rationale": "The named ABI size guard only tests pure-Python arithmetic, multi-chunk and wide-decimal (upper-64-bit) paths are never driven, and every UDF/UDAF callback is only shown correct on dense NULL-free data."
+    },
+    {
+      "id": "T14",
+      "title": "Harden example UDF error paths (handle leaks and chunk guards)",
+      "priority": "medium",
+      "resolves": [
+        "EX-os-MEM-1",
+        "EX-os-COR-1",
+        "EX-os-COR-2",
+        "EX-os-MEM-2",
+        "EX-fraud-1",
+        "EX-hav-2"
+      ],
+      "files": [
+        "examples/online_scoring.py",
+        "examples/fraud_score.py",
+        "examples/haversine.py"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "online_scoring.score_jit wraps prepare+loop in try/finally so duckdb_destroy_prepare always runs (including on prepare failure and loop exceptions), guards chunk_p != 0 and get_size before reading, and checks the bind/execute duckdb_state.",
+        "fraud_score and haversine destroy the scalar-function builder handle on the register-failure path (destroy-before-assert or try/finally).",
+        "All affected examples still run and their cross-checks pass.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
+      ],
+      "rationale": "The reference examples leak prepared-statement and scalar-function handles on error paths and dereference the fetched chunk with no NULL/size guard, teaching an unsafe pattern."
+    },
+    {
+      "id": "T15",
+      "title": "Fix irr convergence tolerance and document the bracket",
+      "priority": "medium",
+      "resolves": [
+        "EX-irr-COR-1",
+        "EX-irr-COR-2"
+      ],
+      "files": [
+        "examples/irr.py",
+        "test/test_ducklib.py"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "irr_bisect converges on bracket width in r (or a scale-relative NPV tolerance) and returns the converged rate rather than NaN; a large-magnitude cashflow case (e.g. amounts scaled x1000) returns the correct finite IRR.",
+        "The no-sign-change / out-of-bracket case is distinguishable from the documented empty-group NaN, and the [-0.99, 10.0] bracket and single-sign-change assumption are documented.",
+        "Existing irr tests still pass.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
+      ],
+      "rationale": "The fixed absolute NPV tolerance cannot be met for realistic (~10M) cashflow magnitudes, so a fully converged root returns NaN indistinguishable from an empty group; the fixed bracket has the same NaN conflation."
+    },
+    {
+      "id": "T16",
+      "title": "Correct the examples README run instructions and links",
+      "priority": "medium",
+      "resolves": [
+        "EX-readme-DOC-1",
+        "EX-readme-DOC-2"
+      ],
+      "files": [
+        "examples/README.md"
+      ],
+      "model": "sonnet",
+      "effort": "high",
+      "acceptanceCriteria": [
+        "The README documents how to run the IRR example (python examples/run_irr.py) and no longer implies python examples/irr.py works (which exits 1), noting run_irr.py is the launcher.",
+        "The numbox clock.py doc link is repinned to a version consistent with the numbox>=0.5.13 dependency pin.",
+        "link-check CI passes."
+      ],
+      "rationale": "The README advertises irr.py as runnable but gives no working command (irr.py exits 1) and links numbox docs at a tag below the dependency floor."
+    },
+    {
+      "id": "T17",
+      "title": "Fix idx_t signedness and validity-pointer typing in the signatures",
+      "priority": "low",
+      "resolves": [
+        "DCK-sig-COR-1",
+        "DCK-wrap-COR-1",
+        "DCK-sig-COR-2",
+        "XC-numbox-COR-1"
+      ],
+      "files": [
+        "numbduck/ducklib.py",
+        "test/test_ducklib.py"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "Every idx_t return/arg (the count/size/index entries and the validity_row_is_valid row arg) is typed uint64, matching duckdb.h and the sibling entries.",
+        "duckdb_vector_get_validity is typed intp(intp), matching the all-pointers-are-intp convention and duckdb_vector_get_data.",
+        "A test feeds duckdb_vector_get_validity into duckdb_validity_row_is_valid inside @njit with no uint64->int64 coercion, and any now-unnecessary intp(...) casts in the tests are removed.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
+      ],
+      "rationale": "Several idx_t entries are signed intp instead of uint64 and the validity pointer is a uint64 scalar, breaking the file's conventions and risking numba int/uint->float64 unification."
+    },
+    {
+      "id": "T18",
+      "title": "ducklib cleanup: reorder stranded wrappers, remove dead code, normalize URLs, add a name-integrity test",
+      "priority": "low",
+      "resolves": [
+        "DCK-sig-DES-1",
+        "DCK-wrap-DES-2",
+        "REC-DCK-sig-DES-2",
+        "DCK-sig-DES-2",
+        "DCK-sig-DES-3",
+        "DCK-wrap-COR-2",
+        "DCK-wrap-DES-3"
+      ],
+      "files": [
+        "numbduck/ducklib.py",
+        "test/test_ducklib.py"
+      ],
+      "model": "opus",
+      "effort": "xhigh",
+      "acceptanceCriteria": [
+        "The four struct-by-value bind wrappers and the two stranded scalar wrappers are relocated into their families, and both the signatures dict and the wrapper defs follow one deterministic order (duckdb_connect moved to its sorted slot).",
+        "Dead code is removed (_is_win and the sole enabling import sys).",
+        "The two varint docstrings use the canonical https://duckdb.org/docs/stable/clients/c/api.html#... form.",
+        "A test asserts, for every wrapper, that the _call_lib_func string literal matches the def name and a registered signatures key.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest.",
+        "Affected docs are updated and doc code-blocks stay flake8-clean at --max-line-length=120 (doc-codeblock-flake8 CI passes)."
+      ],
+      "rationale": "Migration residue left six wrappers appended at EOF out of order, ducklib carries dead Windows code and two non-canonical varint URLs, and the repeated name literal has no import-time integrity check."
+    },
+    {
+      "id": "T19",
+      "title": "Add @cfunc exception guards to example callbacks and exercise the combine leak path",
+      "priority": "low",
+      "resolves": [
+        "XC-numbox-MEM-1",
+        "EX-irr-MEM-1",
+        "EX-scalar-MEM-1",
+        "REC-EX-irr-MEM-1"
+      ],
+      "files": [
+        "examples/irr.py",
+        "examples/haversine.py",
+        "test/test_ducklib.py"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "Each UDAF and scalar-UDF @cfunc impl body is wrapped in a bare try/except (not try/finally, which re-raises on numba 0.65.1) so a raise runs the NRT cleanup / releases any borrowed structref and writes a defined sentinel instead of a silently-wrong result.",
+        "A test induces a raise inside a callback (e.g. forced bad input) and asserts NRT alloc==free afterward.",
+        "The irr leak guard exercises the combine path (parallel aggregation / a table large enough to produce multiple partial states) inside the alloc==free region.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
+      ],
+      "rationale": "A raise inside a callback impl is swallowed at numba's cfunc boundary, leaking a borrowed structref incref and handing DuckDB a silently-wrong aggregate, and the combine borrow/release balance is never actually exercised."
+    },
+    {
+      "id": "T20",
+      "title": "Handle NULL validity in the example scalar UDFs",
+      "priority": "low",
+      "resolves": [
+        "REC-EX-hav-1",
+        "REC-EX-fraud-1",
+        "REC-EX-fraud-MEM-1"
+      ],
+      "files": [
+        "examples/haversine.py",
+        "examples/fraud_score.py"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "The haversine and fraud_score chunk callbacks either fetch each input vector's validity via duckdb_vector_get_validity and gate rows with duckdb_validity_row_is_valid (mirroring irr.py), or document the non-NULL precondition inline at the loop.",
+        "The examples still run and their cross-checks pass.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
+      ],
+      "rationale": "The reference scalar-UDF chunk callbacks read input vectors with no validity check, so a NULL input row is folded into the result as a garbage value."
+    },
+    {
+      "id": "T21",
+      "title": "Add value assertions and edge-case coverage to the test suite",
+      "priority": "low",
+      "resolves": [
+        "TST-cover-5",
+        "TST-cover-6",
+        "TST-cover-7",
+        "TST-cover-8",
+        "TST-cover-9",
+        "TST-cover-11",
+        "TST-COR-1",
+        "TST-COR-2",
+        "REC-TST-COR-1",
+        "REC-TST-cover-4",
+        "REC-TST-cover-7"
+      ],
+      "files": [
+        "test/test_ducklib.py"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "Tests that currently assert only non-null now assert values: get_value_type and column_logical_type assert the type id, create_array_value reads back its elements, create_get_bit asserts the payload bytes, and the combined Welford .mean is asserted against the pooled mean.",
+        "Coverage is added for: a >12-char/out-of-line string_t round-trip, an in-JIT error/edge branch (rc == DuckDBError), the scalar_function init callback actually firing, destroy/leak verification for value/logical_type/function handles, and the invalid param-index branch across all bind_* wrappers.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
+      ],
+      "rationale": "Many tests assert existence but not value, and several paths (long strings, in-JIT errors, init callbacks, handle destroys, most bind invalid-index branches) are untested, so real regressions would pass silently."
+    },
+    {
+      "id": "T22",
+      "title": "Fix the example test helpers (_common.py)",
+      "priority": "low",
+      "resolves": [
+        "EX-common-1",
+        "EX-common-2"
+      ],
+      "files": [
+        "examples/_common.py"
+      ],
+      "model": "opus",
+      "effort": "xhigh",
+      "acceptanceCriteria": [
+        "assert_results_match treats both-NaN as equal (documenting the intent) and format_table raises ValueError when a row's cell count differs from the header count.",
+        "Tests cover the NaN-match and the row-length-mismatch cases.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
+      ],
+      "rationale": "assert_results_match spuriously fails on identical NaN results and format_table silently truncates or crashes on wrong-width rows."
+    },
+    {
+      "id": "T23",
+      "title": "Commit a real fallback __version__",
+      "priority": "low",
+      "resolves": [
+        "REC-BLD-DES-3"
+      ],
+      "files": [
+        "numbduck/__init__.py",
+        "pyproject.toml"
+      ],
+      "model": "opus",
+      "effort": "xhigh",
+      "acceptanceCriteria": [
+        "numbduck/__init__.py carries a valid PEP 440 fallback (e.g. 0.0.0.dev0) or version resolution moves to setuptools-scm, so a local build yields a meaningful version without the CI overwrite.",
+        "A local build produces a wheel with a non-empty PEP 440 version, and CI's version injection still works.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
+      ],
+      "rationale": "The committed __version__ = \"\" makes any non-CI build silently report the placeholder 0.0.0."
+    },
+    {
+      "id": "T24",
+      "title": "Make version-gated bindings raise a clear error for JIT callers",
+      "priority": "low",
+      "resolves": [
+        "REC-XC-err-2"
+      ],
+      "files": [
+        "numbduck/ducklib.py",
+        "test/test_ducklib.py"
+      ],
+      "model": "opus",
+      "effort": "max",
+      "acceptanceCriteria": [
+        "Calling a version-gated binding absent from the loaded libduckdb from @njit raises a clear, named error at typing time (via an @njit-introspectable stub / overload, or a Python-level capability check before compiling dependent JIT code) instead of an opaque numba TypingError.",
+        "A test (skipif the symbol is present) asserts the clear error; if the root fix belongs in numbox, an upstream follow-up is referenced.",
+        "flake8 --max-line-length=120 is clean over the whole tree.",
+        "After clearing __pycache__ and ~/.cache/numba, the full suite is green: /home/erik/projects/numbduck/venv/bin/python -m pytest."
+      ],
+      "rationale": "proxy_if_available stubs raise a clear error only for Python callers; from @njit (the intended consumer) an unavailable symbol surfaces as an opaque TypingError."
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "unit": "UTL-COR",
+  "results": [
+    {
+      "oldId": "UTL-COR-1",
+      "class": "covered",
+      "newIds": ["UTL-COR-2", "UTL-DES-4"],
+      "justification": "Same defect, same root cause: the unguarded os.remove of the legacy unversioned cache at utils.py:38-40 inside _find_standalone_libduckdb, which can raise OSError and abort load_duckdb. Current UTL-COR-2 (line 40) reports it verbatim (crash-on-import via propagated PermissionError/FileNotFoundError); UTL-DES-4 reports the same removal as a side-effect-in-a-discovery-function/testability concern. The @proxy migration did not touch utils.py; code at lines 37-40 is unchanged.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "UTL-COR-2",
+      "class": "covered",
+      "newIds": ["UTL-COR-1"],
+      "justification": "Same root cause: unreliable library selection in find_duckdb_shared_lib (utils.py:94-110) via a non-end-anchored re.match regex combined with a strict len==1 count. Current UTL-COR-1 (line 98) covers both the regex-anchoring defect and the singleton-count fragility (len>=2 raises RuntimeError despite a valid lib; a single over-broad match returns the wrong file). The old finding's third sub-point (the 1.3 pkg-dir branch being tried before the 1.4+ site-packages branch) is the same first-match-over-broad-regex selection logic, not a distinct root cause, and the current recommendation (verify a candidate with _has_capi_symbols) addresses the wrong-lib selection it describes. Old reviewer confidence was low and the shadowing scenario was assessed as theoretical.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "UTL-COR-3",
+      "class": "covered",
+      "newIds": ["UTL-DES-6", "XC-ver-1"],
+      "justification": "Both sub-defects are covered. (a) The version-coupling/404 defect (URL and cache keyed verbatim on duckdb.__version__ at utils.py:19-21,51-56, so a pre/post/dev suffix yields a nonexistent tag) is reported by current UTL-DES-6 (line 83), which explicitly calls out pre/post-release suffixes producing a raw HTTPError 404. (b) The homebrew/standalone ABI-version-mismatch with no version assertion (utils.py:44-46) is reported by current XC-ver-1 (line 44), which flags that the env-override and brew paths are accepted with no check that the standalone lib's version matches the wheel and recommends a duckdb_library_version() comparison. Code unchanged on current tree.",
+      "currentEvidence": "",
+      "adopted": null
+    }
+  ]
+}

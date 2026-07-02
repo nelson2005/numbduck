@@ -1,0 +1,45 @@
+{
+  "unit": "DOC-acc",
+  "results": [
+    {
+      "oldId": "DOC-acc-1",
+      "class": "covered",
+      "newIds": ["DOC-acc-3", "DCK-wrap-DES-1"],
+      "justification": "Same defect: CLAUDE.md 'Struct-by-value helpers (ducklib.py)' section (lines 43-53) lists helpers (_call_lib_func_struct_in, _call_lib_func_struct_out, _emit_byval_call, _build_packed_interval, plus the 'Custom @intrinsic' claim) that do not exist in the @proxy tree. New DOC-acc-3 reports the identical section and enumerates the same missing helper names; DCK-wrap-DES-1 covers the same stale-section root cause.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "DOC-acc-2",
+      "class": "covered",
+      "newIds": ["DOC-acc-4", "DCK-wrap-DES-1"],
+      "justification": "Same defect: CLAUDE.md 'Follow-ups' (lines 55-62) describes an already-completed hugeint/uhugeint/interval bind migration and cites ducklib.py:1525-1640, past EOF (file is 1432 lines). New DOC-acc-4 reports the identical past-EOF line range and completed migration; DCK-wrap-DES-1 point (3) covers the same item.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "DOC-acc-3",
+      "class": "covered",
+      "newIds": ["DOC-acc-3", "DCK-wrap-DES-1"],
+      "justification": "Same defect and same CLAUDE.md line-53 sentence as old DOC-acc-1: the 'Custom @intrinsic functions are used for decimal/varint/interval' claim, while ducklib.py defines zero @intrinsic functions. New DOC-acc-3 explicitly calls out the 'Custom @intrinsic' claim and states ducklib.py contains zero @intrinsic definitions; DCK-wrap-DES-1 covers it too.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "DOC-acc-4",
+      "class": "covered",
+      "newIds": ["DOC-acc-1", "EX-readme-DOC-2"],
+      "justification": "Same defect: CLAUDE.md's stated numbox pin (~=0.5.6) disagrees with pyproject. New DOC-acc-1 reports the identical CLAUDE.md:16-vs-pyproject mismatch (pyproject now pins >=0.5.13). The secondary examples/README.md:20 numbox 0.5.8 doc-link reference noted in the old finding is covered by new EX-readme-DOC-2 (numbox clock.py link pinned to 0.5.8, below the >=0.5.13 floor).",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "DOC-acc-5",
+      "class": "covered",
+      "newIds": ["DOC-acc-5"],
+      "justification": "Same defect: CLAUDE.md step 1 ('verify docstring links point to the correct line in duckdb.h') contradicts step 5 ('docstring links must use duckdb.org api.html, not duckdb.h'). New DOC-acc-5 reports the identical step-1-vs-step-5 contradiction (and additionally flags step 7's same phrasing).",
+      "currentEvidence": "",
+      "adopted": null
+    }
+  ]
+}

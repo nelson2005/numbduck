@@ -1,0 +1,11 @@
+{
+  "findingId": "PBR-SEC-3",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Verified against current numbduck/pybridge.py:36-74 and numbox/utils/pysqlite_bridge.py:110-176. extract_connection_ptr's docstring (pybridge.py:36-51) documents only the `int` return type and the TypeError/RuntimeError exceptions; it says nothing about the returned pointer's lifetime, ownership, or borrow semantics. The returned conn_ptr (line 62, returned line 74) is read straight out of the live DuckDBPyConnection's internal unique_ptr<Connection> slot -- it is unmistakably a borrowed pointer that becomes dangling once conn.close() runs or conn is GC'd, and a bare Python int cannot keep conn alive. The sibling numbox.utils.pysqlite_bridge.extract_connection_ptr (pysqlite_bridge.py:110-176) documents exactly this contract explicitly: a 'Returns' note stating the pointer is 'borrowed ... owned by the Python Connection and stays valid only while conn is alive and open... the keep-alive is the caller's responsibility' plus a dedicated 'Warning' section (pysqlite_bridge.py:137-144) spelling out the use-after-free risk on close()/GC. numbduck's pybridge.py has no equivalent language anywhere in the file. This is a real, verifiable asymmetry between the two sibling bridges and a genuine documentation gap on a raw-pointer API where the docstring is the only safety mechanism a caller has. Severity: the gap is purely documentary (it doesn't change extract_connection_ptr's own behavior, which still validates the pointer via SELECT 1 at extraction time), so 'low' is the right rating -- consistent with the reviewer's own low severity assignment.",
+  "verifiedAgainst": {
+    "numbduck_pybridge_docstring": "pybridge.py:36-51 documents Parameters/Returns(int)/Raises only; no lifetime/ownership/warning language",
+    "numbduck_return_site": "pybridge.py:62 conn_ptr read from DuckDBPyConnection internals; pybridge.py:74 returned as bare int",
+    "numbox_sibling_contract": "numbox/utils/pysqlite_bridge.py:131-144 has explicit Returns 'borrowed' language and a Warning section on use-after-free after close()/GC"
+  }
+}

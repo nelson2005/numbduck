@@ -1,0 +1,21 @@
+{
+  "unit": "EX-common",
+  "results": [
+    {
+      "oldId": "EX-common-1",
+      "class": "covered",
+      "newIds": ["EX-common-2"],
+      "justification": "Same defect: format_table (examples/_common.py:45-60) has no per-row length guard, so a row longer than headers raises IndexError at widths[i] (lines 50-52) and a shorter row is silently truncated by zip() in fmt_row (line 55). New EX-common-2 reports exactly this (root cause, lines, and ValueError recommendation identical).",
+      "currentEvidence": "examples/_common.py:47 checks headers vs alignments only; lines 50-52 index widths[i] by row cell position with no length check.",
+      "adopted": null
+    },
+    {
+      "oldId": "EX-common-2",
+      "class": "covered",
+      "newIds": ["EX-common-1"],
+      "justification": "Same root cause: assert_results_match uses bare `if first != other` (examples/_common.py:73). New EX-common-1 covers the NaN failure mode (NaN != NaN is True -> spurious mismatch). The old finding's second sub-claim (numpy-array truth-value ambiguity) is the same expression/line and was explicitly acknowledged out-of-contract in the old verified verdict (docstring promises only numpy float scalar support); the new finding's recommended fix (numpy.array_equal(..., equal_nan=True)) subsumes both, so it is not a distinct extra defect.",
+      "currentEvidence": "examples/_common.py:73 `if first != other` with docstring at 64-67 promising full-precision float equality; NaN and array cases both flow through this single expression.",
+      "adopted": null
+    }
+  ]
+}

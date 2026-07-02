@@ -1,0 +1,21 @@
+{
+  "unit": "UTL-SEC",
+  "results": [
+    {
+      "oldId": "UTL-SEC-1",
+      "class": "covered",
+      "newIds": ["UTL-SEC-1"],
+      "justification": "Same root cause: _download_libduckdb() fetches the release zip and writes/dlopens libduckdb.dylib RTLD_GLOBAL with no SHA-256/signature/codesign check (still present at utils.py:83-89, 129-130). New UTL-SEC-1 reports the identical unverified-download -> native-code-execution defect with the same medium severity and the pin-a-digest recommendation.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "UTL-SEC-2",
+      "class": "covered",
+      "newIds": ["UTL-SEC-1"],
+      "justification": "New UTL-SEC-1 explicitly folds in the cache-poisoning/persistence dimension: it flags that _find_standalone_libduckdb returns the cached path with no re-verification on every subsequent import (utils.py:41-43) and that makedirs uses default umask perms (utils.py:86), and its recommendation covers re-verifying the hash on every load and creating the cache dir/file with restrictive perms (0o700/0o600) -- the exact security substance of old UTL-SEC-2. The only omitted sub-point is the temp+os.replace atomic-write suggestion, which the old verified reasoning itself classified as a truncation-on-crash reliability aside, not a security defect, so it does not constitute an unmatched distinct security defect.",
+      "currentEvidence": "",
+      "adopted": null
+    }
+  ]
+}

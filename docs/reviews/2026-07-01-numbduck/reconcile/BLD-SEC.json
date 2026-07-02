@@ -1,0 +1,29 @@
+{
+  "unit": "BLD-SEC",
+  "results": [
+    {
+      "oldId": "BLD-SEC-1",
+      "class": "covered",
+      "newIds": ["BLD-SEC-2", "BLD-SEC-1"],
+      "justification": "Same defect: github.ref_name spliced directly into a run: shell block (echo VERSION=...) and propagated into numbduck/__init__.py, a GitHub Actions script-injection vector reachable only on the tag path. Current BLD-SEC-2 is the identical numbduck_ci.yml instance (now at lines 56/63 vs old 53/60 after the @proxy-era workflow edits); current BLD-SEC-1 is the same injection pattern newly present in release.yml (a file that did not exist on the old tree), where the sink is higher-consequence (PyPI publish). Root cause and recommendation are identical.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "BLD-SEC-2",
+      "class": "covered",
+      "newIds": ["BLD-SEC-3"],
+      "justification": "Same defect: first-party/third-party actions pinned to mutable tags rather than immutable commit SHAs (actions/checkout, actions/setup-python, lycheeverse/lychee-action). Current BLD-SEC-3 reports the identical supply-chain gap and additionally elevates it — the new release.yml pins pypa/gh-action-pypi-publish@release/v1 (a mutable BRANCH) in an id-token:write OIDC-publish job — but it is the same root cause and same SHA-pinning recommendation.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "BLD-SEC-3",
+      "class": "covered",
+      "newIds": ["BLD-SEC-4"],
+      "justification": "Same defect: `pip install -e .` resolves numbox from an unpinned, unhashed range at run time while numba/duckdb are exact-pinned, giving non-reproducible CI and a supply-chain surface. The pin has actually worsened on the current tree (pyproject.toml:13 is now floor-only `numbox>=0.5.13` with no upper cap, vs the old `numbox~=0.5.11` which at least bounded the minor). Current BLD-SEC-4 reports exactly this with the same exact-pin/lockfile recommendation.",
+      "currentEvidence": "",
+      "adopted": null
+    }
+  ]
+}

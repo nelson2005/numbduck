@@ -1,0 +1,33 @@
+{
+  "unit": "XC-ver",
+  "results": [
+    {
+      "oldId": "XC-ver-1",
+      "class": "covered",
+      "newIds": ["PBR-COR-1", "XC-ver-2", "PBR-COR-3"],
+      "justification": "Same root cause. extract_connection_ptr hard-codes the pybind11 holder offset (id(conn)+16) and the DuckDBPyConnection unique_ptr<Connection> offset (+32), validated only on duckdb 1.3.2/Linux/libstdc++ with no version/platform guard, while the pin allows <1.6. Current PBR-COR-1 and the current XC-ver-2 report the identical hardcoded-offset/no-version-guard defect against pybridge.py:59-62; PBR-COR-3 covers the residual point that the SELECT 1 check cannot catch a shifted-offset garbage pointer. No unmatched defect remains.",
+      "currentEvidence": "numbduck/pybridge.py:59,62 (offsets still hard-coded; no version guard) — reported by PBR-COR-1, XC-ver-2 (new), PBR-COR-3."
+    },
+    {
+      "oldId": "XC-ver-2",
+      "class": "covered",
+      "newIds": ["XC-ver-1", "PBR-SEC-1"],
+      "justification": "Same root cause. The standalone/Homebrew/NUMBDUCK_LIBDUCKDB libduckdb is accepted with no version check against the wheel's duckdb.__version__ (only the single-symbol _has_capi_symbols probe); no duckdb_library_version binding exists. Current XC-ver-1 reports exactly this version-coordination gap on the brew/env fallback path (utils.py:34-46) with the same duckdb_library_version()/numbox libraries_coordinated() fix, and PBR-SEC-1 is the pybridge-framed instance of the identical gap.",
+      "currentEvidence": "numbduck/utils.py:34-46 (env/brew branches accept lib with no version compare) — reported by XC-ver-1 (new) and PBR-SEC-1."
+    },
+    {
+      "oldId": "XC-ver-3",
+      "class": "covered",
+      "newIds": ["UTL-COR-3", "UTL-DES-5", "PBR-SEC-1"],
+      "justification": "Same root cause across a split of current findings. On the macOS stripped-wheel path load_duckdb loads a second full libduckdb RTLD_GLOBAL alongside the already-resident wheel (two runtimes) — reported by UTL-COR-3 and UTL-DES-5 — and pybridge then passes a wheel-minted Connection* into duckdb_query resolved against the standalone runtime — reported by PBR-SEC-1. The union covers both halves of the old finding (dual-runtime load + cross-runtime handle mixing) with no unmatched part.",
+      "currentEvidence": "numbduck/utils.py:115 + 121/130 (two RTLD_GLOBAL loads); numbduck/pybridge.py:67 (wheel Connection* into standalone-resolved duckdb_query) — reported by UTL-COR-3, UTL-DES-5, PBR-SEC-1."
+    },
+    {
+      "oldId": "XC-ver-4",
+      "class": "covered",
+      "newIds": ["UTL-DES-6"],
+      "justification": "Same root cause. _download_libduckdb builds the release URL from duckdb.__version__ as v{version}/libduckdb-osx-universal.zip and extracts a flat 'libduckdb.dylib' member, so a non-tag/suffixed version or an asset/layout change 404s (HTTPError) or KeyErrors with no branded recovery. Current UTL-DES-6 reports the identical version-coupling + asset/member-name assumption surfacing as raw urllib/zipfile errors (plus the rot-prone version-range comment).",
+      "currentEvidence": "numbduck/utils.py:52-56,83,88 (version-coupled URL, flat member name, raw errors) — reported by UTL-DES-6."
+    }
+  ]
+}

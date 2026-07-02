@@ -1,0 +1,13 @@
+{
+  "unit": "XC-numbox-MEM",
+  "results": [
+    {
+      "oldId": "XC-numbox-MEM-1",
+      "class": "covered",
+      "newIds": ["EX-irr-MEM-1", "XC-numbox-MEM-1"],
+      "justification": "Same root cause: the five @cfunc-wrapped UDAF callbacks in examples/irr.py have no try/except, so a raise inside an impl (e.g. NRT MemoryError during vector_push/vector_extend while a borrow_structref-borrowed state is live) is swallowed at numba's cfunc boundary, leaking the borrow incref and returning a silent zero/void default to DuckDB. Current EX-irr-MEM-1 (examples/irr.py:156) and the current review's own XC-numbox-MEM-1 (examples/irr.py:165) both report exactly this defect and cite the same numba cfunc-swallow contract. The @cres->@proxy migration only touched ducklib.py; the examples/irr.py UDAF callback pattern is unchanged, so the defect survives and is fully covered.",
+      "currentEvidence": "",
+      "adopted": {}
+    }
+  ]
+}

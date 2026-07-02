@@ -1,0 +1,29 @@
+{
+  "unit": "DCK-wrap-COR",
+  "results": [
+    {
+      "oldId": "DCK-wrap-COR-1",
+      "class": "covered",
+      "newIds": ["DCK-wrap-COR-1", "DCK-sig-COR-1"],
+      "justification": "Same defect: idx_t returns/args typed as signed intp instead of uint64 (duckdb_column_count, duckdb_data_chunk_get_column_count/get_size, duckdb_row_count, and the col_idx/row arg). Current DCK-wrap-COR-1 and DCK-sig-COR-1 both report this exact type-signedness inconsistency against the CLAUDE.md idx_t->uint64 convention on the current @proxy tree; line numbers shifted +1 (L106 etc.) but the root cause is identical.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "DCK-wrap-COR-2",
+      "class": "covered",
+      "newIds": ["DCK-sig-COR-2", "XC-numbox-COR-1", "DCK-wrap-COR-1"],
+      "justification": "Same defect: duckdb_vector_get_validity return typed uint64 while the C prototype returns uint64_t* (a pointer), violating the all-pointers-are-intp convention. Current DCK-sig-COR-2 and XC-numbox-COR-1 report this directly (L237), and current DCK-wrap-COR-1 also folds it in. Present on the current tree.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "DCK-wrap-COR-3",
+      "class": "covered",
+      "newIds": ["DCK-wrap-COR-2", "DCK-sig-DES-3"],
+      "justification": "Same defect: duckdb_create_varint (L728) and duckdb_get_varint (L1053) docstrings use the non-canonical version-pinned https://duckdb.org/docs/1.3/clients/c/api#... links (no .html) instead of the mandated stable api.html form. Current DCK-wrap-COR-2 and DCK-sig-DES-3 report exactly these two deviating links; line numbers shifted +1.",
+      "currentEvidence": "",
+      "adopted": null
+    }
+  ]
+}

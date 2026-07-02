@@ -1,0 +1,23 @@
+{
+  "unit": "EX-fraud",
+  "results": [
+    {
+      "oldId": "EX-fraud-1",
+      "class": "missed",
+      "newIds": [],
+      "justification": "Old-confirmed (low). Defect is the fraud scalar chunk callback reading inputs and writing output with no validity/NULL handling. Still present on the current tree (examples are binding-mechanism-independent, so the @cres->@proxy migration did not touch this code). No current finding covers it: current EX-fraud-1 is a distinct handle-leak defect, EX-scalar-MEM-1 is a distinct exception-swallowing root cause on haversine, and TST-cover-4 targets the test suite's coverage gap, not the example's callback.",
+      "currentEvidence": "examples/fraud_score.py:102-144 _fraud_chunk_impl carrays all six input vectors (d_amt..d_rx, lines 111-123) and the output (d_out, line 117), then the loop (125-144) unconditionally reads a_amt[i]/a_co[i]/a_hco[i]/a_hr[i]/a_rt[i]/a_rx[i] and writes a_out[i] for every i in range(n) with no duckdb_vector_get_validity call. setup_data (176-188) generates dense random()/floor(random()*N) columns (no NULLs), so the example's own query never triggers it. irr.py:140-153 reference validity pattern confirmed present on current tree.",
+      "adopted": {
+        "id": "REC-EX-fraud-1",
+        "severity": "low",
+        "title": "Chunk callback reads inputs and writes output with no validity/NULL handling",
+        "file": "examples/fraud_score.py",
+        "line": 118,
+        "description": "The @njit chunk impl _fraud_chunk_impl carrays each input vector's data pointer (lines 111-123) and the output pointer (117) and, in the loop at 125-144, unconditionally reads a_amt[i]/a_co[i]/a_hco[i]/a_hr[i]/a_rt[i]/a_rx[i] and writes a_out[i] for every i in range(n), never calling duckdb_vector_get_validity on the inputs nor touching the output validity mask. A DuckDB scalar function receives whatever validity its input vectors carry; a NULL row's data slot may hold uninitialized/stale bytes that would be read and folded into the score, and a NULL-producing rule cannot be expressed. This is safe ONLY because setup_data (176-188) generates dense random() columns with no NULLs, so the example's own query cannot trigger it. It is flagged because the file is the de-facto usage contract for the scalar chunk-callback pattern; a downstream caller copying it against NULL-able columns would get silently wrong results.",
+        "impact": "None for the shipped benchmark (dense data). Latent silent-wrong-result risk if the pattern is reused on NULL-able inputs.",
+        "recommendation": "Either add a comment at the loop documenting the dense-data precondition, or (matching irr.py's reference handling at irr.py:140-153) fetch duckdb_vector_get_validity for each input vector and gate each row via duckdb_validity_row_is_valid (with the val != 0 all-valid guard) to skip/propagate NULLs. No change needed for correctness of this example as written.",
+        "confidence": "low"
+      }
+    }
+  ]
+}

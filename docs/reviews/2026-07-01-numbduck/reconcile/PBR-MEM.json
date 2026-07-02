@@ -1,0 +1,13 @@
+{
+  "unit": "PBR-MEM",
+  "results": [
+    {
+      "oldId": "PBR-MEM-1",
+      "class": "covered",
+      "newIds": ["PBR-MEM-1", "PBR-SEC-3"],
+      "justification": "Identical defect: extract_connection_ptr returns a borrowed Connection* as a bare Python int (pybridge.py:74) read from offset +32, with no keep-alive/use-after-close contract in the docstring. Current PBR-MEM-1 reports the exact same root cause at the same file:line (latent use-after-free / borrow-contract documentation gap); PBR-SEC-3 also documents the same borrowed-pointer ownership gap. Not stale on the current @proxy tree - the pointer walk and bare-int return survive the migration unchanged.",
+      "currentEvidence": "",
+      "adopted": null
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "unit": "DCK-wrap-DES",
+  "target": "ducklib @proxy wrappers",
+  "dimension": "DES",
+  "findings": [
+    {
+      "id": "DCK-wrap-DES-1",
+      "severity": "high",
+      "title": "CLAUDE.md Architecture/Follow-ups sections describe a since-completed migration and helpers/intrinsics that do not exist in the current @proxy tree",
+      "category": "stale-documentation",
+      "file": "/home/erik/projects/numbduck/CLAUDE.md",
+      "line": 43,
+      "description": "The current ducklib.py wraps every C function with @proxy(...)/@proxy_if_available(...) plus _call_lib_func/_call_lib_func_byval (imported from numbox), and contains NO @intrinsic definitions and NO local helper functions at all. Multiple concrete CLAUDE.md claims are now false: (1) L26 says wrappers use '@cres + _call_lib_func' and the 'Adding a New Binding' template L33-37 shows '@cres(signatures.get(\"duckdb_func\"))' — the actual decorator is '@proxy(signatures.get(...), jit_options=jit_options)'; @cres is never used and the template omits the required jit_options kwarg. L86 again lists '@cres decorator'. (2) The 'Struct-by-value helpers (ducklib.py)' section L43-53 states 'ducklib.py provides' _call_lib_func_struct_in, _call_lib_func_struct_out, _emit_byval_call, and _build_packed_interval, and that 'Custom @intrinsic functions are used for >16-byte structs (decimal 24B, varint 24B) and interval'. None of these symbols exist in ducklib.py — only _call_lib_func_byval exists and it is imported from numbox (ducklib.py:4), not provided here; decimal/varint/interval binds are now plain @proxy wrappers (ducklib.py:1423-1432, 648-663). (3) The 'Follow-ups' section L55-62 asks to migrate '_duckdb_bind_hugeint/_uhugeint/_interval' intrinsics at 'ducklib.py:1525-1640 (~116 lines)' to _call_lib_func — that migration is already done (the binds are now @proxy wrappers at ducklib.py:1411-1432) and the cited line range does not even exist (the file is 1432 lines). The INT/INT eightbyte repack referenced as a 'gated numbox follow-up' already lives in numbox call.py/abi.py.",
+      "impact": "A maintainer following the documented 'Adding a New Binding' recipe writes @cres(...) (nonexistent decorator, missing jit_options) producing code that does not match the module; searches for four helper functions that do not exist; and may re-attempt a completed 116-line migration against phantom line numbers. The single authoritative onboarding doc for this ~190-wrapper module actively misdescribes it.",
+      "recommendation": "Rewrite the Architecture (L26), 'Adding a New Binding' template (L33-37), 'Struct-by-value helpers' (L43-53), 'Follow-ups' (L55-62), and 'Related Projects' (L86) sections to reflect the current @proxy/@proxy_if_available + _call_lib_func/_call_lib_func_byval design: no local intrinsics, ABI lowering (byval/optnone/sret/INT-INT repack) lives entirely in numbox, and the struct-by-value migration is complete. Delete the stale Follow-ups item.",
+      "confidence": "high"
+    },
+    {
+      "id": "DCK-wrap-DES-2",
+      "severity": "low",
+      "title": "Four struct-by-value bind wrappers appended at EOF instead of in their sorted slot with the other duckdb_bind_* wrappers",
+      "category": "maintainability",
+      "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+      "line": 1411,
+      "description": "duckdb_bind_hugeint (1411), duckdb_bind_uhugeint (1417), duckdb_bind_interval (1423), and duckdb_bind_decimal (1429) are defined at the very end of the file, after the entire scalar/aggregate-function section (1213-1408), whereas every other duckdb_bind_* wrapper is clustered at 288-411. These four are exactly the struct-by-value binds that were last to be converted from bespoke intrinsics to plain @proxy wrappers, and they were left in append order rather than moved back into the bind cluster. Their signatures are registered up in the normal signatures block (83, 86, 91, 97), so the wrapper and its signature entry are now physically ~1330 lines apart.",
+      "impact": "The bind family is split across two distant regions of a 1432-line file, so a reader scanning the bind cluster (288-411) sees an incomplete set and could add a duplicate hugeint/interval wrapper, or miss these when auditing bind coverage. Cosmetic only — no runtime effect.",
+      "recommendation": "Relocate the four wrappers into the duckdb_bind_* cluster near lines 288-411 (adjacent to bind_double/bind_float and the other typed binds) so the family is contiguous.",
+      "confidence": "high"
+    },
+    {
+      "id": "DCK-wrap-DES-3",
+      "severity": "low",
+      "title": "~190 near-identical 4-line wrappers each repeat the C function-name string three times",
+      "category": "duplication",
+      "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+      "line": 276,
+      "description": "Every binding is the same 4-line shape: '@proxy(signatures.get(\"NAME\"), jit_options=jit_options)' / 'def NAME(args):' / docstring / 'return _call_lib_func(\"NAME\", (args,))'. The C name string 'NAME' is written three times per binding (decorator lookup key, def name, and the _call_lib_func literal) across ~190 wrappers. numbox's proxy requires a real def (it eager-compiles the body and anchors the numba cache key to func.__code__.co_firstlineno) and _call_lib_func is prefer_literal, so a def-generating factory would defeat the cache-anchoring workaround — the per-wrapper def is largely justified. The residual smell is the triple name repetition: a body literal that mistyped but still matched some other dict key would silently compile against the wrong signature (a missing key fails loud at import, but a wrong-but-present key does not).",
+      "impact": "Pure boilerplate volume (the bulk of a 1432-line file) plus a latent name-desync hazard where the body's _call_lib_func literal, the def name, and the signatures key must stay identical by hand with no cross-check. No current defect — all three agree in every wrapper.",
+      "recommendation": "Accept the per-wrapper def (needed for proxy's cache anchoring) but reduce the hazard: derive the body's function-name literal from the wrapper (or add an import-time assert that each def name matches its signatures key), so a future typo cannot bind a wrapper to the wrong signature.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "ducklib.py (1432 lines) is entirely imports + type/enum constants + the signatures-dict population block + ~190 @proxy/@proxy_if_available wrappers; it contains no @intrinsic definitions and no local helper functions (_call_lib_func_byval is imported from numbox, not defined here). This directly contradicts CLAUDE.md's 'Struct-by-value helpers' and 'Follow-ups' sections (the DES-1 finding), which still describe hand-rolled intrinsics and a completed migration. The struct ABI lowering (byval/optnone/sret + the interval INT/INT eightbyte repack) all lives in numbox call.py/abi.py per the understanding notes. DES-1 is the material defect; DES-2/DES-3 are low-severity maintainability items. No correctness/ABI defects are in scope for this DES unit and none were incidentally observed in the wrapper bodies."
+}

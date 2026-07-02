@@ -1,0 +1,12 @@
+{
+  "findingId": "DCK-sig-DES-3",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Verified directly against numbduck/ducklib.py at HEAD. Line 728 (duckdb_create_varint) and line 1053 (duckdb_get_varint) both contain the docstring 'https://duckdb.org/docs/1.3/clients/c/api#duckdb_create_varint' / '#duckdb_get_varint' -- a version-pinned '/docs/1.3/...' path with no '.html' extension. grep confirms exactly these two lines match 'docs/1\\.3' while 191 other docstrings in the same file use the stable form 'https://duckdb.org/docs/stable/clients/c/api.html#name'. Confirmed the third proxy_if_available-gated wrapper, duckdb_scalar_function_set_init at line 1287, does use the correct stable '.html' form, so this is not a proxy_if_available-wide pattern -- it is isolated to these two varint wrappers. CLAUDE.md's 'Adding a New Binding' section, rule 5, explicitly states: 'Docstring links must use https://duckdb.org/docs/stable/clients/c/api.html#func_name, not links to duckdb.h source', confirming these two lines violate the project's own documented convention. This is a purely cosmetic/documentation defect (no functional, signature, or runtime impact) affecting exactly 2 of 193 wrapper docstrings, consistent with the claimed 'low' severity.",
+  "citations": [
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:728",
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:1053",
+    "/home/erik/projects/numbduck/numbduck/ducklib.py:1287",
+    "/home/erik/projects/numbduck/CLAUDE.md:39"
+  ]
+}

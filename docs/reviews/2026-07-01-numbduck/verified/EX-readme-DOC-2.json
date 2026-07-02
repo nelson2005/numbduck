@@ -1,0 +1,6 @@
+{
+  "findingId": "EX-readme-DOC-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Confirmed against the current tree. examples/README.md:20 links numbox.utils.clock.monotonic_ns to https://github.com/Goykhman/numbox/blob/0.5.8/numbox/utils/clock.py, while pyproject.toml:13 pins numbox>=0.5.13 — the link targets a tag three minor releases below the actual supported floor. This is inconsistent with the sibling make_structref link at README.md:36, which uses /blob/main/ rather than a stale tag. Severity is correctly low: clock.py's monotonic_ns API and docstring (verified in the current numbox source at numbox/utils/clock.py:1-40) is stable/self-contained, so a reader following the stale link still lands on materially the same function; this is a doc-hygiene inconsistency, not a functional or misleading-content defect."
+}

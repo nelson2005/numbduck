@@ -1,0 +1,29 @@
+{
+  "unit": "PBR-COR",
+  "results": [
+    {
+      "oldId": "PBR-COR-1",
+      "class": "covered",
+      "newIds": ["PBR-COR-1"],
+      "justification": "Same defect, same root cause: extract_connection_ptr hard-codes the +16/+32 ABI offsets (pybridge.py:59,62) validated only on duckdb 1.3.2 while the pin allows <1.6, with no runtime version guard. Current PBR-COR-1 is the identical finding (even raised to high). pybridge.py is unchanged by the @proxy migration.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "PBR-COR-2",
+      "class": "covered",
+      "newIds": ["PBR-COR-3"],
+      "justification": "Same defect: the SELECT 1 rc-check (pybridge.py:65-72) cannot detect a structurally-wrong pointer (a wrong offset segfaults inside duckdb_query rather than returning a nonzero rc), so the docstring's 'validated before returned' claim (lines 28-29,49-50) overstates the guarantee. Current PBR-COR-3 reports exactly this docstring-vs-guard gap.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "PBR-COR-3",
+      "class": "covered",
+      "newIds": ["PBR-COR-2"],
+      "justification": "Same defect: ctypes.c_void_p.from_address(...).value returns None on a NULL word, and neither cpp_obj_p (line 59) nor conn_ptr (line 62) is NULL-checked, so 'None + 32' raises an undocumented TypeError or a None conn_ptr flows into duckdb_query — contradicting the documented Raises contract. Current PBR-COR-2 covers both the +16 and +32 NULL paths.",
+      "currentEvidence": "",
+      "adopted": null
+    }
+  ]
+}

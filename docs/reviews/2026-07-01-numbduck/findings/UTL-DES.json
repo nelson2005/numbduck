@@ -1,0 +1,80 @@
+{
+  "unit": "UTL-DES",
+  "target": "utils.py loader",
+  "dimension": "DES",
+  "findings": [
+    {
+      "id": "UTL-DES-1",
+      "severity": "medium",
+      "title": "Cache dylib path and filename literal duplicated across two functions",
+      "file": "numbduck/utils.py",
+      "line": "38, 41, 87, 88",
+      "category": "duplication",
+      "confidence": "high",
+      "description": "The bare filename literal \"libduckdb.dylib\" is repeated four times (old_cached :38, cached :41, dest :87, zf.open member :88), and the *cached destination path* `os.path.join(_LIBDUCKDB_CACHE_DIR, \"libduckdb.dylib\")` is independently reconstructed in two different functions: `_find_standalone_libduckdb` (:41, the path it looks for) and `_download_libduckdb` (:87, the path it writes to). These two must stay byte-for-byte identical or the loader downloads to a location the finder never checks (silent re-download every import), yet nothing in the code ties them together — they are two literal copies of the same join. There is already a module-level constants block (`_LIBDUCKDB_CACHE_BASE`/`_LIBDUCKDB_CACHE_DIR`, :16-21) that this filename and the derived cache-file path clearly belong in.",
+      "impact": "A future edit to the cached filename or layout in one function silently desynchronizes the discover/write contract, causing perpetual re-downloads or a lib that is written but never found. Extra copies also make the migration-cleanup literal at :38 easy to overlook.",
+      "recommendation": "Introduce a `_LIBDUCKDB_DYLIB_NAME = \"libduckdb.dylib\"` constant and a derived `_LIBDUCKDB_CACHE_FILE = os.path.join(_LIBDUCKDB_CACHE_DIR, _LIBDUCKDB_DYLIB_NAME)` next to the existing constants, and reference those from both functions (and the zip member name)."
+    },
+    {
+      "id": "UTL-DES-2",
+      "severity": "medium",
+      "title": "Downloaded library is returned without the _has_capi_symbols re-check applied to every other path",
+      "file": "numbduck/utils.py",
+      "line": "129",
+      "category": "robustness/error-message",
+      "confidence": "high",
+      "description": "Every other load path validates the handle with `_has_capi_symbols` before trusting it: the wheel (:116) and the standalone (:122). The download branch alone returns `load_lib_path(downloaded)` directly (:129-130) with no symbol probe. A stripped, truncated, or wrong-architecture download (the universal zip asset name/layout is assumed correct, see UTL-DES-6) therefore passes the loader silently and only fails much later as an opaque LLVM/JIT 'symbol not found' link error at the first `@njit` call — with no pointer back to the bad download.",
+      "impact": "A corrupt or ABI-mismatched download produces a confusing deferred JIT link failure instead of an immediate, actionable loader error, defeating the whole purpose of the fallback flow.",
+      "recommendation": "Load the download, run `_has_capi_symbols` on it, and raise a numbduck-branded RuntimeError (naming the cached path and suggesting deletion / NUMBDUCK_LIBDUCKDB) if the check fails — mirroring the standalone branch."
+    },
+    {
+      "id": "UTL-DES-3",
+      "severity": "medium",
+      "title": "input() consent prompt crashes library import with EOFError under non-interactive stdin",
+      "file": "numbduck/utils.py",
+      "line": "67",
+      "category": "robustness/error-message",
+      "confidence": "high",
+      "description": "When the macOS fallback is reached and `NUMBDUCK_LIBDUCKDB_DOWNLOAD != \"1\"`, the flow calls `input(\"Download now? [y/N] \")` (:67). Under CI, a piped/closed stdin, a subprocess, or any non-TTY context, `input()` raises `EOFError`, which is uncaught. Because this whole subsystem runs at import time of `ducklib.py` (`load_duckdb()` is called at module top level), a bare `import numbduck.ducklib` turns into an `EOFError` traceback rather than the carefully worded RuntimeError with brew/env instructions that the code clearly intends to surface for the decline case (:70-77).",
+      "impact": "On any headless macOS wheel-without-C-API environment, importing numbduck crashes with an unrelated-looking EOFError instead of the branded 'install via brew / set NUMBDUCK_LIBDUCKDB' guidance, making the failure hard to diagnose.",
+      "recommendation": "Guard the prompt: if stdin is not a TTY (`sys.stdin is None or not sys.stdin.isatty()`) or wrap `input()` in `try/except EOFError`, and in that case raise the same instructional RuntimeError (which also tells the user they can set NUMBDUCK_LIBDUCKDB_DOWNLOAD=1 to auto-download)."
+    },
+    {
+      "id": "UTL-DES-4",
+      "severity": "low",
+      "title": "Read-flavoured _find_standalone_libduckdb performs an unconditional os.remove side effect",
+      "file": "numbduck/utils.py",
+      "line": "37",
+      "category": "abstraction quality/testability",
+      "confidence": "high",
+      "description": "`_find_standalone_libduckdb` is named and used as a pure discovery function (its result feeds an `if standalone:` at :119-120), but it embeds an unconditional filesystem mutation: it `os.remove`s the legacy unversioned cache `~/.numbduck/lib/libduckdb.dylib` if present (:37-40). Hiding a destructive migration inside a lookup violates least surprise, makes the function non-idempotent to test (a unit test for discovery must now mock/tolerate `os.remove`), and is unguarded — a read-only home directory, a permissions issue, or a concurrent numbduck process racing the same delete makes the 'find' throw where a lookup should simply return a path or None.",
+      "impact": "Reduced testability of the discovery path and a latent crash/race: an environment where the legacy file exists but is not deletable turns a benign library load into an OSError.",
+      "recommendation": "Move the legacy-cache cleanup into its own explicitly-named migration step (called once from load_duckdb, or lazily) wrapped in try/except OSError, and keep `_find_standalone_libduckdb` side-effect free."
+    },
+    {
+      "id": "UTL-DES-5",
+      "severity": "medium",
+      "title": "macOS fallback loads two full DuckDB runtimes RTLD_GLOBAL, enabling cross-runtime handle mismatch",
+      "file": "numbduck/utils.py",
+      "line": "121",
+      "category": "fragile layout assumption",
+      "confidence": "medium",
+      "description": "On the macOS fallback path the symbol-less wheel is first loaded RTLD_GLOBAL (:115) and then the standalone/downloaded dylib is loaded RTLD_GLOBAL as well (:121 / :130). Two complete DuckDB runtimes are now resident in one process with global state (allocator, extension registry, memory manager) duplicated. The Python `duckdb` module continues to operate its own (wheel) runtime; numbduck's JIT code binds to the standalone runtime. Any handle created in Python (`duckdb.connect()`/relation buffers) and then passed into numbduck `@njit` code — or vice versa — is interpreted by a *different* library instance than the one that allocated it, which is undefined behaviour (free-across-allocators, mismatched struct layout across versions), a classic dual-runtime corruption hazard. The loader offers no guard against, or documentation of, this constraint at the seam where both handles become live.",
+      "impact": "Latent under current usage (handles are created and consumed entirely within the standalone runtime via JIT `duckdb_open`), but the design silently permits mixing Python-created and JIT-created handles, which would produce heap corruption or crashes that are extremely hard to trace back to the loader.",
+      "recommendation": "Document the single-runtime invariant at the load site, and consider dlclose-ing / not retaining the symbol-less wheel handle before loading the standalone (it is only kept alive incidentally), or at minimum add a code comment stating that all DuckDB handles used from JIT must originate from the numbduck-loaded runtime, never from the Python `duckdb` module."
+    },
+    {
+      "id": "UTL-DES-6",
+      "severity": "low",
+      "title": "Download failures (404 / missing zip member) surface as raw urllib/zipfile errors, and version-range comment is rot-prone",
+      "file": "numbduck/utils.py",
+      "line": "83",
+      "category": "error-message/fragile version assumption",
+      "confidence": "high",
+      "description": "The download assumes the wheel's `duckdb.__version__` string is exactly a DuckDB GitHub release tag that ships an asset literally named `libduckdb-osx-universal.zip` containing a member literally named `libduckdb.dylib` (:52-56, :88). If the wheel version has a pre/post-release suffix, or the asset/member naming ever differs, `urlopen` raises a raw `HTTPError: 404` (:83) or `zf.open` raises `KeyError` (:88) — neither wrapped in a numbduck-branded message pointing back to `brew install duckdb` / NUMBDUCK_LIBDUCKDB. There is also no timeout on `urlopen`, so a hung connection blocks import indefinitely. Separately, the hardcoded comment at :118 ('macOS with 1.5.2 >= duckdb >= 1.4.1') is a documented version-range assumption that will silently rot as the `duckdb>=1.3.2,<1.6` pin advances.",
+      "impact": "A version whose release layout differs, or a network hiccup, degrades a recoverable situation into an opaque stack trace or an indefinite hang during import; the stale comment misleads future maintainers about the actual affected version window.",
+      "recommendation": "Wrap the fetch/extract in try/except (HTTPError, URLError, KeyError) re-raising the branded RuntimeError, pass a `timeout=` to `urlopen`, and replace the fixed version-range comment with a reference to the tracking issue / a note that the window is whatever the wheel strips (detected dynamically by `_has_capi_symbols`)."
+    }
+  ],
+  "notes": "Reviewed numbduck/utils.py in full against loader.md architecture notes and CLAUDE.md. Findings target the DES dimension per the requested focus: duplicated path constants (UTL-DES-1), fallback-flow robustness/error messages (UTL-DES-2, UTL-DES-3, UTL-DES-6), testability/side-effects of the discovery+download path (UTL-DES-4), and the macOS dual-runtime handle-mismatch hazard (UTL-DES-5). UTL-DES-5 is latent under current handle-lifecycle usage (all handles created/consumed inside the JIT-loaded standalone runtime) but is a genuine unguarded design seam. Did not flag the single-symbol _has_capi_symbols probe as a DES defect since per-version gating is handled deliberately by proxy_if_available; noted in loader.md."
+}

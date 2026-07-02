@@ -1,0 +1,13 @@
+{
+  "unit": "EX-hav-MEM",
+  "results": [
+    {
+      "oldId": "EX-hav-MEM-1",
+      "class": "covered",
+      "newIds": ["EX-hav-2"],
+      "justification": "Same defect, same root cause: in register_jit_udf the scalar-function builder handle func_p (created at haversine.py:125) is destroyed only at L136-137, after `assert rc == DuckDBSuccess` (L135), so a failed duckdb_register_scalar_function leaks func_p. Current EX-hav-2 reports exactly this ordering error at the same file:line with the same recommendation (destroy before asserting).",
+      "currentEvidence": "examples/haversine.py:134-137 unchanged on the current tree (assert at L135 precedes duckdb_destroy_scalar_function at L136-137); the @proxy migration did not alter this example's registration path.",
+      "adopted": null
+    }
+  ]
+}

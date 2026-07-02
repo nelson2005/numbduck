@@ -1,0 +1,20 @@
+{
+  "unit": "EX-fraud",
+  "target": "examples/fraud_score.py",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "EX-fraud-1",
+      "severity": "low",
+      "title": "func_p scalar-function handle leaked on the register-failure path",
+      "file": "examples/fraud_score.py",
+      "line": 170,
+      "category": "memory/handle-leak",
+      "description": "In register_jit_udf, the scalar-function builder handle func_p (created at line 154 by duckdb_create_scalar_function) is only destroyed at lines 172-173 (duckdb_destroy_scalar_function), which run AFTER the 'assert rc == ducklib.DuckDBSuccess' at line 171. If duckdb_register_scalar_function returns DuckDBError, the assert raises before the destroy call, so func_p is never freed. Per CLAUDE.md 'Error Handling' the C API uses return-code checks and, per the create/destroy contract (understanding/examples.md cross-cutting invariant 3), every handle created must be destroyed. The logical types (dbl_p/tin_p/int_p) are already destroyed at lines 166-168 before the assert, so only func_p is orphaned.",
+      "impact": "A single duckdb_scalar_function allocation is leaked on the registration-failure branch. Because this is a standalone benchmark whose only failure mode here is the AssertionError terminating the interpreter (which reclaims all memory on teardown), the practical impact is negligible; it matters mainly as a copied usage pattern for real applications that catch the error and continue.",
+      "recommendation": "Destroy func_p before asserting, e.g. capture rc, run the numpy-buffer destroy idiom on func_p, then 'assert rc == ducklib.DuckDBSuccess'; or wrap registration in try/finally so the handle is freed on both paths.",
+      "confidence": "high"
+    }
+  ],
+  "notes": "Correctness of the hot path checks out: chunk size via duckdb_data_chunk_get_size (line 104), vectors indexed 0..5 matching the SQL column order amount,country,home_country,hour,risk_tier,recent_txns and the parameter-registration order dbl,tin,tin,tin,tin,int (lines 159-164); carray dtypes exactly match the declared logical types (DOUBLE->float64, TINYINT->int8, INTEGER->int32/output int32, lines 118-124); the @cfunc signature void(intp,intp,intp) (line 147) matches the DuckDB scalar callback (info, input_chunk, output_vector); output written directly to the passed output vector. The branchy scoring logic in _fraud_chunk_impl is identical to fraud_score_py and fraud_score_arrow (amount tiers, country mismatch, off-hours h<6 or h>=23, risk tiers, recent>10), so the differential assert_results_match is a genuine check. Logical-type destroy-once-though-reused (lines 166-168) is correct because DuckDB copies the type on add_parameter/set_return_type. duckdb_scalar_function_set_name (line 155) is correctly set on the single function object (this is a single scalar function, not a scalar-function SET, so CLAUDE.md note 7 about per-member naming does not apply). NULL/validity handling: the kernel reads no validity masks, but the synthetic data (random()/floor(random()*k)) produces no NULLs and dense flat vectors, so this is a safe documented assumption (understanding/examples.md invariant 7), not a live defect for this code; a user porting to nullable columns would need duckdb_vector_get_validity guards. No further correctness defects found."
+}

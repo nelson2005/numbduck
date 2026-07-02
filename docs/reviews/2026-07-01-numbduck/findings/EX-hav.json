@@ -1,0 +1,32 @@
+{
+  "unit": "EX-hav",
+  "target": "examples/haversine.py",
+  "dimension": "COR",
+  "findings": [
+    {
+      "id": "EX-hav-1",
+      "severity": "high",
+      "confidence": "medium",
+      "category": "vector-read / constant-vector handling",
+      "title": "Kernel treats literal-constant argument vectors as flat n-element arrays (out-of-bounds read of args lat2/lon2)",
+      "file": "examples/haversine.py",
+      "line": 101,
+      "description": "The SQL calls the UDF as hv_jit(lat, lon, 37.7749, -122.4194) (haversine.py:152 via sql_py -> sql_jit at 155). Arguments 3 and 4 are SQL literal constants. In DuckDB, a BoundConstantExpression evaluates to a CONSTANT_VECTOR whose data buffer holds a SINGLE physical value; DuckDB does not flatten scalar-function argument vectors before invoking the C-API callback (the C wrapper reinterpret_casts the input DataChunk and calls the user function directly). The kernel, however, reads every input column identically: v_lat2 = duckdb_data_chunk_get_vector(chunk, 2), d_lat2 = duckdb_vector_get_data(v_lat2), a_lat2 = carray(..., (n,), float64) (lines 92-93, 96-97, 101-102), then indexes a_lat2[i]/a_lon2[i] for i in range(n) (lines 107-109, 112). For a CONSTANT vector the data pointer addresses only one double, so a_lat2[1..n-1] and a_lon2[1..n-1] read past the 8-byte constant buffer (up to ~2047 doubles per 2048-row chunk) -> heap over-read and garbage store coordinates for every row except row 0 of each chunk. This is the classic DuckDB constant-vector gotcha; the kernel performs no duckdb_vector get-type/flatten check. The canonical test (test_udf_benchmark, jit_square(x), test_ducklib.py:2685-2745) only ever passes a single FLAT column argument, so it never exercises constant inputs and would not catch this.",
+      "impact": "Out-of-bounds heap reads and incorrect distances for all non-first rows of each chunk, yielding a wrong count(*) in the < 50 km filter. Whether it manifests depends on DuckDB's actual constant-vector delivery for the C-API scalar path across the pinned range duckdb>=1.3.2,<1.6; if any version delivers constants un-flattened, the example silently miscomputes (and could crash under ASAN).",
+      "recommendation": "Do not assume flat inputs for constant arguments. Either query the vector type and broadcast a constant (read index 0 when the vector is CONSTANT), or bind the store lat/lon as scalars passed outside the chunk (e.g. via extra_info / a captured constant) rather than as SQL literal UDF arguments, or add an explicit flatten step. At minimum, exercise the constant-argument path in a differential test since the current test suite passes only flat columns."
+    },
+    {
+      "id": "EX-hav-2",
+      "severity": "low",
+      "confidence": "high",
+      "category": "handle cleanup on error",
+      "title": "Scalar-function handle leaked if registration assertion fails",
+      "file": "examples/haversine.py",
+      "line": 135,
+      "description": "In register_jit_udf, func_p is created at line 125 and only destroyed at lines 136-137 (duckdb_destroy_scalar_function) AFTER assert rc == DuckDBSuccess (line 135). If duckdb_register_scalar_function returns DuckDBError, the assert raises before the destroy runs, so func_p is never freed. The logical-type handle is already destroyed earlier (lines 131-132), so it is unaffected.",
+      "impact": "A one-time handle leak on the registration-failure path only. Because the assert aborts the example process, the OS reclaims the memory, so real-world impact is negligible; it is a cleanup-on-error gap rather than a live leak.",
+      "recommendation": "Destroy func_p before asserting (capture rc, destroy the handle via the numpy-buffer idiom, then assert), so the failure path does not leak the scalar-function object."
+    }
+  ],
+  "notes": "Haversine math verified correct: a = sin^2(dphi/2) + cos(p1)cos(p2) sin^2(dlambda/2), d = 2*R*asin(sqrt(a)) with R=6371 km, matching the Python and Arrow variants (lines 60-84 vs 104-113). NULL-input precondition is safe by construction here: inputs come from random()-generated columns (setup_data, lines 140-145) which never produce NULLs, and the scalar function uses DuckDB default null-handling (no special handling set), so the documented 'assumes non-NULL inputs' invariant holds for this example (see understanding/examples.md:110-111, 282-286). cfunc signature void(intp,intp,intp) correctly models void(duckdb_function_info, duckdb_data_chunk, duckdb_vector). Output vector is written for all n rows (line 113); float64 carray dtype matches the DUCKDB_TYPE_DOUBLE declaration. The dominant risk is EX-hav-1 (constant-argument vectors treated as flat)."
+}

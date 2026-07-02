@@ -1,0 +1,21 @@
+{
+  "unit": "DCK-sig-COR",
+  "results": [
+    {
+      "oldId": "DCK-sig-COR-1",
+      "class": "covered",
+      "newIds": ["DCK-sig-COR-1", "DCK-wrap-COR-1"],
+      "justification": "Same root cause and same entry set: idx_t (uint64_t) mapped to signed intp in the four count/size returns (duckdb_column_count, duckdb_row_count, duckdb_data_chunk_get_column_count, duckdb_data_chunk_get_size) plus the two idx_t index args (duckdb_data_chunk_get_vector 2nd arg, duckdb_validity_row_is_valid 2nd arg). Current DCK-sig-COR-1 reports exactly this at the same lines (shifted +1: :106/:226/:156/:157/:158/:234); DCK-wrap-COR-1 restates the same idx_t inconsistency from the wrapper angle. Severity low, same numba int/uint float-promotion rationale.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "DCK-sig-COR-2",
+      "class": "covered",
+      "newIds": ["DCK-sig-COR-2", "XC-numbox-COR-1"],
+      "justification": "Identical defect: duckdb_vector_get_validity is C `uint64_t *` (a pointer) but its signature return is typed uint64 instead of intp, violating the all-pointers-are-intp convention. Current DCK-sig-COR-2 reports this at :237 with the same downstream rationale (fed into duckdb_validity_row_is_valid's intp 1st arg). XC-numbox-COR-1 is the same finding cross-cut against the numbox pointer contract.",
+      "currentEvidence": "",
+      "adopted": null
+    }
+  ]
+}

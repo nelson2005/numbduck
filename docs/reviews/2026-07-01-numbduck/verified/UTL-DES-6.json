@@ -1,0 +1,13 @@
+{
+  "findingId": "UTL-DES-6",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Verified against numbduck/utils.py on the current tree. (1) `_download_libduckdb` line 83 `with urlopen(url) as resp:` has no `timeout=` argument and no surrounding try/except — a 404 (mismatched release tag/asset name) raises a raw `urllib.error.HTTPError`, and a hung connection blocks indefinitely (default socket timeout is None/blocking). (2) Line 88 `with zf.open(\"libduckdb.dylib\") as src` has no try/except — if the zip's member name ever differs, `zipfile.ZipFile.open` raises a raw `KeyError`. (3) Neither `_download_libduckdb` (lines 50-91) nor its sole caller `load_duckdb` (line 129: `downloaded = _download_libduckdb()`) contains any try/except around the fetch/extract, so both errors would propagate unbranded. Confirmed no wrapping exists anywhere else in the package: `grep -rn except numbduck/` finds only an unrelated `except json.JSONDecodeError` in configurations.py. Because `load_duckdb()` runs at ducklib.py import time (numbduck/ducklib.py:12 `duckdb_lib = load_duckdb()`), any such failure surfaces as a raw exception during `import numbduck.ducklib`, exactly as claimed, with no pointer back to the brew/NUMBDUCK_LIBDUCKDB guidance the surrounding code otherwise provides (see the branded RuntimeError at utils.py:71-77 for the decline path). (4) The version-range comment at line 118 (`# Python wheel missing C API symbols (macOS with 1.5.2 >= duckdb >= 1.4.1)`) is purely descriptive/non-functional — actual gating is done dynamically by `_has_capi_symbols` (line 116), so the comment cannot desync behavior, but it is a real code-quality nitpick since it names a version window narrower than the `duckdb>=1.3.2,<1.6` pin and will visibly go stale as the pin advances. All claimed line numbers (83, 88, 118) and mechanics check out; severity 'low' is appropriate since triggering requires an actual DuckDB release-asset layout change or a network fault, both edge cases relative to the more directly reachable issues (e.g. UTL-DES-3's EOFError under non-interactive stdin, correctly rated medium).",
+  "citations": [
+    "numbduck/utils.py:83",
+    "numbduck/utils.py:88",
+    "numbduck/utils.py:118",
+    "numbduck/utils.py:129",
+    "numbduck/ducklib.py:12"
+  ]
+}

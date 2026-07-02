@@ -1,0 +1,7 @@
+{
+  "findingId": "DCK-sig-DES-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Read /home/erik/projects/numbduck/numbduck/ducklib.py lines 1-14: line 1 is `import sys`, line 14 is `_is_win = sys.platform == 'win32'`. Repo-wide grep for `_is_win` across all .py files in numbduck (numbduck/, test/) finds exactly one hit: the definition itself at ducklib.py:14 -- no reader, no other module imports it, no `sys.` usage elsewhere in the file. This confirms the flag is computed and never consumed anywhere in the current tree, and `import sys` exists solely to support that dead computation. Cross-checked against /home/erik/projects/numbox: numbox/core/bindings/call.py imports and uses `_current_platform` from numbox/core/bindings/abi.py (verified via grep) to do the actual Windows/SysV ABI branching for by-value struct passing, corroborating the finding's claim that platform branching has moved upstream into numbox, leaving ducklib.py's `_is_win` orphaned. The flake8-silence explanation also checks out: pyflakes' F401 doesn't fire on `import sys` because `sys` is referenced (by line 14), and F841 doesn't fire on `_is_win` because it's a module-level global, not a function-local unused variable -- pyflakes does not flag unused globals. The defect is real and correctly characterized (2 lines of genuinely dead code), and 'low' severity is appropriate: it is inert, has no functional/correctness/security impact, and is purely a lint-gate blind spot / cleanliness issue.",
+  "level": "low"
+}

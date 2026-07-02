@@ -1,0 +1,6 @@
+{
+  "findingId": "TMD-DOC-4",
+  "verdict": "confirmed",
+  "correctedSeverity": "medium",
+  "reasoning": "Verified against current tree. test/test_ducklib.md:199 reads: \"That's what [`test_structref_meminfo_bridge_refcount_ladder`](test_ducklib.py#L3179) does.\" `grep -n 'def test_structref_meminfo_bridge_refcount_ladder' test/test_ducklib.py` shows the function is actually defined at line 2931 (test/test_ducklib.py:2931), not 3179. `def test_array_meminfo_bridge_refcount_ladder` (a different, similarly-named test) is at line 2974. Line 3179 lands past both of these, in an unrelated region of the file (consistent with the finding's claim it points into the array UDAF area), so the link does not resolve to the cited refcount-ladder test at all. This is a clean, reproducible stale-line-reference in a markdown design doc's citation anchor -- low functional impact (doc-only, no build/test breakage) but does mislead a reader following the link to the wrong code, which supports keeping it at medium rather than downgrading to low."
+}

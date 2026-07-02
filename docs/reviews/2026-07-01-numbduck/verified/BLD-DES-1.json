@@ -1,0 +1,12 @@
+{
+  "findingId": "BLD-DES-1",
+  "verdict": "confirmed",
+  "correctedSeverity": "high",
+  "reasoning": "Verified against current tree. pyproject.toml:24-27 declares only `markers = [\"benchmark: slow benchmarks, run only locally (deselected in CI)\"]` under [tool.pytest.ini_options] with no `addopts` and no `-m` filter anywhere. test/test_ducklib.py:2684-2685 decorates `test_udf_benchmark` with `@pytest.mark.benchmark`; the body (lines 2699-2790) is unconditional -- no env-var gate like the `NUMBDUCK_BENCH_BIG` check used by examples/haversine.py (confirmed via .github/workflows/haversine_bench.yml:30, a separate workflow_dispatch-only job that benchmarks examples/haversine.py, not this test). numbduck_ci.yml:77-79 runs a bare `pytest` step with no marker deselection. Confirmed no conftest.py, pytest.ini, tox.ini, or setup.cfg exists anywhere in the project tree that could inject `-m 'not benchmark'` (only irrelevant venv site-packages files matched). The test's own docstring records 0.749s+7.382s+118.835s (~127s) of pure Python-UDF timing per run at 10K/100K/1M rows, so every one of the ~90-minus-excludes matrix jobs (5 python x 3 arch x 2 numba x 3 duckdb, with 1.10x windows-limiting excludes -> reviewer's ~51 estimate is in the right ballpark) pays this cost unconditionally. The documented contract ('deselected in CI') is not implemented anywhere in the current tree. Severity high is justified: this is a real, quantifiable, silent violation of a stated CI contract that wastes tens of minutes of billable CI compute per run across the full matrix, and will silently apply to any future test tagged @pytest.mark.benchmark.",
+  "citations": [
+    "/home/erik/projects/numbduck/pyproject.toml:24-27",
+    "/home/erik/projects/numbduck/test/test_ducklib.py:2684-2685",
+    "/home/erik/projects/numbduck/.github/workflows/numbduck_ci.yml:77-79",
+    "/home/erik/projects/numbduck/.github/workflows/haversine_bench.yml:1-30"
+  ]
+}

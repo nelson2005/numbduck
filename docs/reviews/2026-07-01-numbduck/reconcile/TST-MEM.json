@@ -1,0 +1,29 @@
+{
+  "unit": "TST-MEM",
+  "results": [
+    {
+      "oldId": "TST-MEM-1",
+      "class": "covered",
+      "newIds": ["TST-MEM-2"],
+      "justification": "Old TST-MEM-1's defect is that the two aux_query_1 consumers test_query (132-137) and test_duckdb_column_count_and_duckdb_row_count (153-160) call aux_close_db without duckdb_destroy_result, leaking the result. Current TST-MEM-2 names those exact two tests as leaking out_result via the same aux_close_db-only teardown -- same root cause.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "TST-MEM-2",
+      "class": "covered",
+      "newIds": ["TST-MEM-1", "TST-MEM-2"],
+      "justification": "Old TST-MEM-2 has two coupled defects across the aux_get_data_vector consumers and fetch_chunk_exhausted: (a) the DuckDB result is never destroyed, and (b) the fetched data chunk is never destroyed. Current TST-MEM-1 covers (a) -- aux_get_data_vector discards the out_result buffer so no consumer (185/192/199/222) can ever reach duckdb_destroy_result. Current TST-MEM-2 covers (b) -- the fetched chunk leak in those consumers plus test_duckdb_fetch_chunk_exhausted's first-chunk-and-result leak. Both parts are covered.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "TST-MEM-3",
+      "class": "covered",
+      "newIds": ["TST-MEM-3"],
+      "justification": "Old TST-MEM-3 is the coverage gap that leak/double-free accounting exists only for NRT/MemInfo (via rtsys.get_allocation_stats in the UDAF tests) and there is no DuckDB C-handle balance harness, so result/chunk/value/logical_type leaks pass silently. Current TST-MEM-3 states the identical gap (rtsys stats blind to DuckDB-side malloc; no C-handle accounting; destroys only checked via handle[0]==0) with the same recommendation -- same defect.",
+      "currentEvidence": "",
+      "adopted": null
+    }
+  ]
+}

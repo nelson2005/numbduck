@@ -1,0 +1,37 @@
+{
+  "unit": "DCK-wrap-DES",
+  "results": [
+    {
+      "oldId": "DCK-wrap-DES-1",
+      "class": "covered",
+      "newIds": ["DOC-acc-4", "DCK-wrap-DES-1"],
+      "justification": "Same defect: CLAUDE.md 'Follow-ups' section describes an already-completed hugeint/uhugeint/interval migration and cites a ducklib.py:1525-1640 range that is past EOF. Current DOC-acc-4 ('Follow-ups cites nonexistent ducklib.py line range 1525-1640 and an already-completed migration') is a direct match; DCK-wrap-DES-1 folds the same Follow-ups/helpers-do-not-exist claim into the broader @proxy-tree doc-drift finding.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "DCK-wrap-DES-2",
+      "class": "covered",
+      "newIds": ["DOC-acc-3", "DCK-wrap-DES-1"],
+      "justification": "Same defect: the CLAUDE.md 'Struct-by-value helpers (ducklib.py)' section lists helpers/intrinsics (_call_lib_func_struct_in/out, _emit_byval_call, _build_packed_interval, @intrinsic) that do not exist in ducklib.py. Current DOC-acc-3 ('Struct-by-value helpers section lists ducklib.py helpers that no longer exist') is a direct match; DCK-wrap-DES-1 also reports the same non-existent-helpers claim.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "DCK-wrap-DES-3",
+      "class": "covered",
+      "newIds": ["DCK-wrap-DES-3"],
+      "justification": "Same defect and root cause: every wrapper repeats the C function-name string three times (decorator key, def name, _call_lib_func literal) with no structural guard against drift. Current DCK-wrap-DES-3 ('~190 near-identical 4-line wrappers each repeat the C function-name string three times') is the same duplication finding, updated to the @proxy shape.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "DCK-wrap-DES-4",
+      "class": "covered",
+      "newIds": ["DCK-sig-DES-3", "DCK-wrap-COR-2"],
+      "justification": "Same defect: the two varint wrappers (duckdb_create_varint, duckdb_get_varint) use a versioned '/docs/1.3/...api#' docstring URL instead of the mandated 'docs/stable/clients/c/api.html#' form, and are the only two deviations. Current DCK-sig-DES-3 and DCK-wrap-COR-2 both report exactly this varint doc-link deviation.",
+      "currentEvidence": "",
+      "adopted": null
+    }
+  ]
+}

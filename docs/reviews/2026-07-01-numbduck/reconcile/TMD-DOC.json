@@ -1,0 +1,37 @@
+{
+  "unit": "TMD-DOC",
+  "results": [
+    {
+      "oldId": "TMD-DOC-1",
+      "class": "covered",
+      "newIds": ["TMD-DOC-2"],
+      "justification": "Same defect: test_ducklib.md cites the Welford callbacks at test_ducklib.py#L3075-3176 (design-doc lines 51 and 75), but that range is the array-state UDAF, not the Welford callbacks. New TMD-DOC-2 reports the identical stale anchor (the target-code line range differs only because the test file shifted).",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "TMD-DOC-2",
+      "class": "covered",
+      "newIds": ["TMD-DOC-3"],
+      "justification": "Same defect: test_ducklib.md cites the Welford registration block at test_ducklib.py#L3280-3304 (design-doc lines 51 and 192), but that range is init/finalize callback defs, not the registration calls. New TMD-DOC-3 reports the identical stale registration anchor.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "TMD-DOC-3",
+      "class": "covered",
+      "newIds": ["TMD-DOC-4"],
+      "justification": "Same defect: test_ducklib.md line 199 links test_structref_meminfo_bridge_refcount_ladder to test_ducklib.py#L3179, which lands in an unrelated array-combine impl. New TMD-DOC-4 reports the identical stale anchor (correct target now L2931 vs old L2999 due to file shift).",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "TMD-DOC-4",
+      "class": "covered",
+      "newIds": ["TMD-DOC-5"],
+      "justification": "Same defect: test_ducklib.md line 197 cites the commented-out refcount_of_meminfo intrinsic at test_ducklib.py#L2877-2914, which is offset from the actual commented block. New TMD-DOC-5 reports the identical stale range (correct target now L2836-2851 due to file shift).",
+      "currentEvidence": "",
+      "adopted": null
+    }
+  ]
+}

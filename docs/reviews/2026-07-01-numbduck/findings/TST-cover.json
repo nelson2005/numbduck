@@ -1,0 +1,140 @@
+{
+  "unit": "TST-cover",
+  "target": "test/test_ducklib.py",
+  "dimension": "TST",
+  "findings": [
+    {
+      "id": "TST-cover-1",
+      "severity": "medium",
+      "category": "test-asserts-nothing-relevant",
+      "title": "test_struct_size_guard tests pure-Python arithmetic, never the ABI guard it names",
+      "file": "test/test_ducklib.py",
+      "line": 1706,
+      "description": "test_struct_size_guard (1706-1724) claims to 'Verify the size computation used by _call_lib_func_struct_in/out.' but its body only computes sum(t.bitwidth for t in <numba tuple type>)/8 and asserts the resulting integers (16, 8, 18, 19, 24). It never imports or calls _call_lib_func_struct_in / _call_lib_func_struct_out, never constructs a ducklib wrapper, and never exercises the <=16-byte vs >16-byte branch that actually decides by-value vs by-pointer lowering. The assertions are tautological restatements of numba's bitwidth attributes; they would still pass verbatim even if ducklib's struct-size threshold logic were deleted or inverted.",
+      "impact": "The one test named as the ABI size guard provides zero protection: a regression flipping the <=16-byte boundary (e.g. a 24-byte decimal struct wrongly lowered by-value) would not be caught here. False sense of coverage over the most delicate part of the binding (struct-by-value ABI).",
+      "recommendation": "Replace the arithmetic assertions with a behavioral test that actually round-trips a 16-byte struct (e.g. hugeint) and a >16-byte struct (24-byte decimal/varint) through the real wrappers and, if feasible, asserts the guard rejects/redirects an oversized struct. If only documenting the threshold, rename it so it isn't mistaken for a guard test.",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-cover-2",
+      "severity": "medium",
+      "category": "missing-coverage",
+      "title": "Multi-chunk (>2048 row) results and the fetch_chunk loop are never exercised",
+      "file": "test/test_ducklib.py",
+      "line": 212,
+      "description": "Every result in the suite comes from aux_query_1 (107-129, 3 rows) or single-value SELECTs. Chunk exhaustion is validated only for a single 3-row chunk: test_duckdb_fetch_chunk_exhausted (212-219) fetches one non-null chunk then asserts the next is null. DuckDB's standard vector size is 2048 (STANDARD_VECTOR_SIZE); no test produces a result exceeding one chunk, so the second-and-subsequent duckdb_fetch_chunk return, the multi-chunk iteration loop, and offset handling are never covered. Correspondingly every UDF/UDAF callback (_add_one_impl, _welford_update_impl, _arr_update_impl, etc.) is only ever invoked with a single small chunk, so the finalize 'offset' parameter (offset+count indexing at 2286, 3126, 3278) is always tested with offset==0.",
+      "impact": "A defect in multi-chunk fetch, or in a UDAF finalize that mishandles a non-zero output offset (multiple result chunks), would ship undetected. This is the most likely real-world path (large tables) yet is entirely unexercised.",
+      "recommendation": "Add a test that inserts > 2048 rows (e.g. range(5000)), loops duckdb_fetch_chunk until null accumulating row counts to the expected total, and runs a UDAF/UDF over that many rows so finalize is called with offset != 0 across chunks.",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-cover-3",
+      "severity": "medium",
+      "category": "missing-coverage",
+      "title": "High-precision decimal (width>18 / 128-bit value) never bound or created",
+      "file": "test/test_ducklib.py",
+      "line": 891,
+      "description": "test_bind_decimal (891-906) binds DECIMAL(10,2) with value tuple (10, 2, 12345, 0) and reads back an INT64 physical storage; test_create_get_decimal (1319-1327) uses the same (10,2,12345,0). Both are width<=18 (INT64 physical) and always pass the hugeint value's upper 64 bits as 0. The 24-byte decimal struct is passed through the custom >16-byte @intrinsic path (per CLAUDE.md), but the high-precision regime that actually needs the upper 64 bits -- width>18 (INT128 physical) with a non-zero upper word -- is never bound, created, or read back. duckdb_decimal_internal_type is only asserted != 0 (1752), never asserted to be HUGEINT for a wide decimal.",
+      "impact": "A bug that drops or mis-packs the upper 64 bits of the decimal struct (exactly the kind of eightbyte-ABI hazard the custom intrinsics exist to prevent) would pass all decimal tests, since every decimal value tested fits in 64 bits with upper==0.",
+      "recommendation": "Add a DECIMAL(38,0) (or width>18) case binding/creating a value whose magnitude requires the upper 64 bits (e.g. lower!=0, upper!=0), and assert both 64-bit halves of the stored INT128 round-trip.",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-cover-4",
+      "severity": "medium",
+      "category": "missing-coverage",
+      "title": "UDF/UDAF callbacks never read validity; NULL input rows are untested by design",
+      "file": "test/test_ducklib.py",
+      "line": 3229,
+      "description": "Every UDF/UDAF update/scalar callback reads duckdb_vector_get_data and iterates all n rows without ever calling duckdb_vector_get_validity (_add_one_impl 1924, _double_it_* 2083/2100, _isqrt_impl 2538, _triple_impl 2602, _welford_update_impl 3229, _arr_update_impl 3064, _agg_update_impl 2226). The NOTE at 3227-3228 makes this explicit: 'skips NULL validity checks -- test data has no NULLs.' All test tables/inputs are dense and NULL-free, so correctness of these callbacks over NULL-containing input is never demonstrated even though the validity bitmap read is tested elsewhere (test_fetch_chunk...get_vector at 227-230).",
+      "impact": "A UDF/UDAF that reads garbage or produces wrong aggregates for NULL rows (the common real case) would pass the entire suite. The callback pattern the tests exist to validate is only shown correct for the no-NULL subset.",
+      "recommendation": "Add at least one scalar-UDF and one UDAF test over a column containing NULLs, with a callback that consults duckdb_vector_get_validity, and assert the result matches a NULL-aware reference (e.g. matches DuckDB's built-in aggregate or a Python computation that ignores NULLs).",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-cover-5",
+      "severity": "low",
+      "category": "missing-leak-destroy-check",
+      "title": "Destroy of value/logical-type/function handles is never verified (no slot-zero or leak assert)",
+      "file": "test/test_ducklib.py",
+      "line": 1165,
+      "description": "Handle liveness-after-destroy is asserted only for database/connection/prepared/data_chunk via buf[0]==0 (98, 208, 287). For the ~150 value, logical-type, and scalar/aggregate-function tests, teardown calls aux_destroy_value (1165-1170), duckdb_destroy_logical_type, or duckdb_destroy_scalar_function on a scratch buffer and never re-reads the slot, never asserts alloc==free, and never checks the destroy actually ran. The leak/stats assertions (rtsys alloc==free) exist only in the three bridge/UDAF tests (3386, 3465, 3547) which measure numba NRT allocations, not DuckDB-side allocations.",
+      "impact": "A wrapper that silently no-ops a destroy (or drops the handle without freeing) would leak DuckDB memory and still pass every value/logical-type/function test. The destroy bindings for the largest handle families are effectively unasserted.",
+      "recommendation": "Where DuckDB zeroes the handle on destroy, assert buf[0]==0 after the destroy call (as done for DB/conn). Where it does not, add at least one long-loop create/destroy test with an OS/process RSS or DuckDB-side allocation check to catch leaks.",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-cover-6",
+      "severity": "low",
+      "category": "test-runs-without-asserting-value",
+      "title": "test_column_logical_type executes but never asserts the type is correct",
+      "file": "test/test_ducklib.py",
+      "line": 934,
+      "description": "test_column_logical_type (934-943) fetches the column's logical type pointer, asserts only logical_type_p != 0, then destroys it. It never calls duckdb_get_type_id on the returned logical type to confirm it is DUCKDB_TYPE_INTEGER, unlike test_create_logical_type_integer (1727-1733) and the type-constructor tests which all verify get_type_id. The test thus proves the pointer is non-null but not that duckdb_column_logical_type returns the correct type for column 0.",
+      "impact": "A binding that returned a valid-but-wrong logical type handle for a result column would pass. Weak assertion on a metadata accessor.",
+      "recommendation": "Add assert duckdb_get_type_id(logical_type_p) == DUCKDB_TYPE_INTEGER before destroying.",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-cover-7",
+      "severity": "low",
+      "category": "test-runs-without-asserting-value",
+      "title": "test_create_array_value asserts only non-null; array value contents are never read back",
+      "file": "test/test_ducklib.py",
+      "line": 1634,
+      "description": "test_create_array_value (1634-1648) builds a 3-element array value, asserts av != 0, and destroys everything. Unlike the sibling container tests -- list (get_list_size + get_list_child at 1538-1543), map (get_map_size/key/value at 1576-1588), struct (get_struct_child at 1617-1621) -- it never reads back the array's size or child elements, so the created array value's contents are never verified.",
+      "impact": "duckdb_create_array_value could store wrong or no elements and the test would still pass on the non-null check alone.",
+      "recommendation": "Read back the array's length and/or child values (matching the list/map/struct tests) and assert they equal the inputs 1,2,3.",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-cover-8",
+      "severity": "low",
+      "category": "weak-smoke-test",
+      "title": "test_scalar_function_set_init never verifies the init callback runs; init impl is a no-op",
+      "file": "test/test_ducklib.py",
+      "line": 2376,
+      "description": "test_scalar_function_set_init (2376-2420) registers a UDF with duckdb_scalar_function_set_init whose callback (_init_cb -> _init_cb_impl, 2362-2369) is a bare 'pass'. The test only asserts the ordinary add_one result is 43. Nothing observes that the init callback was invoked or mutated any state, so set_init is smoke-tested for acceptance only -- if the binding silently ignored the init pointer, the test would still pass.",
+      "impact": "The v1.5+ set_init binding is exercised for 'does not error' but not for 'the init function actually runs / receives correct info', so a broken init-registration would go undetected.",
+      "recommendation": "Have the init callback write an observable marker (e.g. via extra_info or a state slot) and assert the marker after the query, or otherwise verify the init callback fired.",
+      "confidence": "high"
+    },
+    {
+      "id": "TST-cover-9",
+      "severity": "low",
+      "category": "missing-coverage",
+      "title": "JIT (@njit) tests assert Success only; no in-JIT error/edge branch is covered",
+      "file": "test/test_ducklib.py",
+      "line": 1029,
+      "description": "The JIT section (993-1160) only exercises happy paths: jit_open_close (1013) and jit_connect_query_disconnect (1029) assert DuckDBSuccess and non-null pointers; jit_prepare_bind_execute (1061) reads back values but only for a successful prepare/bind/execute. No @njit test drives an error return code (invalid SQL, failed bind, null handle, unbound param) through the wrappers from inside compiled code. Error-code propagation across the JIT boundary -- a core invariant per CLAUDE.md 'Error Handling' -- is only ever tested in Python-called paths.",
+      "impact": "A wrapper that mishandles a DuckDBError return specifically under @njit lowering (e.g. wrong sign/truncation of the state code) would be caught only in Python calls, not in the JIT calls the library exists to enable.",
+      "recommendation": "Add an @njit test that issues an invalid query and/or an out-of-range bind and asserts the returned rc == DuckDBError from within compiled code.",
+      "confidence": "medium"
+    },
+    {
+      "id": "TST-cover-10",
+      "severity": "low",
+      "category": "platform-gated-gap",
+      "title": "Windows sret/by-pointer struct ABI and macOS library-download branches are unexercised",
+      "file": "test/test_ducklib.py",
+      "line": 835,
+      "description": "All struct-by-value tests (hugeint 835, uhugeint 853, interval 871, decimal 891, and the create/get value equivalents 1263-1327) plus every UDF/UDAF path run only on SysV x86-64 (Linux/WSL2, confirmed by the benchmark docstring at 2693). The Windows branches of _call_lib_func_struct_in/out (arg-by-pointer / sret return) and the macOS library-acquisition/download path in the loader are never hit by this suite; there is no xfail/skip marker documenting them as platform-conditional either. Given the pin duckdb>=1.3.2,<1.6 and cross-platform intent, these ABI/loader branches ship untested.",
+      "impact": "A Windows-only ABI regression (struct passed/returned via the wrong convention) or a macOS-only loader/download failure would not be caught by CI, which is Linux-only.",
+      "recommendation": "Either add a Windows CI leg that runs the struct-by-value tests, or add explicit skip markers with reason so the platform gap is visible; add a targeted loader test for the macOS/download branch (can be mocked).",
+      "confidence": "medium"
+    },
+    {
+      "id": "TST-cover-11",
+      "severity": "low",
+      "category": "missing-coverage",
+      "title": "Only the short (inline) string_t layout is read back; long (>12 char, out-of-line) strings untested",
+      "file": "test/test_ducklib.py",
+      "line": 267,
+      "description": "aux_read_inline_string (267-272) decodes DuckDB string_t as a uint32 length at data_p followed by inline chars at data_p+4, and BLOB reads use the same inline layout (778-782). Every string/blob tested is short: 'hello', 'hello world'[:5], '42', 4-byte blob -- all within the 12-byte inline capacity of string_t. The long-string representation (len > 12, where bytes 4..8 are a prefix and 8..16 hold an out-of-line data pointer) is never produced or read, so any binding/reader assuming inline-only layout would pass.",
+      "impact": "A UDF or bind path that mishandles long (out-of-line) strings would not be detected; the string-reading helper itself is only correct for short strings and is never stressed with a long value.",
+      "recommendation": "Add a bind_varchar / get_varchar round-trip with a >12-character string and a >12-byte blob, reading back via the out-of-line pointer layout (or via duckdb_value/string_at) and asserting equality.",
+      "confidence": "medium"
+    }
+  ],
+  "notes": "Reviewed test/test_ducklib.py (3549 lines) in full plus understanding/tests.md. The suite is broad on happy-path binding coverage (~180 tests spanning open/connect/query, prepared-statement binds for every scalar type, value create/get, logical types, scalar UDFs, aggregate UDAFs, and the structref/array MemInfo bridge with NRT leak asserts). The library code itself was not modified; all findings are test-quality/coverage gaps, not library bugs, so none rise above medium. Highest-value gaps: (1) test_struct_size_guard is a tautological arithmetic check that never touches the ABI guard it names; (2) no multi-chunk/>2048-row result or non-zero finalize offset; (3) high-precision decimal (width>18, 128-bit value) never bound/created; (4) UDF/UDAF callbacks never consult validity, so NULL input correctness is undemonstrated by design. Platform branches (Windows sret ABI, macOS loader/download) and long out-of-line string_t layout are structurally out of reach of the Linux/SysV-only suite. Destroy-binding correctness for the value/logical-type/function handle families is not asserted (no slot-zero re-check, no DuckDB-side leak check)."
+}

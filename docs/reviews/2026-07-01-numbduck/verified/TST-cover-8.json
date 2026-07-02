@@ -1,0 +1,6 @@
+{
+  "findingId": "TST-cover-8",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Read test/test_ducklib.py:2362-2369 and :2376-2420 directly. _init_cb_impl (line 2363-2364) is a bare `pass` under @njit, wrapped by the @cfunc _init_cb (2367-2369) which just calls it. test_scalar_function_set_init (def at 2376) registers a scalar function, calls ducklib.duckdb_scalar_function_set_init(func_p, _init_cb.address) (its return value is void, unchecked), then only asserts rc == DuckDBSuccess for duckdb_register_scalar_function and duckdb_query, and asserts the final SELECT with_init(42) result equals 43. Nothing in the test observes whether the init callback pointer was actually stored/invoked by DuckDB -- the add_one scalar function alone produces 43 regardless of whether set_init did anything. Confirmed: if the duckdb_scalar_function_set_init binding (numbduck/ducklib.py:1285-1288, a thin proxy_if_available wrapper around the C API with signature void(intp, intp)) silently failed to pass the pointer through, or the underlying DuckDB engine never invoked the init callback for this code path, this test would still pass. This is a genuine test-coverage gap (weak assertion), not a functional bug in ducklib.py itself, so severity=low is appropriate, matching the reviewer's claim."
+}

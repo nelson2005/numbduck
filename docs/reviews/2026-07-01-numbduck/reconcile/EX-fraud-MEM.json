@@ -1,0 +1,23 @@
+{
+  "unit": "EX-fraud-MEM",
+  "results": [
+    {
+      "oldId": "EX-fraud-MEM-1",
+      "class": "missed",
+      "newIds": [],
+      "justification": "The defect is byte-for-byte present on the current tree: _fraud_chunk_impl (examples/fraud_score.py:102-144) reads a_amt/a_co/a_hco/a_hr/a_rt/a_rx[i] for every row 0..n-1 (loop at 125-144) with no duckdb_vector_get_validity call. The @proxy migration only rewrote ducklib.py wrappers, not this example. No CURRENT finding reports this root cause: EX-fraud-1 (COR) is the func_p register-failure handle leak, and EX-scalar-MEM-1 (MEM) is the @cfunc exception-swallow contract (silent partial output on raise) — a distinct defect. Both current units merely mention the missing validity guard in their notes and explicitly decline to file it ('a safe documented assumption ... not a live defect'), which is not coverage. Adopting at the old low severity.",
+      "currentEvidence": "examples/fraud_score.py:125-144 — the loop reads all six input carrays by index with zero validity-mask fetch; setup_data (176-188) generates only dense non-NULL random()/floor(random()*k) columns so the gap is inert but present. The correctly-guarded reference (duckdb_vector_get_validity + duckdb_validity_row_is_valid) lives in examples/irr.py, and both APIs are bound in ducklib.py.",
+      "adopted": {
+        "id": "REC-EX-fraud-MEM-1",
+        "severity": "low",
+        "confidence": "high",
+        "title": "Chunk callback reads input vectors without validity (NULL) guard",
+        "file": "examples/fraud_score.py",
+        "line": "125-144",
+        "description": "The @njit callback _fraud_chunk_impl (examples/fraud_score.py:102-144) indexes a_amt/a_co/a_hco/a_hr/a_rt/a_rx[i] for every row 0..n-1 (loop at 125-144) without ever fetching the DuckDB validity mask (no duckdb_vector_get_validity). For a NULL input cell DuckDB does not guarantee the data-slot value is initialized, so the loop folds an undefined value into the fraud score. This is the value-domain inverse of a bounds bug: the data buffers are allocated full-width, so every read is in-bounds (no OOB/use-after-free), but the byte content for a NULL row is garbage, yielding a silently wrong score. examples/irr.py is the in-repo reference that does this correctly (duckdb_vector_get_validity + duckdb_validity_row_is_valid per row); both APIs are bound in ducklib.py, so the fix is available in-repo.",
+        "impact": "No memory-safety violation (in-bounds read of a full-width buffer). Latent correctness bug: any NULL in amount/country/home_country/hour/risk_tier/recent_txns produces a wrong fraud score that assert_results_match would not catch because the reference path also has no NULL rows. Inert as written because setup_data (176-188) generates dense random() columns with no NULLs, so neither the benchmark nor the assert ever exercises a NULL. Matters mainly as a copied usage pattern for real applications with nullable columns.",
+        "recommendation": "Either (a) document inline that the callback requires non-NULL inputs (matching the online_scoring/haversine caveat) and is correct only for the dense generated data, or (b) for parity with the irr.py reference, fetch each input vector's validity via duckdb_vector_get_validity and treat a NULL row as score 0 / propagate NULL. Since the example is a usage contract, an explicit inline comment is the minimum."
+      }
+    }
+  ]
+}

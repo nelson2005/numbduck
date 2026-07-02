@@ -1,0 +1,6 @@
+{
+  "findingId": "BLD-DES-4",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Verified numbduck_ci.yml:74 contains `flake8 . --count --exclude=test/core/random_image_ref.py --select=E9,F63,F7,F82 --show-source --statistics`. Confirmed via `find /home/erik/projects/numbduck/test -type d` that test/ has no core/ subdirectory, and a repo-wide search for random_image_ref* returns nothing. No setup.cfg, .flake8, or tox.ini exists that could reference this path elsewhere either. The excluded path is genuinely dead/stale (plausibly copy-pasted from another project such as numbox/numbarrow, which likely does have a test/core/random_image_ref.py). Excluding a nonexistent path is a functional no-op for flake8 (it simply never matches), so there is no build breakage or false negative risk today. Severity 'low' is correctly calibrated: this is pure dead-config/maintenance-noise, not a functional defect."
+}

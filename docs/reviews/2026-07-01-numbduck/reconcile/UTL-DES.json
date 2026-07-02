@@ -1,0 +1,65 @@
+{
+  "unit": "UTL-DES",
+  "results": [
+    {
+      "oldId": "UTL-DES-1",
+      "class": "covered",
+      "newIds": ["UTL-DES-1"],
+      "justification": "Same defect, same root cause: the \"libduckdb.dylib\" leaf and the os.path.join(_LIBDUCKDB_CACHE_DIR, ...) cache path are duplicated literally in _find_standalone_libduckdb (:41, read) and _download_libduckdb (:87, write) with no shared constant, risking silent producer/consumer desync. New UTL-DES-1 reports it with the same recommendation (introduce _LIBDUCKDB_DYLIB_NAME + derived _LIBDUCKDB_CACHE_FILE constants).",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "UTL-DES-2",
+      "class": "missed",
+      "newIds": [],
+      "justification": "Old DES-2's root cause is testability: _download_libduckdb fuses consent + fetch + unzip + write with zero injectable collaborators, so the fetch/cache logic cannot be unit-tested. No current finding reports this. New UTL-DES-3 (input() EOFError), UTL-DES-6 (raw HTTP/zip errors), and UTL-DES-2 (missing symbol re-check) each touch a slice of the same function but address distinct robustness surfaces, not the fused-concerns/non-injectability design defect or its refactor. The unmatched core remains uncovered; classified by the unmatched part.",
+      "currentEvidence": "Verified still present: /home/erik/projects/numbduck/numbduck/utils.py:50-91. URL built inline from duckdb.__version__ (:52-56), consent via builtin input() (:67), destination from module global _LIBDUCKDB_CACHE_DIR (:87), urlopen called directly (:83), lazy io/zipfile/urlopen imports (:78-80) — no parameter is injectable, and no test references _download_libduckdb.",
+      "adopted": {
+        "id": "REC-UTL-DES-2",
+        "severity": "medium",
+        "confidence": "high",
+        "title": "_download_libduckdb fuses consent, network fetch, unzip, and cache write into one unit with no injectable collaborators (untestable fallback path)",
+        "file": "numbduck/utils.py",
+        "line": "50-91",
+        "description": "_download_libduckdb (:50-91) does four unrelated things in one body with no injectable collaborators: (a) decides consent via a blocking builtin input() prompt (:67-77), (b) fetches a URL built inline from duckdb.__version__ (:52-56, :83), (c) unzips an in-memory archive (:85-89), and (d) writes to a path derived from module global _LIBDUCKDB_CACHE_DIR (:86-90). The URL, destination, consent decision, and network opener are all hard-wired rather than parameters, and io/zipfile/urlopen are lazily imported inside the body (:78-80), obscuring the dependency surface. A unit test of the extract-and-cache logic cannot run without monkeypatching builtin input, patching urlopen, and mutating module globals, and can never exercise the happy path without hitting or stubbing GitHub. The name (_download_...) also hides that the call may block on stdin or raise RuntimeError on a declined prompt (:70-77).",
+        "impact": "The fallback download path — the loader logic most likely to break on a duckdb release/layout change — is effectively unit-untestable and can only be validated by an actual network round-trip, so regressions ship undetected.",
+        "recommendation": "Split into (1) a pure-policy _consent_to_download() -> bool (or have the caller decide) and (2) a _fetch_and_cache(url, dest) -> path taking URL and destination as parameters, so tests can drive fetch/cache with a local file:// URL or injected opener and a tmp dest, and consent can be tested in isolation."
+      }
+    },
+    {
+      "oldId": "UTL-DES-3",
+      "class": "covered",
+      "newIds": ["UTL-DES-4"],
+      "justification": "Same defect, same root cause: _find_standalone_libduckdb is a pure locator that hides an unconditional, unguarded os.remove of the legacy cache (:37-40), mixing destructive migration into a discovery function (least-surprise/testability) and exposing an OSError/TOCTOU crash path out of a non-throwing probe. New UTL-DES-4 reports it verbatim with the same recommendation (move cleanup to an explicit migration step wrapped in try/except OSError). New UTL-COR-2 also covers the crash-import angle.",
+      "currentEvidence": "",
+      "adopted": null
+    },
+    {
+      "oldId": "UTL-DES-4",
+      "class": "missed",
+      "newIds": [],
+      "justification": "Old DES-4's defect — the non-Darwin terminal error message gives circular guidance (tells the user to set NUMBDUCK_LIBDUCKDB, which _find_standalone already consulted and rejected), never echoes the offending path, and never states that auto-download is macOS-only — is not reported by any current finding. The new UTL-DES set covers download errors (DES-6), EOFError (DES-3), missing symbol re-check (DES-2), and the os.remove side effect (DES-4), but none address the non-Darwin error-message asymmetry/ergonomics.",
+      "currentEvidence": "Verified still present: /home/erik/projects/numbduck/numbduck/utils.py:34-36 (env var silently discarded when os.path.isfile is False) and :124-128 (non-Darwin branch raises \"Set NUMBDUCK_LIBDUCKDB=/path/to/libduckdb.so\" unconditionally, no echo of the offending path, no mention that the Darwin branch falls through to _download_libduckdb at :129).",
+      "adopted": {
+        "id": "REC-UTL-DES-4",
+        "severity": "low",
+        "confidence": "medium",
+        "title": "Non-Darwin error message gives circular NUMBDUCK_LIBDUCKDB guidance and hides the macOS-only download asymmetry",
+        "file": "numbduck/utils.py",
+        "line": "124-128",
+        "description": "_find_standalone_libduckdb consults NUMBDUCK_LIBDUCKDB (:34-36) and silently returns None if the path is missing/invalid. load_duckdb then reaches the non-Darwin branch (:124-128) and raises with only 'Set NUMBDUCK_LIBDUCKDB=/path/to/libduckdb.so' — so a user who set the var to a non-existent path is told to do exactly what they just did, with no hint the path was rejected. Meanwhile the Darwin path (:129) silently proceeds to an interactive network download. The two terminal branches give materially different experiences for the same root cause (stripped wheel) with no shared explanatory message, and the non-Darwin message offers no diagnostic about why the env var did not take effect.",
+        "impact": "A user who set NUMBDUCK_LIBDUCKDB to a bad path on Linux gets unhelpful, circular guidance; the platform behavior asymmetry (download is macOS-only) is undocumented at the call site.",
+        "recommendation": "Distinguish 'env var unset' from 'env var set but file missing' in the message (echo the offending path), and state the platform asymmetry (download is macOS-only) so a non-Darwin user understands the env var is their only recourse."
+      }
+    },
+    {
+      "oldId": "UTL-DES-5",
+      "class": "covered",
+      "newIds": ["UTL-DES-6"],
+      "justification": "Same defect, same root cause: the download couples duckdb.__version__ 1:1 to a GitHub release tag with a libduckdb-osx-universal.zip asset containing a flat libduckdb.dylib member (:52-56, :88), so any version-string skew or layout change surfaces as a raw HTTPError (:83) or KeyError (:88) instead of the branded brew/NUMBDUCK_LIBDUCKDB guidance the decline branch already provides. New UTL-DES-6 reports it with the same wrap-in-branded-RuntimeError recommendation (and additionally notes the missing urlopen timeout and rot-prone version comment, which are extensions on the new side, not distinct old defects).",
+      "currentEvidence": "",
+      "adopted": null
+    }
+  ]
+}

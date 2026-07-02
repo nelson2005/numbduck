@@ -1,0 +1,23 @@
+{
+  "unit": "EX-hav",
+  "results": [
+    {
+      "oldId": "EX-hav-1",
+      "class": "missed",
+      "newIds": [],
+      "justification": "Old EX-hav-1 (confirmed, low): the haversine scalar-UDF chunk callback reads no validity mask and never sets output validity, so the de-facto reference pattern is silently wrong on any nullable column. This root cause (validity handling) is distinct from the current review's EX-hav-1 (constant-vector out-of-bounds read) and EX-hav-2 (handle leak on register failure). No current finding reports it: the 2026-07-01 EX-hav notes explicitly evaluated the NULL-input precondition and chose to treat it as safe-by-construction / a documented invariant (understanding/examples.md:110-111) rather than file a finding. Since the code is unchanged and no finding covers it, it is missed.",
+      "currentEvidence": "examples/haversine.py:87-113 (_haversine_chunk_impl) still calls duckdb_vector_get_data for all four inputs (94-97) and indexes a_lat1[i]/a_lon1[i]/a_lat2[i]/a_lon2[i] for every i in range(n) (105-113) with zero duckdb_vector_get_validity calls and no output-validity write; contrast the correct discipline still present in examples/irr.py:140-153 (duckdb_vector_get_validity + duckdb_validity_row_is_valid guard). The @cres->@proxy migration did not touch this callback body.",
+      "adopted": {
+        "id": "REC-EX-hav-1",
+        "severity": "low",
+        "confidence": "medium",
+        "title": "Chunk callback reads no validity mask; the reference scalar-UDF pattern is silently wrong on NULL input",
+        "file": "examples/haversine.py",
+        "line": 105,
+        "description": "_haversine_chunk_impl (examples/haversine.py:87-113) unconditionally carrays each input vector's data buffer (lines 94-102) and reads a_lat1[i]/a_lon1[i]/a_lat2[i]/a_lon2[i] for every i in range(n) (lines 105-113) with no call to duckdb_vector_get_validity and no write to the output vector's validity. DuckDB leaves the data slot of a NULL row uninitialized/stale, so a NULL input is read as a garbage double, pushed through math.asin(math.sqrt(...)), and written to the output as a non-NULL value. In this example it is safe by construction: setup_data (lines 140-145) fills lat/lon via random()*180-90 / random()*360-180 over range(n), which never yields NULL, and the store coordinates are non-NULL literals, so no NULL reaches the UDF and the count(*) cross-check passes. It is flagged because haversine.py is the de-facto reference scalar-UDF pattern, and irr.py:140-153 demonstrates the correct discipline (duckdb_vector_get_validity + skip NULL rows). The 'assumes non-NULL inputs' invariant is documented in understanding/examples.md:110-111, but the callback itself carries no comment or guard, so a downstream caller copying it for a nullable column gets silently wrong results.",
+        "impact": "No behavioral defect in the running example (dense generated data). The risk is pattern propagation: a caller reusing this callback on a nullable column reads garbage doubles for NULL rows and emits them as non-NULL output with no error.",
+        "recommendation": "Either add a one-line precondition comment at the loop asserting inputs are non-NULL, or (better for a reference example) fetch each input's validity via duckdb_vector_get_validity and gate each row with duckdb_validity_row_is_valid (guarded by validity_ptr != 0), mirroring irr.py:140-153, so the pattern is safe to copy for nullable columns."
+      }
+    }
+  ]
+}

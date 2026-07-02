@@ -1,0 +1,68 @@
+{
+  "unit": "BLD-DES",
+  "target": "packaging & CI",
+  "dimension": "DES",
+  "findings": [
+    {
+      "id": "BLD-DES-1",
+      "severity": "high",
+      "title": "Benchmark test runs in CI despite marker documented as deselected",
+      "file": "numbduck/.github/workflows/numbduck_ci.yml",
+      "line": 79,
+      "category": "CI correctness / wasted resources",
+      "confidence": "high",
+      "description": "pyproject.toml:26 declares the marker `benchmark: slow benchmarks, run only locally (deselected in CI)`, and test/test_ducklib.py:2684 decorates `test_udf_benchmark` with `@pytest.mark.benchmark`. The CI test step is a bare `pytest` (numbduck_ci.yml:79) with no `-m \"not benchmark\"` filter, and pyproject.toml has no `addopts` (tool.pytest.ini_options only defines `markers`). The benchmark is NOT env-gated (unlike the examples/, which check NUMBDUCK_BENCH_BIG) — its body unconditionally builds and times a Python scalar UDF over ROW_COUNTS = [10_000, 100_000, 1_000_000]. Its own docstring records the 1M-row Python column at 118.835s, i.e. roughly two minutes of pure-interpreter work per job. This runs on every one of the ~51 matrix jobs. The declared/documented contract (deselected in CI) is simply not implemented; the marker filter is missing.",
+      "impact": "Every matrix job pays ~1-2 minutes of pointless Python-UDF benchmarking (tens of billable minutes per CI run across ~51 jobs), and the marker's stated purpose is silently violated. Any future benchmark added under the same marker inherits the same non-deselection.",
+      "recommendation": "Filter benchmarks out in CI: change the pytest step to `pytest -m \"not benchmark\"` (numbduck_ci.yml:79), or add `addopts = \"-m 'not benchmark'\"` under [tool.pytest.ini_options] so local runs opt in explicitly. Per project convention also add `--durations=20` to the CI pytest invocation."
+    },
+    {
+      "id": "BLD-DES-2",
+      "severity": "medium",
+      "title": "No upper cap on numbox while importing concrete internal modules",
+      "file": "numbduck/pyproject.toml",
+      "line": 13,
+      "category": "Dependency pin / fragile version assumption",
+      "confidence": "high",
+      "description": "The runtime pin is `numbox>=0.5.13` with no upper bound (pyproject.toml:13). numbduck imports concrete, non-top-level internals of numbox: `from numbox.core.bindings.call import _call_lib_func, _call_lib_func_byval`, `from numbox.core.bindings.signatures import signatures`, and `from numbox.core.proxy.proxy import proxy, proxy_if_available` (ducklib.py:4-6). These are deep module paths and underscore-prefixed private symbols, not a stable public API surface. Any future numbox that moves/renames `core.proxy.proxy` or `core.bindings.call`, or drops `_call_lib_func`, breaks numbduck at import time with an ImportError and no version guard to explain why. Contrast with the deliberate `<1.6` upper cap on duckdb (pyproject.toml:12), which the note (build.md 1a) documents as guarding an unvalidated major.",
+      "impact": "A silent, hard import failure on any numbox that reshuffles these internals; users on an unpinned environment can `pip install` an incompatible numbox and get a broken numbduck with no actionable diagnostic.",
+      "recommendation": "Add an upper cap reflecting the tested numbox range (e.g. `numbox>=0.5.13,<0.6`) and bump it deliberately as new numbox releases are validated, mirroring the duckdb pin discipline."
+    },
+    {
+      "id": "BLD-DES-3",
+      "severity": "medium",
+      "title": "Committed __version__ is empty; local unstamped build produces an invalid version",
+      "file": "numbduck/numbduck/__init__.py",
+      "line": 1,
+      "category": "Packaging / version design",
+      "confidence": "medium",
+      "description": "The tracked `numbduck/__init__.py` is literally `__version__ = \"\"` (no newline). pyproject.toml:29-30 resolves the dynamic version via `attr = \"numbduck.__version__\"`, so an unstamped build reads the empty string. The build backend is pinned to setuptools~=75.3.0 (pyproject.toml:2), which validates versions against PEP 440; an empty string is not a valid version. Only the CI/release workflows rewrite `__init__.py` before building (numbduck_ci.yml:61-63, release.yml:30-31), so wheels built inside CI are fine, but the documented developer path `pip install -e .` / `python -m build` on a clean checkout has no stamp step and hits the empty version. This is a design gap: the source of truth for local dev is a value that is never itself buildable.",
+      "impact": "A fresh-clone `pip install -e .` or `python -m build` (both documented dev commands in CLAUDE.md) can fail with an invalid/empty version, or at best produce degenerate metadata, confusing new contributors. The mechanism silently depends on a CI-only side effect.",
+      "recommendation": "Commit a valid placeholder dev version (e.g. `__version__ = \"0.0.0.dev0\"`) so unstamped local builds succeed with an honest dev marker, while CI/release still overwrite it with the tag-derived version. This keeps the stamp flow intact and removes the clean-checkout failure."
+    },
+    {
+      "id": "BLD-DES-4",
+      "severity": "low",
+      "title": "flake8 excludes a path that does not exist in the tree",
+      "file": "numbduck/.github/workflows/numbduck_ci.yml",
+      "line": 74,
+      "category": "Dead config",
+      "confidence": "high",
+      "description": "The hard flake8 pass excludes `test/core/random_image_ref.py` (`--exclude=test/core/random_image_ref.py`, numbduck_ci.yml:74). There is no `test/core/` directory in the repository; the path is a stale copy-paste leftover from another project. Excluding a nonexistent path is a no-op, so it is harmless today, but it is dead configuration that misleads readers into thinking such a file exists and needs exemption.",
+      "impact": "None functionally; maintenance noise and a false signal that the exclude is load-bearing.",
+      "recommendation": "Drop the `--exclude=...` argument (or replace it with a real exclude if one is actually needed)."
+    },
+    {
+      "id": "BLD-DES-5",
+      "severity": "low",
+      "title": "release.yml drifts from other workflows: pinned-action lag, no sdist, inconsistent fallback minor",
+      "file": "numbduck/.github/workflows/release.yml",
+      "line": 15,
+      "category": "Maintainability / release design",
+      "confidence": "high",
+      "description": "release.yml pins checkout@v4 (line 15), setup-python@v5 (line 17), and upload-artifact@v4 (line 40), while every other workflow uses @v6/@v7 (numbduck_ci.yml, doc-codeblock-flake8.yml, link-check.yml). It also builds only a wheel (`python -m build --wheel`, line 37) and never a source distribution, so the published PyPI project will have no sdist (acceptable for a pure-Python `py3-none-any` package but a deliberate gap worth stating). Finally its non-tag version fallback is `0.0.<run_number>` (line 27) whereas numbduck_ci.yml uses `0.1.<run_number>` (line 58) — cosmetic drift in the synthetic scheme. The `else` fallback in release.yml is also effectively dead since `release: published` always targets a tag (release.yml:3-5), so `github.ref_type == 'tag'` is expected always true.",
+      "impact": "Action-version skew accrues silent deprecation warnings and divergent behavior over time; absence of an sdist limits source-based installs; the divergent fallback minor and dead else-branch are minor confusion.",
+      "recommendation": "Sync release.yml action pins to the @v6/@v7 versions used elsewhere; add `python -m build` (both sdist+wheel) or explicitly document wheel-only intent; unify the synthetic-version minor with numbduck_ci.yml."
+    }
+  ],
+  "notes": "Verified against source: (1) test/test_ducklib.py:2684 `test_udf_benchmark` is @pytest.mark.benchmark and is NOT env-gated, and CI runs bare `pytest` (numbduck_ci.yml:79) with no addopts in pyproject.toml -> benchmark runs on all ~51 jobs (BLD-DES-1). (2) Non-findings I checked and cleared: the 'numba pin clobbered by pip install -e .' worry is a NON-issue -- numbox depends on `numba>=0.60.0,<0.66.0` (/home/erik/projects/numbox/pyproject.toml:11-13), so both matrix pins (0.60.0, 0.64.0) satisfy it and pip will not upgrade numba. The py3.14 x numba0.60.0 exclude and the 3.13 x 0.60.0 exclude are correct (numba 0.60.0 supports up to Python 3.12). requires-python `>=3.10` is consistent with the 3.10-3.14 matrix. Windows binding path IS exercised (windows-latest on py3.11 + py3.14 x duckdb 1.5.1), so the by-pointer struct ABI branch has coverage. macOS is absent from the matrix, but this is a documented intentional limitation (macOS DuckDB Python wheel strips the C API symbols; ADBC workaround), and the AArch64 struct-passing ABI is still exercised via ubuntu-24.04-arm, so I did not raise it as a defect. The duckdb-version axis (1.3.2/1.4.0/1.5.1) is load-bearing for proxy_if_available gating and is present. Script-injection via `${{ github.ref_name }}` interpolated into run: shell (numbduck_ci.yml:56,63; release.yml:25,31) is a real sharp edge but out of the packaging/DES scope and gated by tag-push access -- noted, not scored."
+}

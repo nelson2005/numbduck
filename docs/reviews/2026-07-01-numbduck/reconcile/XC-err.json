@@ -1,0 +1,31 @@
+{
+  "unit": "XC-err",
+  "results": [
+    {
+      "oldId": "XC-err-1",
+      "class": "covered",
+      "newIds": ["PBR-COR-2", "PBR-MEM-2"],
+      "justification": "Same defect, same root cause. pybridge.py is byte-for-byte unchanged on the current tree (cpp_obj_p at :59 and conn_ptr at :62 are still read via ctypes.c_void_p.from_address(...).value with no NULL guard). PBR-COR-2 describes the identical two paths the old finding raised: (a) a null +16 read makes line 62 evaluate None + 32 -> non-contract TypeError, and (b) a closed connection yields conn_ptr=None which is passed to duckdb_query, bypassing the SELECT 1 round-trip and the documented RuntimeError contract; it prescribes the same NULL-guard remedy. PBR-MEM-2 covers the same missing null/validity guard on the extracted pointer before dereference. No unmatched extra defect remains.",
+      "currentEvidence": "numbduck/pybridge.py:59,62 unchanged from the old tree; PBR-COR-2 (numbduck/pybridge.py:62) is the exact equivalent, PBR-MEM-2 (numbduck/pybridge.py:62) the closely related null-guard finding.",
+      "adopted": null
+    },
+    {
+      "oldId": "XC-err-2",
+      "class": "missed",
+      "newIds": [],
+      "justification": "Still present on the current @proxy tree and no current finding covers it. The gating decorator migrated from numbox cres_if_available (@cres era) to numbox proxy_if_available, but the diagnostic defect is identical: when the C symbol is absent, proxy_if_available returns a plain Python `stub(*args)` that raises NotImplementedError (numbox/numbox/core/proxy/proxy.py, proxy_if_available); when present it returns an @njit dispatcher. The absent path is therefore an untyped Python global, so an @njit caller gets an opaque numba TypingError at compile time, NOT the documented NotImplementedError. The three gated numbduck wrappers still exist (ducklib.py:726 duckdb_create_varint, :1051 duckdb_get_varint, :1285 duckdb_scalar_function_set_init). The only current findings touching these wrappers (DCK-sig-DES-3, DCK-wrap-COR-2) concern their docstring URLs, a distinct defect, so this diagnostic gap is uncovered.",
+      "currentEvidence": "numbox/numbox/core/proxy/proxy.py proxy_if_available: `def stub(*args, **_kwargs): raise NotImplementedError(...)` returned when `not hasattr(lib, func.__name__)`; docstring promises 'Callers get a stub that raises NotImplementedError instead of a confusing LLVM link error' — holds for Python callers only. numbduck gated wrappers at ducklib.py:726, 1051, 1285.",
+      "adopted": {
+        "id": "REC-XC-err-2",
+        "severity": "low",
+        "title": "Version-gated bindings surface a numba TypingError, not NotImplementedError, for JIT callers on a libduckdb missing the symbol",
+        "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+        "line": 726,
+        "confidence": "medium",
+        "description": "Three bindings are gated with @proxy_if_available(duckdb_lib, ...) so they degrade when the loaded libduckdb lacks the symbol: duckdb_create_varint (ducklib.py:726), duckdb_get_varint (ducklib.py:1051), duckdb_scalar_function_set_init (ducklib.py:1285). numbox's proxy_if_available (numbox/numbox/core/proxy/proxy.py) returns a plain Python `stub(*args, **_kwargs)` that raises NotImplementedError when the symbol is absent, and its docstring promises callers 'get a stub that raises NotImplementedError instead of a confusing LLVM link error at call time'. That promise only holds for pure-Python callers. These are JIT bindings whose intended call site is inside @njit code; from @njit the stub is an untyped Python global and numba raises an opaque TypingError at compile time, not the documented NotImplementedError. When the symbol IS present, proxy_if_available returns an @njit dispatcher, so the same name is two different object types depending on the runtime library — only the present case is @njit-callable. This is the same defect the pre-@proxy review flagged against numbox cres_if_available; it carried over unchanged in the @cres->@proxy migration.",
+        "impact": "On a DuckDB in the supported range (>=1.3.2,<1.6) that lacks a gated symbol, JIT code calling the gated wrapper fails to compile with a generic numba typing error instead of a clear 'X is not available' message. No exception leaks across the JIT/C boundary at runtime (compile-time failure, the safe direction), so the binding-level error-handling contract is not violated; the defect is the unmet diagnostic promise. Root cause lives in numbox proxy.py, but numbduck relies on this stub for cross-version portability.",
+        "recommendation": "Make the unavailable-symbol stub @njit-introspectable so JIT callers get a clear NotImplementedError-equivalent — e.g. have proxy_if_available register an @intrinsic/overload that raises a numba error naming the function at typing time — or, in numbduck, document that gated functions are unavailable in @njit on older libduckdb and guard dependent JIT code with a Python-level hasattr(duckdb_lib, name) capability check before compiling. Fix is in numbox; track as an upstream numbox follow-up."
+      }
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "unit": "DBU-MEM",
+  "target": "duckdb_utils.py buffers",
+  "dimension": "MEM",
+  "findings": [
+    {
+      "id": "DBU-MEM-1",
+      "severity": "low",
+      "confidence": "low",
+      "category": "buffer-overflow / fixed-size out-param buffer",
+      "title": "create_duckdb_result hard-codes a 48-byte buffer that libduckdb writes through by pointer",
+      "file": "numbduck/duckdb_utils.py",
+      "line": 39,
+      "description": "create_duckdb_result() returns allocate_buffer(6) = 6 x int64 = 48 bytes (duckdb_utils.py:36-39). This buffer's .ctypes.data is passed as the duckdb_result* out-param to duckdb_query / duckdb_execute_prepared, which memcpy the FULL duckdb_result struct through that pointer. The 48-byte size is pinned only against duckdb.h v1.3.2 (docstring at line 38), where duckdb_result is exactly six 8-byte fields (3x idx_t + 3x pointer). The project pin is duckdb>=1.3.2,<1.6, spanning 1.4 and 1.5. There is no runtime size check (e.g. ctypes.sizeof) tying the allocation to the loaded library's actual struct. If any in-range release enlarges duckdb_result, libduckdb writes past the 48-byte numpy buffer -> heap-adjacent out-of-bounds write / corruption, a memory-safety fault rather than a catchable error. This is the memory-safety facet; the version-drift/design facet overlaps DES. Confidence is low because duckdb_result has in practice been stable at 48 bytes across the 1.x line (all real payload sits behind the internal_data pointer), so the risk is latent, not a live bug on 1.3.2.",
+      "impact": "Latent heap out-of-bounds write if duckdb_result grows within the >=1.3.2,<1.6 pin; would manifest as silent memory corruption on query/execute, not a clean error.",
+      "recommendation": "Derive the result-buffer size from the loaded library instead of hard-coding 6: allocate ceil(sizeof(duckdb_result)/8) int64s using the actual struct size (or assert 48 >= that size at import). At minimum add a startup assertion against the running duckdb version so an enlarged struct fails loudly instead of corrupting the heap."
+    }
+  ],
+  "notes": "duckdb_utils.py is a set of seven @njit(**jit_options) allocators, each returning numpy.zeros(sz, int64). Reviewed strictly for memory-safety/lifetime across @njit boundaries.\n\nNo dangling-pointer defect exists in this file's own code: the allocators return real, NRT-owned numpy arrays; nothing here takes .ctypes.data inline. The '.ctypes.data does not keep the array alive' hazard (p = create_duckdb_result().ctypes.data) is a CALLER responsibility, and every in-repo caller binds the array to a local first (pybridge.py:65 'result', online_scoring.py:153 'stmt', all create_* uses in test_ducklib.py), so no use-after-free is actually present in the tree.\n\nNo meminfo incref/decref, borrow_structref/release_meminfo, export_meminfo, ctypes.from_address reads, or NRT refcount handling occur in this file (those live in the UDAF/bridge and pybridge units), so none of those MEM sub-categories apply here.\n\nThe single-pointer handle buffers (n=1, 8 bytes) are exactly sized for opaque 'typedef struct {...} *' handles and zero-initialised (correct NULL slot). numpy/NRT allocations satisfy the 8-byte alignment the int64-punned pointer/idx_t fields require on LP64. The one MEM-relevant concern rooted in this file's code is the fixed 48-byte result buffer (DBU-MEM-1), reported at low/low as a latent risk. int64 punning also assumes LP64 (8-byte pointers) but that is a portability/DES matter, not a live memory-safety bug on the supported Linux x86-64 target."
+}

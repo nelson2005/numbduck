@@ -1,0 +1,21 @@
+{
+  "unit": "XC-numbox-COR",
+  "results": [
+    {
+      "oldId": "XC-numbox-COR-1",
+      "class": "covered",
+      "newIds": ["DCK-sig-COR-2", "XC-numbox-COR-1", "DCK-wrap-COR-1"],
+      "justification": "Same defect (duckdb_vector_get_validity returns uint64_t* but is typed uint64 instead of intp, breaking the all-pointers-are-intp convention). New DCK-sig-COR-2 and the new XC-numbox-COR-1 report it verbatim at the same current line (ducklib.py:237); DCK-wrap-COR-1 also folds it in. Same root cause, same recommendation (retype to intp).",
+      "currentEvidence": "ducklib.py:237 still `signatures[\"duckdb_vector_get_validity\"] = uint64(intp)`; sibling pointer return duckdb_vector_get_data at :236 is `intp(intp)`; consumer duckdb_validity_row_is_valid at :234 takes intp first arg.",
+      "adopted": null
+    },
+    {
+      "oldId": "XC-numbox-COR-2",
+      "class": "covered",
+      "newIds": ["DCK-sig-COR-1", "DCK-wrap-COR-1"],
+      "justification": "Same defect (idx_t, a uint64_t, mapped to signed intp in count/size/index slots, inconsistent with duckdb.h and the file's own uint64 usage). New DCK-sig-COR-1 and DCK-wrap-COR-1 enumerate the identical slots and give the same fix. The old finding cited 6 slots (returns :105/155/156/225 and args :157/233 on the old tree); the new findings cover all of them (returns duckdb_column_count :106, duckdb_data_chunk_get_column_count :156, duckdb_data_chunk_get_size :157, duckdb_row_count :226, and idx_t args of duckdb_data_chunk_get_vector :158 and duckdb_validity_row_is_valid :234 on the current tree). Full overlap, no unmatched extra defect.",
+      "currentEvidence": "Current ducklib.py: :106 duckdb_column_count=intp(intp), :156 duckdb_data_chunk_get_column_count=intp(intp), :157 duckdb_data_chunk_get_size=intp(intp), :158 duckdb_data_chunk_get_vector=intp(intp,intp) [2nd arg idx_t], :226 duckdb_row_count=intp(intp), :234 duckdb_validity_row_is_valid=int8(intp,intp) [2nd arg idx_t] — all still signed intp, while sibling idx_t entries (:189, :217, :227, :228) use uint64.",
+      "adopted": null
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "findingId": "DOC-acc-4",
+  "verdict": "confirmed",
+  "correctedSeverity": "medium",
+  "reasoning": "Independently verified against the current tree. numbduck/numbduck/ducklib.py is exactly 1432 lines total (wc -l), so the CLAUDE.md Follow-ups line range 'ducklib.py:1525-1640' (CLAUDE.md:57) references lines past EOF -- it cannot exist. Grepping ducklib.py for @intrinsic, _build_packed_interval, _call_lib_func_struct_in/_out, and _emit_byval_call returns zero hits anywhere in the file, confirming no 'hand-rolled intrinsics' remain. The three binds named in the follow-up are present at ducklib.py:1411-1426 as plain @proxy(...)+_call_lib_func(...) wrappers (duckdb_bind_hugeint at 1411-1414, duckdb_bind_uhugeint at 1417-1420, duckdb_bind_interval at 1423-1426), matching the 18 sibling wrappers' pattern -- i.e. the described migration is already complete, not pending. Also verified the doc's stated precondition: numbox's /home/erik/projects/numbox/numbox/core/bindings/call.py already implements the generic INT/INT eightbyte repack via _needs_int_int_eightbyte_repack (line 212) and _repack_to_i64_pair (line 236), used inside _call_lib_func (lines 115, 160-161) -- so the 'once the numbox repack lands' gate the follow-up describes has, in fact, already landed. All three sub-claims in DOC-acc-4 (nonexistent line range, absent intrinsics, completed migration) hold exactly as stated. Severity: downgraded from high to medium. Impact is real (a maintainer following this stale doc would search past EOF and attempt already-finished work) but it's a single self-contained doc paragraph with no code/build/security consequence and no risk of silent wrong behavior -- it wastes at most a few minutes of investigation before the maintainer discovers the code already matches the desired end-state. That is more consistent with medium (misleading/wasted-effort documentation debt) than high (which should be reserved for defects with material risk of incorrect action, e.g. installing a wrong dependency version per DOC-acc-1).",
+  "notes_file_line_citations": {
+    "ducklib_length": "numbduck/numbduck/ducklib.py: 1432 lines (wc -l)",
+    "binds": "numbduck/numbduck/ducklib.py:1411-1426",
+    "claude_md_stale_ref": "numbduck/CLAUDE.md:57",
+    "numbox_repack": "numbox/numbox/core/bindings/call.py:115,160-161,212,236"
+  }
+}

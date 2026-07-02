@@ -1,0 +1,6 @@
+{
+  "findingId": "UTL-DES-4",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Verified against current numbduck/utils.py:33-47. _find_standalone_libduckdb is named/used as a discovery function (feeds `if standalone:` at utils.py:119-120) but unconditionally executes os.remove(old_cached) at line 40 with no try/except guard, on the mainline (non-NUMBDUCK_LIBDUCKDB-override) path. Traced the call chain: numbduck/ducklib.py:12 calls `duckdb_lib = load_duckdb()` at module import time with no surrounding try/except; load_duckdb() (utils.py:113-130) calls _find_standalone_libduckdb() unconditionally on the macOS symbol-less-wheel fallback path (utils.py:119). Thus a permission error or TOCTOU race on the os.remove would surface as a raw unhandled OSError during `import numbduck.ducklib`, exactly as described. No mitigating try/except, idempotency guard, or separation of migration-vs-lookup exists elsewhere in the file. Severity 'low' fits: narrow trigger window (macOS fallback path AND legacy unversioned cache present AND permission/race failure), a design/testability smell rather than a common-path functional bug."
+}

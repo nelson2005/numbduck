@@ -1,0 +1,7 @@
+{
+  "unit": "DBU-COR",
+  "target": "duckdb_utils.py buffers",
+  "dimension": "COR",
+  "findings": [],
+  "notes": "All buffer sizes in duckdb_utils.py are correct vs the real DuckDB C struct/handle sizes for the supported range (duckdb>=1.3.2,<1.6). The six handle allocators (create_duckdb_database L18-21, create_duckdb_connection L12-15, create_duckdb_prepared_statement L24-27, create_duckdb_data_chunk L30-33, create_duckdb_value L42-45, create_duckdb_vector L48-51) each allocate allocate_buffer(1) = 1 int64 = 8 bytes. Each corresponding DuckDB handle type is an opaque single-pointer typedef in duckdb.h (typedef struct _duckdb_X { void *internal_ptr; } * duckdb_X;), so the out-param slot duckdb_X* requires exactly 8 bytes on 64-bit targets. create_duckdb_result (L36-39) allocates allocate_buffer(6) = 48 bytes, matching the C duckdb_result struct: 3x idx_t (uint64, 24B: deprecated_column_count/row_count/rows_changed) + 3 pointers (24B: duckdb_column* deprecated_columns, char* deprecated_error_message, void* internal_data) = 48 bytes. This deprecated result layout has been stable across all duckdb 1.x releases including 1.3-1.5, so no cross-version undersizing exists. allocate_buffer uses numpy.int64 (8-byte elements, >=8-byte aligned), so every buffer is >= its C struct/handle size; none are undersized. This matches the review understanding note (architecture.md L105-124) which independently documents duckdb_result as 6 int64 = 48 bytes and the handles as single int64. No memory-safety defect from undersized buffers."
+}

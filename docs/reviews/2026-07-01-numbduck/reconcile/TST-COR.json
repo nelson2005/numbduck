@@ -1,0 +1,30 @@
+{
+  "unit": "TST-COR",
+  "results": [
+    {
+      "oldId": "TST-COR-1",
+      "class": "missed",
+      "newIds": [],
+      "justification": "Old-confirmed too-loose-assertion: welford_combine's merged-mean update is never asserted by any test, so a sign/precedence regression in the new_mean line would pass silently. Still present on the current tree and no current finding (new TST-COR-1/2 concern get_value_type/create_array_value; TST-cover-1..11 concern struct-size guard, multi-chunk, decimal, NULL validity, destroy checks, logical types, set_init, JIT errors, platform gaps, long strings) reports this welford mean coverage gap. The new TST-COR notes even assert the welford math is correct without raising the missing .mean assertion.",
+      "currentEvidence": "test/test_ducklib.py: welford_combine now at lines 3175-3192 (new_mean computed at 3187, stored to tgt.mean at 3190); welford_finalize (3195-3199) returns sqrt(m2/(count-1)), independent of mean; the only combine call sites are _compute_combined (3319-3327, returns only welford_finalize(sb)) and _welford_combine_impl (3251-3263, no downstream mean read). m2 merge (3188-3189) uses delta=src.mean-tgt.mean captured at 3186 before 3190 overwrites tgt.mean, so m2 is independent of new_mean correctness. No assertion reads .mean after a combine.",
+      "adopted": {
+        "id": "REC-TST-COR-1",
+        "severity": "low",
+        "confidence": "medium",
+        "title": "welford_combine's merged-mean arithmetic is never asserted (too loose)",
+        "file": "test/test_ducklib.py",
+        "line": 3187,
+        "description": "welford_combine computes the pooled mean at line 3187 (`new_mean = tgt.mean + delta * src.count / new_count`) and writes it to tgt.mean at 3190, but no test ever reads `.mean` after a combine. test_welford_numba_only._compute_combined (3319-3327) calls welford_combine(sa, sb) then returns only welford_finalize(sb), and welford_finalize (3195-3199) returns sqrt(m2/(count-1)) which depends solely on m2 and count. The m2 merge term (3188-3189) uses delta = src.mean - tgt.mean captured at 3186 BEFORE new_mean overwrites tgt.mean at 3190, so m2 is correct independent of new_mean. The UDAF combine callback path (_welford_combine_impl 3251-3263) likewise has no downstream mean assertion. Consequently a sign or operator-precedence regression on line 3187 would pass the entire suite silently.",
+        "impact": "A correctness regression in the parallel-merge pooled-mean update (Chan et al.) would not be caught by any assertion. The current code is correct, but the test does not guard it.",
+        "recommendation": "In test_welford_numba_only._compute_combined, also return the combined state's mean and assert it against the expected pooled mean (e.g. compare sb.mean to numpy.mean(xs) within tolerance), or add a dedicated assertion reading .mean after welford_combine."
+      }
+    },
+    {
+      "oldId": "TST-COR-2",
+      "class": "covered",
+      "newIds": ["TST-cover-11"],
+      "justification": "Same root cause: aux_read_inline_string (267-272) and the blob reader (778-782) decode string_t assuming the inlined layout only, and no test exercises a >12-byte (out-of-line) string/blob. New TST-cover-11 reports exactly this defect at the same lines, noting both the inline-only helper and the missing long-string coverage.",
+      "currentEvidence": "New review finding TST-cover-11 (test/test_ducklib.py:267) covers the inline-only string_t reader and the untested long/out-of-line string+blob path."
+    }
+  ]
+}

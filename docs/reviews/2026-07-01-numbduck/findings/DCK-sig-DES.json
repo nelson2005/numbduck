@@ -1,0 +1,45 @@
+{
+  "unit": "DCK-sig-DES",
+  "target": "ducklib signatures/enum/types",
+  "dimension": "DES",
+  "findings": [
+    {
+      "id": "DCK-sig-DES-1",
+      "severity": "medium",
+      "title": "Struct-by-value bind wrappers stranded at file end; wrapper/section grouping diverges from the signatures dict",
+      "category": "maintainability/organization",
+      "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+      "line": 1411,
+      "description": "The four struct-by-value bind wrappers duckdb_bind_hugeint (1411), duckdb_bind_uhugeint (1417), duckdb_bind_interval (1423) and duckdb_bind_decimal (1429) are defined at the very bottom of the file, after all scalar- and aggregate-function wrappers, whereas the other 18 duckdb_bind_* wrappers are grouped together at 288-411. Their signature-dict entries, by contrast, sit correctly with the rest of the bind_* group (bind_decimal:83, bind_hugeint:86, bind_interval:91, bind_uhugeint:97). This is a drift artifact from the migration of these three/four bindings off hand-rolled @intrinsic lowering onto plain @proxy + _call_lib_func (the stale CLAUDE.md 'Follow-ups'/'Struct-by-value helpers' text still describes them as bespoke intrinsics at ducklib.py:1525-1640, lines that no longer exist). The same split affects duckdb_scalar_function_get_extra_info/duckdb_scalar_function_set_error, whose sig entries (272-273) and wrappers (1399-1408) are separated from the rest of the scalar-function group (sigs 239-255, wrappers 1213-1312) by the entire aggregate block. More broadly the signatures dict is only loosely alphabetical (e.g. duckdb_connect:122 sits after the create_* run 110-121; duckdb_create_hugeint:131 precedes duckdb_create_float:132; duckdb_create_varint:153 precedes duckdb_create_varchar:154) and the wrapper-definition order (276+) does not follow the dict order at all. Because each binding is a manually paired (signature entry, wrapper, two name literals) tuple with no generator, a non-monotonic layout makes it error-prone to confirm the 193 sigs and 193 wrappers stay in sync and to locate/add an entry.",
+      "impact": "Higher chance of a future omission or mismatched pair going unnoticed on edits; readers cannot scan a single ordered block to verify coverage; the orphaned bind_* block reads as an accidental appendage rather than part of the bind group.",
+      "recommendation": "Move duckdb_bind_hugeint/uhugeint/interval/decimal up next to the other duckdb_bind_* wrappers, and move duckdb_scalar_function_get_extra_info/set_error into the scalar-function wrapper group. Adopt one deterministic order (strict alphabetical, or explicit labeled sections) for BOTH the signatures dict and the wrapper definitions so the two lists can be diffed against each other. This is pure reordering with no behavioral change (import-time registration order is irrelevant to a dict).",
+      "confidence": "high"
+    },
+    {
+      "id": "DCK-sig-DES-2",
+      "severity": "low",
+      "title": "Dead code: _is_win and its sole enabling import sys are unused",
+      "category": "dead-code",
+      "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+      "line": 14,
+      "description": "_is_win = sys.platform == 'win32' (line 14) is never referenced anywhere in the module (grep confirms only the definition), and import sys (line 1) exists solely to compute it. All platform/ABI branching now lives in numbox (abi._current_platform / call.py), so this Windows-detection flag is a leftover from before the ABI helpers were moved upstream. Because _is_win is a module-level name and sys is technically 'used' by line 14, flake8 flags neither (no F401 for sys, no F841 for a module global), so this dead code survives the lint gate silently.",
+      "impact": "Misleads readers into thinking ducklib still performs platform-specific dispatch; carries an obsolete assumption that could be miscited when adding a new struct binding.",
+      "recommendation": "Delete line 14 (_is_win) and line 1 (import sys).",
+      "confidence": "high"
+    },
+    {
+      "id": "DCK-sig-DES-3",
+      "severity": "low",
+      "title": "Two varint wrappers use a divergent, versioned docstring URL instead of the mandated stable form",
+      "category": "consistency/doc-drift",
+      "file": "/home/erik/projects/numbduck/numbduck/ducklib.py",
+      "line": 728,
+      "description": "duckdb_create_varint (728) and duckdb_get_varint (1053) document themselves with 'https://duckdb.org/docs/1.3/clients/c/api#duckdb_create_varint' (and #duckdb_get_varint) — a version-pinned '/docs/1.3/...' path with no '.html' — whereas every other one of the 193 wrappers, including the third proxy_if_available-gated wrapper duckdb_scalar_function_set_init (1287), uses 'https://duckdb.org/docs/stable/clients/c/api.html#name'. numbduck/CLAUDE.md explicitly mandates the stable '.html' form ('Docstring links must use https://duckdb.org/docs/stable/clients/c/api.html#func_name'), so these two lines violate the project's own documented convention. The inconsistency appears to be a hand-authoring slip when the version-gated varint bindings were added; the '/docs/1.3/' path is also a stale, pinned target more likely to rot than the 'stable' alias.",
+      "impact": "Doc-link inconsistency; a link-check pass keyed to the canonical format could miss/misreport these; readers may assume the differing URL implies a different (1.3-only) semantics when the wrapper is simply version-gated.",
+      "recommendation": "Change both docstrings to 'https://duckdb.org/docs/stable/clients/c/api.html#duckdb_create_varint' and '#duckdb_get_varint' to match the rest of the module and the CLAUDE.md rule.",
+      "confidence": "high"
+    }
+  ],
+  "notes": "Scope: ducklib.py enum/type-alias/signatures-dict organization only (DES). Verified programmatically that the signatures dict (193 keys), the @proxy wrapper defs (193), and the _call_lib_func body-literal names are fully consistent — no dead signature entries, no wrappers missing a signature, no body-literal/def-name mismatch; that class of drift is currently clean. The VARINT=BIGNUM=35 shared-value aliasing (61-62) with its explanatory comment, and the TIME_NS 1.5+ comment (66), are sound and appropriately documented; not flagged. proxy_if_available gating is applied to exactly the three genuinely version-variant symbols (create_varint, get_varint, scalar_function_set_init); no over/under-gating found. Findings are all low/medium maintainability items; no correctness defects in the sig/enum/type layer.",
+  "findings_count": 3
+}

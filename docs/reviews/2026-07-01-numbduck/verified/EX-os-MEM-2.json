@@ -1,0 +1,14 @@
+{
+  "findingId": "EX-os-MEM-2",
+  "verdict": "confirmed",
+  "correctedSeverity": "low",
+  "reasoning": "Empirically verified against the pinned duckdb runtime (1.5.4, within the numbduck pin duckdb>=1.3.2,<1.6) by calling the actual C API via ctypes (same shared lib numbduck/utils.py:find_duckdb_shared_lib locates): a zero-row query's FIRST call to duckdb_fetch_chunk returns NULL, not merely on a later exhausted call. This matches the project's own test/test_ducklib.py:212-219 (test_duckdb_fetch_chunk_exhausted), which only exercises the second-call-after-exhaustion case for a non-empty (3-row) result, so it does not cover the zero-row-on-first-call path that is at issue here. examples/online_scoring.py:123 assigns chunk_p = ducklib.duckdb_fetch_chunk(result_tup) with no check, and lines 125-128 immediately call ducklib.duckdb_data_chunk_get_vector(chunk_p, 0..3). ducklib.py's binding (ducklib.py:732-735, duckdb_data_chunk_get_vector) is a raw _call_lib_func wrapper with no null/validity check, consistent with numbduck's documented policy (CLAUDE.md 'Error Handling': bindings mirror the C API exactly, never inject checks) -- so no guard exists anywhere in the path, and a NULL chunk_p would be dereferenced inside the nogil njit region. Severity is correctly 'low': setup_features (online_scoring.py:72-79) populates the features table with id = range(N_FEATURES) (0..k-1) and setup_events (line 84) draws ids via rng.integers(0, k_features, ...), so every generated id is guaranteed to match a row and the path is provably unreachable with this example's own data -- it is a latent defect in the canonical pattern being taught, not a live bug in the shipped example. No mitigating contract, prior guard, or version-specific behavior refutes it; verdict CONFIRMED at the claimed low severity.",
+  "citations": [
+    "examples/online_scoring.py:123",
+    "examples/online_scoring.py:125-128",
+    "examples/online_scoring.py:72-79",
+    "examples/online_scoring.py:84",
+    "numbduck/ducklib.py:732-735",
+    "test/test_ducklib.py:212-219"
+  ]
+}

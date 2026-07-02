@@ -1,0 +1,33 @@
+{
+  "unit": "PBR-DES",
+  "target": "pybridge.py",
+  "dimension": "DES",
+  "findings": [
+    {
+      "id": "PBR-DES-1",
+      "severity": "medium",
+      "title": "Docstring overstates what the SELECT 1 step validates; no graceful failure path for the layout-drift it warns about",
+      "file": "numbduck/pybridge.py",
+      "line": 28,
+      "category": "docstring-accuracy / fragile-layout-assumption",
+      "description": "The docstring promises that the extracted pointer 'is validated by running SELECT 1 via the C API before it is returned' (lines 28-29) and that a RuntimeError is raised 'if the extracted pointer fails the validation query' (lines 49-51). The actual check is `rc = ducklib.duckdb_query(conn_ptr, query_p, result.ctypes.data)` followed by `if rc != DuckDBSuccess` (lines 67-72). This dramatically overstates the guarantee for the one failure mode the same docstring warns about (ABI/offset drift across duckdb 1.4/1.5, lines 31-34): if `+16`/`+32` drift and `conn_ptr` becomes a structurally-wrong (wild) pointer, `duckdb_query` dereferences garbage — undefined behavior / segfault — BEFORE any rc is produced, so the RuntimeError branch never runs. Conversely, when `conn_ptr` is a genuine live `Connection*`, `SELECT 1` essentially always returns DuckDBSuccess, so the RuntimeError branch is effectively dead. The step therefore confirms only 'an already-correct pointer works'; it provides no detection and no graceful failure for a drifted layout. The docstring reads as if the query is a safety net against the offset assumptions, but it is not.",
+      "impact": "A maintainer upgrading duckdb (pin allows >=1.3.2,<1.6) may trust the 'validated before returned' language and the documented RuntimeError as protection against layout change, when in reality the drift scenario is uncatchable UB. Misleads about the actual robustness contract.",
+      "recommendation": "Reword the docstring to state precisely what the query proves: that a *plausibly-correct* pointer resolves to a live connection that can execute a trivial query — it is a liveness smoke-test, not validation of the ABI offsets, and cannot catch a wrong-layout (wild) pointer, which is undefined behavior. Move the offset-drift warning next to this caveat.",
+      "confidence": "high"
+    },
+    {
+      "id": "PBR-DES-2",
+      "severity": "medium",
+      "title": "Hard-coded ABI offsets with no named constants, no duckdb version guard, and no programmatic re-verify mechanism",
+      "file": "numbduck/pybridge.py",
+      "line": 59,
+      "category": "fragile-version-assumption / maintainability",
+      "description": "The two load-bearing ABI offsets are inline magic numbers: `ctypes.c_void_p.from_address(py_obj_addr + 16)` (line 59) and `ctypes.c_void_p.from_address(cpp_obj_p + 32)` (line 62). The docstring validates them only against 'duckdb 1.3.2 / Linux x86-64 / libstdc++' and instructs a human to 'Re-verify offsets when upgrading duckdb' (lines 31-34), but (a) the package pins `duckdb>=1.3.2,<1.6`, so a 1.4 or 1.5 wheel installs and runs the identical hard-coded offsets with zero runtime check; (b) there are no named module-level constants (e.g. CPYTHON_OBJ_HEADER = 16, DUCKDBPY_CONNECTION_OFFSET = 32) tying the numbers to their meaning — the `+16` in particular has no explanation in the code (the CPython 16-byte object header rationale exists only in the review note, not the source); and (c) 'Re-verify offsets when upgrading duckdb' is a manual instruction with no supporting mechanism — no `duckdb.__version__` guard that fails fast or warns on an untested version, and no test that would flag drift. This is precisely the fragility-management gap the review focus asks about: no version guard, no named offset constants, no automated re-verify, and (per PBR-DES-1) no graceful failure path.",
+      "impact": "On any in-pin-range duckdb release whose pybind11 holder layout or DuckDBPyConnection field order differs, the code silently reads a wrong pointer and (best case) fails an opaque RuntimeError or (worst case) segfaults, with nothing directing the maintainer to the offsets. The bare integers also make the code hard to audit and to correct.",
+      "recommendation": "Promote the offsets to named module-level constants with a one-line rationale each (CPython object header = 16; unique_ptr<Connection> at +32). Add a fail-fast/warn guard that checks `duckdb.__version__` against a known-verified set (or at least the pinned range) and raises a clear, actionable error naming the offsets to re-verify when an untested version is detected — turning silent UB into a diagnosable failure and giving the 're-verify' instruction teeth.",
+      "confidence": "high"
+    }
+  ],
+  "notes": "Scope: DES/fragility of extract_connection_ptr. The code is correct on the verified target (duckdb 1.3.2 / Linux x86-64 / libstdc++). Both findings are maintainability/fragility defects, not correctness bugs on that target. PBR-DES-1 = docstring overstates the SELECT 1 guarantee and there is no graceful failure path for the drift it warns about. PBR-DES-2 = no version guard, no named offset constants, no programmatic re-verify. These two compound: the missing guard (DES-2) is what would otherwise make the weak validation (DES-1) tolerable. The duckdb_result 48-byte buffer sizing lives in duckdb_utils.py (out of this unit's scope) and is covered by the sibling review note.",
+  "confidence": "high"
+}

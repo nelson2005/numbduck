@@ -1,0 +1,23 @@
+{
+  "unit": "DBU-MEM",
+  "results": [
+    {
+      "oldId": "DBU-MEM-1",
+      "class": "missed",
+      "newIds": [],
+      "justification": "Old DBU-MEM-1 is the latent bare-ndarray .ctypes.data lifetime footgun: allocators hand out an owned numpy array with no coupling to the DuckDB handle/struct written into it, so the natural one-liner `create_duckdb_*().ctypes.data` dangles. The CURRENT review's DBU-MEM-1 is a DIFFERENT root cause (the hard-coded 48-byte result buffer vs. the duckdb>=1.3.2,<1.6 struct-size drift), not the lifetime hazard. The current review's notes explicitly discuss this dangling-pointer hazard but deliberately chose NOT to file it as a finding (deeming it a caller responsibility) — a note is not a finding, so it is not covered. The @proxy migration did not touch duckdb_utils.py, so the hazard is unchanged and still present.",
+      "currentEvidence": "numbduck/duckdb_utils.py:7-51 — allocate_buffer (:8) still returns `numpy.zeros(sz, dtype=numpy.int64)` and every create_duckdb_* (:13,19,25,31,37,43,49) returns a bare ndarray via allocate_buffer with no lifetime coupling; identical shape to the pre-@proxy tree. Callers still bind to a named local first (pybridge.py:65 'result', online_scoring.py:153 'stmt'), so no live use-after-free exists — the hazard remains latent, exactly as in the old finding.",
+      "adopted": {
+        "id": "REC-DBU-MEM-1",
+        "severity": "low",
+        "confidence": "low",
+        "title": "Allocators hand out a bare ndarray whose .ctypes.data is a dangling-pointer footgun if the array is not bound to a live name",
+        "file": "numbduck/duckdb_utils.py",
+        "line": 8,
+        "description": "Every allocator returns a plain owned numpy.int64 array (allocate_buffer at duckdb_utils.py:8, via create_duckdb_* at lines 13/19/25/31/37/43/49). The buffer's lifetime is entirely caller-managed and there is no coupling between the buffer object and the handle/struct DuckDB writes into it. The whole out-param protocol depends on the caller keeping the *array* alive (not just the extracted handle int) for as long as DuckDB needs that memory: for single-handle buffers, until the matching duckdb_destroy_*(buf.ctypes.data); for the 48-byte duckdb_result buffer (create_duckdb_result, line 37), until duckdb_destroy_result reads internal_data out of the live struct. Because the allocator yields a bare ndarray, the idiomatic numpy footgun `p = create_duckdb_result().ctypes.data` (take .ctypes.data of an unbound temporary) leaves `p` dangling the instant the temporary is collected, and DuckDB's subsequent execute/destroy writes/reads freed heap. This is a real property of the API and is unchanged by the @proxy migration (duckdb_utils.py was not touched). It is not currently triggered — every caller binds the array to a named local first (e.g. pybridge.py:65 'result', online_scoring.py:153 'stmt' kept alive across the JIT loop; test_ducklib.py create_* uses). So this is a latent hazard the buffer API invites, not a present defect.",
+        "impact": "If any future caller (or example/doc copied by a user) writes the natural-looking `create_duckdb_result().ctypes.data` / `create_duckdb_*().ctypes.data` one-liner, the array is GC'd immediately and DuckDB writes the result struct (or a handle) into freed memory — heap corruption / use-after-free, silent and intermittent. The 48-byte result buffer is the highest-stakes case because DuckDB stores the whole struct there and destroy dereferences it.",
+        "recommendation": "Document on the allocators (duckdb_utils.py:7-51) that the returned array must outlive all DuckDB use of its .ctypes.data — the buffer, not the extracted handle int, is what must stay alive — or have callers/helpers take the buffer and its pointer in two explicit steps. No code change is strictly required since no caller is currently affected; treat as an API-safety note."
+      }
+    }
+  ]
+}
