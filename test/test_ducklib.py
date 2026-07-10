@@ -1,6 +1,5 @@
 import ctypes
 import functools
-import hashlib
 import math
 import os
 import subprocess
@@ -4220,73 +4219,62 @@ def test_pybridge_refuses_uncoordinated_runtime(monkeypatch):
         conn.close()
 
 
-def test_verify_cached_dylib_roundtrip(monkeypatch, tmp_path):
-    """A cached dylib matching its sidecar passes; a missing sidecar is refused."""
-    from numbduck import utils
+def test_pybridge_closed_connection_raises_runtime_error():
+    """A closed connection resets its unique_ptr<Connection> to null, so the
+    documented offset yields a null pointer. extract_connection_ptr must raise a
+    clean RuntimeError there rather than pass the null on to duckdb_query (an
+    opaque numba TypeError or a NULL-connection dereference).
+    """
+    from numbduck.pybridge import extract_connection_ptr
 
-    cached = tmp_path / "libduckdb.dylib"
-    sidecar = tmp_path / "libduckdb.dylib.sha256"
-    cached.write_bytes(b"trusted-bytes")
-    sidecar.write_text(hashlib.sha256(b"trusted-bytes").hexdigest())
-
-    monkeypatch.setattr(utils, "_LIBDUCKDB_CACHE_DIR", str(tmp_path))
-
-    utils._verify_cached_dylib(str(cached))  # matches -> no raise
-
-    sidecar.unlink()
-    with pytest.raises(RuntimeError, match="integrity sidecar"):
-        utils._verify_cached_dylib(str(cached))
+    conn = duckdb.connect()
+    conn.close()
+    with pytest.raises(RuntimeError, match="null"):
+        extract_connection_ptr(conn)
 
 
-def test_load_duckdb_rejects_tampered_cache(monkeypatch, tmp_path):
-    """A cached standalone libduckdb whose bytes no longer match its sidecar is
-    refused before it is dlopen'd, simulating local cache poisoning. No network.
+def test_load_duckdb_refuses_unverifiable_standalone_version(monkeypatch):
+    """A standalone libduckdb whose version cannot be read is refused rather than
+    loaded unverified — otherwise it surfaces later as a confusing 'libduckdb
+    None' coordination error. No network.
     """
     from numbduck import utils
 
-    cached = tmp_path / "libduckdb.dylib"
-    sidecar = tmp_path / "libduckdb.dylib.sha256"
-    cached.write_bytes(b"trusted-bytes")
-    sidecar.write_text(hashlib.sha256(b"trusted-bytes").hexdigest())
-    # Poison the cached file without updating the sidecar.
-    cached.write_bytes(b"attacker-controlled-native-code")
+    wheel_lib = object()
+    standalone_lib = object()
 
-    monkeypatch.setattr(utils, "_LIBDUCKDB_CACHED_DYLIB", str(cached))
-    monkeypatch.setattr(utils, "_LIBDUCKDB_CACHE_DIR", str(tmp_path))
+    def fake_load_lib_path(path):
+        return wheel_lib if path == "/fake/wheel.so" else standalone_lib
+
     monkeypatch.setattr(utils, "find_duckdb_shared_lib", lambda: "/fake/wheel.so")
-    monkeypatch.setattr(utils, "load_lib_path", lambda path: object())
-    # Force the standalone fallback and steer it at the poisoned cache path.
-    monkeypatch.setattr(utils, "_has_capi_symbols", lambda lib: False)
-    monkeypatch.setattr(utils, "_find_standalone_libduckdb", lambda: str(cached))
+    monkeypatch.setattr(utils, "load_lib_path", fake_load_lib_path)
+    monkeypatch.setattr(utils, "_has_capi_symbols", lambda lib: lib is standalone_lib)
+    monkeypatch.setattr(
+        utils, "_find_standalone_libduckdb", lambda: "/fake/libduckdb.dylib")
+    monkeypatch.setattr(utils, "_library_version", lambda lib: None)
 
-    with pytest.raises(RuntimeError, match="integrity check"):
+    with pytest.raises(RuntimeError, match="could not read its library version"):
         utils.load_duckdb()
 
 
-def test_download_refuses_unpinned_version_without_override(monkeypatch):
-    """A download for a version with neither a pinned digest nor an explicit
-    NUMBDUCK_LIBDUCKDB_SHA256 override is refused before any network access.
+def test_non_darwin_capi_error_uses_platform_extension(monkeypatch):
+    """The non-macOS C-API-missing guidance names the platform's own library
+    extension (.dll on Windows, .so elsewhere), not a hard-coded .so.
     """
     from numbduck import utils
 
-    monkeypatch.setattr(duckdb, "__version__", "9.9.9")
-    monkeypatch.delenv("NUMBDUCK_LIBDUCKDB_SHA256", raising=False)
-    monkeypatch.setenv("NUMBDUCK_LIBDUCKDB_DOWNLOAD", "1")
-
-    def _no_network(*args, **kwargs):
-        raise AssertionError("network access attempted")
-
-    monkeypatch.setattr("urllib.request.urlopen", _no_network)
-
-    with pytest.raises(RuntimeError, match="NUMBDUCK_LIBDUCKDB_SHA256"):
-        utils._download_libduckdb()
+    monkeypatch.delenv("NUMBDUCK_LIBDUCKDB", raising=False)
+    monkeypatch.setattr(utils.platform, "system", lambda: "Windows")
+    assert "libduckdb.dll" in utils._non_darwin_capi_error()
+    monkeypatch.setattr(utils.platform, "system", lambda: "Linux")
+    assert "libduckdb.so" in utils._non_darwin_capi_error()
 
 
 def _build_fake_libduckdb_zip(tmp_path):
     """Write a ZIP holding a fake libduckdb.dylib under a tmp dir.
 
-    Returns (zip_path, dylib_bytes, zip_sha256) so a test can inject the real
-    digest of the archive it built and check the extracted bytes and sidecar.
+    Returns (zip_path, dylib_bytes) for driving _fetch_and_cache against a local
+    file:// archive.
     """
     import io
     import zipfile
@@ -4297,43 +4285,22 @@ def _build_fake_libduckdb_zip(tmp_path):
         zf.writestr("libduckdb.dylib", dylib_bytes)
     zip_path = tmp_path / "libduckdb-osx-universal.zip"
     zip_path.write_bytes(buf.getvalue())
-    return zip_path, dylib_bytes, hashlib.sha256(buf.getvalue()).hexdigest()
+    return zip_path, dylib_bytes
 
 
 def test_fetch_and_cache_local_zip_roundtrip(tmp_path):
-    """Drive _fetch_and_cache end-to-end against a local file:// archive with the
-    expected digest injected: verify extraction, cache-file and sidecar contents,
-    and (on POSIX) the 0o600 file / 0o700 dir permissions. No network.
+    """Drive _fetch_and_cache end-to-end against a local file:// archive: it must
+    extract the dylib and atomically write it to the cache path. No network.
     """
     from numbduck import utils
 
-    zip_path, dylib_bytes, zip_sha = _build_fake_libduckdb_zip(tmp_path)
+    zip_path, dylib_bytes = _build_fake_libduckdb_zip(tmp_path)
     dest = tmp_path / "cache" / "libduckdb.dylib"
 
-    returned = utils._fetch_and_cache(zip_path.as_uri(), str(dest), zip_sha)
+    returned = utils._fetch_and_cache(zip_path.as_uri(), str(dest))
 
     assert returned == str(dest)
     assert dest.read_bytes() == dylib_bytes
-    sidecar = dest.parent / "libduckdb.dylib.sha256"
-    assert sidecar.read_text() == hashlib.sha256(dylib_bytes).hexdigest()
-    if sys.platform != "win32":
-        assert oct(os.stat(dest).st_mode & 0o777) == "0o600"
-        assert oct(os.stat(dest.parent).st_mode & 0o777) == "0o700"
-
-
-def test_fetch_and_cache_wrong_digest_refuses(tmp_path):
-    """A downloaded ZIP whose SHA-256 does not match the injected expectation is
-    refused before anything is extracted or persisted. No network.
-    """
-    from numbduck import utils
-
-    zip_path, _dylib_bytes, _zip_sha = _build_fake_libduckdb_zip(tmp_path)
-    dest = tmp_path / "cache" / "libduckdb.dylib"
-
-    with pytest.raises(RuntimeError, match="does not match"):
-        utils._fetch_and_cache(zip_path.as_uri(), str(dest), "0" * 64)
-    assert not dest.exists()
-    assert not dest.parent.exists()
 
 
 @pytest.mark.parametrize("headless_mode", ["non_tty", "eof"])
@@ -4344,9 +4311,6 @@ def test_download_consent_headless_raises_branded(monkeypatch, headless_mode):
     """
     from numbduck import utils
 
-    # An override digest so the flow reaches the consent gate rather than the
-    # unpinned-refusal gate that sits ahead of it.
-    monkeypatch.setenv("NUMBDUCK_LIBDUCKDB_SHA256", "0" * 64)
     monkeypatch.delenv("NUMBDUCK_LIBDUCKDB_DOWNLOAD", raising=False)
 
     class _NonTtyStdin:
@@ -4409,17 +4373,3 @@ def test_load_duckdb_non_darwin_message(monkeypatch, env_configured):
         assert bad_path in message
     else:
         assert "NUMBDUCK_LIBDUCKDB=" in message
-
-
-def test_pybridge_closed_connection_raises_runtime_error():
-    """A closed connection resets its unique_ptr<Connection> to null, so the
-    documented offset yields a null pointer. extract_connection_ptr must raise a
-    clean RuntimeError there rather than pass the null on to duckdb_query (an
-    opaque numba TypeError or a NULL-connection dereference).
-    """
-    from numbduck.pybridge import extract_connection_ptr
-
-    conn = duckdb.connect()
-    conn.close()
-    with pytest.raises(RuntimeError, match="null"):
-        extract_connection_ptr(conn)

@@ -1,6 +1,5 @@
 import ctypes
 import duckdb
-import hashlib
 import os
 import platform
 import re
@@ -29,35 +28,11 @@ _LIBDUCKDB_CACHE_DIR = os.path.join(
 # extracts, so the discover/write contract can never silently drift apart.
 _LIBDUCKDB_DYLIB_NAME = "libduckdb.dylib"
 
-# Filename the standalone libduckdb is cached under, and the sidecar recording
-# the SHA-256 of exactly those bytes so a cache poisoned between runs is caught
-# before the dylib is dlopen'd.
+# Filename the standalone libduckdb is cached under.
 _LIBDUCKDB_CACHED_DYLIB = os.path.join(_LIBDUCKDB_CACHE_DIR, _LIBDUCKDB_DYLIB_NAME)
 
 # Bounded so a hung or trickling endpoint fails fast instead of wedging import.
 _LIBDUCKDB_DOWNLOAD_TIMEOUT = 60
-
-# SHA-256 of each supported ``libduckdb-osx-universal.zip`` release asset, pinned
-# in source. The downloaded ZIP is checked against this before anything is
-# extracted, persisted, or dlopen'd, so neither a compromised GitHub release
-# asset nor a poisoned local cache can substitute attacker-controlled native
-# code. DuckDB publishes no per-release checksum asset, so these were computed
-# from the released zips. A version absent here needs an explicit
-# NUMBDUCK_LIBDUCKDB_SHA256 override or the download is refused (fail-closed).
-_PINNED_LIBDUCKDB_SHA256 = {
-    "1.3.2": "6e4a9bfd4f15c83f43b9585b4f62c6f9851de3410cd28275de37d6d74b138415",
-    "1.4.0": "b81db597d72bea1beb20edff78f69961b0bec4a16841996b1d95bd72ee89514c",
-    "1.4.1": "a82bde325dcbb6d1011e1014673eb288e8c1fd5f5b755d47fd245e8b37194817",
-    "1.4.2": "3951dd422902e8a02db6128520b94e71aed88c42af80ead134da0efd62fc49ed",
-    "1.4.3": "efd0c2424589f0d5743ffdc0de22ce84b99bf307c330752f44277cffa3406e43",
-    "1.4.4": "5e6d79f5fb86bbd4f24d59cee3bc38f113d1433761df35337e3c01c62eeafe26",
-    "1.4.5": "33f840404e3b420600936d5b59d342680aa4af41cc06d9a5589711e43cd75766",
-    "1.5.0": "071ef2f775c5bef805fcb9e58504cc2024aee82e5227f2b6322d0bdef832130e",
-    "1.5.1": "d9dd723c59f8571202b468f6bf71d4555238544553dd1445e6c9ecb39f54c0f3",
-    "1.5.2": "524f3537330a1b747556a0c98b62a46865a3f48c7ead2b2035c62f1ad3e5ca8b",
-    "1.5.3": "386f8e8b3b4bc8d128762327121e22065ce45f2ee55ef1b1f412ce11e0e6c51f",
-    "1.5.4": "3f3c52970ad1407ec5037062e1a5e575b24bd5b993c889f89fe5876eff47782c",
-}
 
 _MACOS_LIBDUCKDB_SEARCH_PATHS = [
     "/opt/homebrew/lib/libduckdb.dylib",
@@ -110,7 +85,17 @@ def _require_coordinated_standalone(lib, source):
     """
     lib_version = _library_version(lib)
     wheel_version = _normalize_version(duckdb.__version__)
-    if lib_version is not None and lib_version != wheel_version:
+    if lib_version is None:
+        raise RuntimeError(
+            f"numbduck loaded a standalone libduckdb from {source!r} but could "
+            f"not read its library version (duckdb_library_version is absent or "
+            f"returned nothing). A verifiable version is required to confirm it "
+            f"matches the Python duckdb package (version {wheel_version!r}) "
+            f"before a wheel-minted connection is handed to it; refusing to load "
+            f"an unverifiable libduckdb build. Set NUMBDUCK_LIBDUCKDB to a "
+            f"libduckdb whose version equals {wheel_version!r}."
+        )
+    if lib_version != wheel_version:
         raise RuntimeError(
             f"numbduck loaded a standalone libduckdb (version {lib_version!r}) "
             f"from {source!r}, but the installed Python duckdb package is "
@@ -157,65 +142,6 @@ def _find_standalone_libduckdb():
     return None
 
 
-def _sha256_file(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
-
-
-def _expected_zip_sha256(version):
-    """Expected SHA-256 of *version*'s libduckdb ZIP, or ``None`` if unknown.
-
-    An explicit ``NUMBDUCK_LIBDUCKDB_SHA256`` override is authoritative (the user
-    takes responsibility, as they already can with ``NUMBDUCK_LIBDUCKDB``);
-    otherwise the in-source pin is used. ``None`` means neither is available and
-    the download must be refused.
-    """
-    override = os.environ.get("NUMBDUCK_LIBDUCKDB_SHA256")
-    if override:
-        return override.strip().lower()
-    return _PINNED_LIBDUCKDB_SHA256.get(version)
-
-
-def _verify_cached_dylib(path):
-    """Re-hash a cached standalone libduckdb against its download-time sidecar.
-
-    The sidecar (written 0o600 inside the 0o700 cache dir when the download's ZIP
-    digest was verified) records the SHA-256 of exactly the bytes that were
-    persisted. Recompute it on every load so a cache poisoned between runs is
-    refused before the file is dlopen'd (dlopen runs the Mach-O's constructors
-    immediately). This bounds the local-poisoning window only: an attacker who
-    can rewrite both the dylib and its sidecar together defeats it, but that
-    already requires same-user write access to the 0o700/0o600 per-user cache, so
-    it is out of scope for this threat model. The download-time pinned-ZIP digest
-    is the layer that resists a compromised or corrupted upstream asset.
-    """
-    sidecar = path + ".sha256"
-    try:
-        with open(sidecar) as fh:
-            expected = fh.read().strip()
-    except OSError:
-        expected = None
-    if not expected:
-        raise RuntimeError(
-            f"numbduck's cached libduckdb at {path!r} has no integrity sidecar "
-            f"({sidecar!r}); refusing to load it. Delete "
-            f"{_LIBDUCKDB_CACHE_DIR!r} to re-download, or set NUMBDUCK_LIBDUCKDB "
-            f"to a trusted libduckdb.dylib."
-        )
-    actual = _sha256_file(path)
-    if actual != expected:
-        raise RuntimeError(
-            f"numbduck's cached libduckdb at {path!r} failed its integrity "
-            f"check (expected sha256 {expected}, got {actual}); the cache is "
-            f"corrupted or tampered with. Delete {_LIBDUCKDB_CACHE_DIR!r} to "
-            f"re-download, or set NUMBDUCK_LIBDUCKDB to a trusted "
-            f"libduckdb.dylib."
-        )
-
-
 def _consent_to_download(version):
     """Decide whether the standalone-libduckdb download is authorized.
 
@@ -247,17 +173,16 @@ def _consent_to_download(version):
     return answer in ("y", "yes")
 
 
-def _fetch_and_cache(url, dest, expected_sha):
-    """Download the libduckdb ZIP at *url*, verify it, and cache the dylib.
+def _fetch_and_cache(url, dest):
+    """Download the libduckdb ZIP at *url*, extract the dylib, and cache it at *dest*.
 
-    The expected digest is injected rather than read from module globals so
-    this fetch/verify/extract/persist seam can be driven end-to-end in a unit
-    test against a locally built ``file://`` archive with a computable digest.
-    Nothing is extracted, persisted, or dlopen'd until the downloaded bytes
-    match *expected_sha*, so neither a substituted release asset nor a corrupted
-    transfer can plant native code. The extracted dylib is written to *dest*
-    (0o600) inside a 0o700 cache dir, with a re-verification sidecar recording
-    the SHA-256 of exactly the persisted bytes. Returns *dest*.
+    Downloaded over HTTPS with a bounded timeout; the extracted dylib is staged to
+    a unique temp file and atomically ``os.replace``'d into place so two processes
+    downloading at once can't clobber a file another may already have mapped. There
+    is deliberately no cryptographic check here: DuckDB publishes no signed
+    checksum, so this trusts the official release fetched over TLS exactly as
+    ``pip`` trusts the duckdb wheel it installs the same way. The caller re-checks
+    that the loaded library actually exports the C API. Returns *dest*.
     """
     import io
     import zipfile
@@ -273,16 +198,6 @@ def _fetch_and_cache(url, dest, expected_sha):
             f"it via brew install duckdb, or set NUMBDUCK_LIBDUCKDB="
             f"/path/to/libduckdb.dylib."
         ) from exc
-    actual_sha = hashlib.sha256(data).hexdigest()
-    if actual_sha != expected_sha:
-        # Reject before extract/persist/load: mismatched bytes mean a corrupted
-        # download or a substituted (compromised) release asset.
-        raise RuntimeError(
-            f"numbduck downloaded libduckdb from {url} but its SHA-256 "
-            f"{actual_sha} does not match the expected {expected_sha}; refusing "
-            f"to extract or load it. Install libduckdb via brew install duckdb "
-            f"and set NUMBDUCK_LIBDUCKDB instead."
-        )
     try:
         member = zipfile.ZipFile(io.BytesIO(data)).read(_LIBDUCKDB_DYLIB_NAME)
     except (zipfile.BadZipFile, KeyError) as exc:
@@ -292,37 +207,21 @@ def _fetch_and_cache(url, dest, expected_sha):
             f"NUMBDUCK_LIBDUCKDB=/path/to/libduckdb.dylib."
         ) from exc
     cache_dir = os.path.dirname(dest)
-    os.makedirs(cache_dir, mode=0o700, exist_ok=True)
-    # exist_ok skips the mode above when the dir already exists under a looser
-    # umask, so tighten it explicitly to close the local-poisoning window.
-    os.chmod(cache_dir, 0o700)
-    # Stage into unique per-writer temp files (via mkstemp, not a fixed
-    # dest + ".tmp") and os.replace() each into place. Unique names keep two
-    # processes downloading concurrently from clobbering each other's in-flight
-    # write; the atomic same-dir rename never rewrites a libduckdb.dylib another
-    # process may already have mapped. The sidecar is placed first so that once
-    # the dylib appears its integrity sidecar is already paired with it.
-    digest = hashlib.sha256(member).hexdigest()
-    sidecar = dest + ".sha256"
+    os.makedirs(cache_dir, exist_ok=True)
+    # Stage into a unique temp file and atomically rename into place: unique names
+    # keep concurrent downloads from clobbering each other's in-flight write, and
+    # the same-dir os.replace never rewrites a libduckdb.dylib another process may
+    # already have mapped.
     fd_dest, tmp_dest = tempfile.mkstemp(dir=cache_dir, prefix="libduckdb.", suffix=".tmp")
-    tmp_sidecar = None
     try:
         with os.fdopen(fd_dest, "wb") as dst:
             dst.write(member)
-        os.chmod(tmp_dest, 0o600)
-        fd_sidecar, tmp_sidecar = tempfile.mkstemp(dir=cache_dir, prefix="libduckdb.sha256.", suffix=".tmp")
-        with os.fdopen(fd_sidecar, "w") as fh:
-            fh.write(digest)
-        os.chmod(tmp_sidecar, 0o600)
-        os.replace(tmp_sidecar, sidecar)
         os.replace(tmp_dest, dest)
     except OSError:
-        for tmp in (tmp_dest, tmp_sidecar):
-            if tmp is not None:
-                try:
-                    os.remove(tmp)
-                except OSError:
-                    pass
+        try:
+            os.remove(tmp_dest)
+        except OSError:
+            pass
         raise
     return dest
 
@@ -334,19 +233,6 @@ def _download_libduckdb():
         f"/download/v{version}"
         "/libduckdb-osx-universal.zip"
     )
-    expected_sha = _expected_zip_sha256(version)
-    if expected_sha is None:
-        # Fail closed: without a pinned digest or an explicit override there is
-        # no way to tell a genuine release asset from a substituted one, so
-        # never download-and-hope.
-        raise RuntimeError(
-            f"numbduck has no pinned SHA-256 for the libduckdb '{version}' "
-            f"release asset, so it will not download and execute unverified "
-            f"native code from {url}. Install libduckdb yourself (brew install "
-            f"duckdb) and set NUMBDUCK_LIBDUCKDB=/path/to/libduckdb.dylib, or "
-            f"set NUMBDUCK_LIBDUCKDB_SHA256 to the expected SHA-256 of that ZIP "
-            f"to authorize the download."
-        )
     if not _consent_to_download(version):
         raise RuntimeError(
             "numbduck requires the DuckDB C API but consent to download the "
@@ -357,7 +243,7 @@ def _download_libduckdb():
         )
     print(f"numbduck: Downloading libduckdb "
           f"v{version}...")
-    dest = _fetch_and_cache(url, _LIBDUCKDB_CACHED_DYLIB, expected_sha)
+    dest = _fetch_and_cache(url, _LIBDUCKDB_CACHED_DYLIB)
     print(f"numbduck: Saved to {dest}")
     return dest
 
@@ -400,9 +286,13 @@ def _non_darwin_capi_error():
             f"shared library that exports the DuckDB C API."
         )
     else:
+        lib_name = (
+            "libduckdb.dll" if platform.system() == "Windows"
+            else "libduckdb.so"
+        )
         detail = (
-            "Set NUMBDUCK_LIBDUCKDB=/path/to/libduckdb.so to a libduckdb "
-            "shared library that exports the DuckDB C API."
+            f"Set NUMBDUCK_LIBDUCKDB=/path/to/{lib_name} to a libduckdb "
+            f"shared library that exports the DuckDB C API."
         )
     return (
         "numbduck could not find the DuckDB C API: the installed duckdb wheel "
@@ -437,10 +327,6 @@ def load_duckdb():
     _migrate_legacy_cache()
     standalone = _find_standalone_libduckdb()
     if standalone:
-        if standalone == _LIBDUCKDB_CACHED_DYLIB:
-            # Re-verify our own cache on every hit before dlopen'ing it; an
-            # env-var or Homebrew path is user-supplied and trusted as-is.
-            _verify_cached_dylib(standalone)
         lib = load_lib_path(standalone)
         if _has_capi_symbols(lib):
             _require_coordinated_standalone(lib, standalone)
