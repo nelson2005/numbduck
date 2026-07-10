@@ -1,81 +1,69 @@
 {
   "campaign": "numbduck Stage 2 — loader/supply-chain upstream contribution",
-  "source": "Ported from the deep-review campaign branch review/numbduck-2026-06-29 (fork PR #50). utils.py/pybridge.py on origin/main are pristine upstream (Stage 1 did not touch them), so each task's code is snapped from its campaign commit; final utils.py + pybridge.py verified byte-identical to the CI-green campaign tip. Tests re-synced to the tip after the review-hardening fold.",
+  "source": "Ported from the deep-review campaign branch review/numbduck-2026-06-29 (fork PR #50). utils.py/pybridge.py on origin/main were pristine upstream (Stage 1 did not touch them), so each task's code was snapped from its campaign commit. NOTE: T9's SHA-256 download pinning was later REMOVED as security theater (see T9).",
   "featureBranch": "feat/upstream-stage2 (base origin/main)",
   "upstreamPrBranch": "upstream-pr/stage2 (base upstream/main) — built later by cherry-pick, per-PR approval required",
-  "order": "T2 -> T9 -> T10 -> T11 -> review-hardening -> pin-expansion -> test-sync",
+  "order": "T2 -> T9(ported then REMOVED) -> T10 -> T11 -> review-hardening -> pin-expansion(REMOVED) -> fork review fixes + docstring trim",
   "lastUpdated": "2026-07-10",
-  "gate": "flake8 gating (E9,F63,F7,F82) clean; my Stage-2 additions introduce zero new max-line-length=120 violations; full cache-cleared suite 158 passed / 1 skipped. doc-codeblock + lychee are no-ops (no .md/.rst/link surface changed).",
+  "gate": "flake8 gating (E9,F63,F7,F82) clean; zero new max-line-length=120 violations from Stage-2 code; full cache-cleared suite 156 passed / 1 skipped (was 158 before the pinning tests were removed).",
   "tasks": [
     {
       "id": "T2",
       "title": "Dual-runtime coordination guard",
-      "detail": "load_duckdb compares a standalone libduckdb duckdb_library_version() vs the wheel version and refuses on mismatch; libraries_coordinated() + extract_connection_ptr refuse an uncoordinated runtime. utils.py + pybridge.py.",
+      "detail": "load_duckdb compares a standalone libduckdb duckdb_library_version() vs the wheel version and refuses on mismatch (or when unreadable); libraries_coordinated() + extract_connection_ptr refuse an uncoordinated runtime.",
       "campaignCommit": "f714b7f",
-      "tests": ["test_load_duckdb_refuses_version_mismatch", "test_pybridge_refuses_uncoordinated_runtime"],
       "model": "main-context (deterministic port)",
       "status": "completed",
-      "commit": "97787a9"
+      "commit": "97787a9 (+ d9558dd: also refuse an unreadable standalone version)"
     },
     {
       "id": "T9",
-      "title": "Fail-closed SHA-256 download integrity",
-      "detail": "Pin per-version SHA-256 of libduckdb-osx-universal.zip; verify downloaded ZIP + cached dylib (sidecar) fail-closed; 0700/0600 perms; bounded timeout; symbol re-check. utils.py.",
+      "title": "Fail-closed SHA-256 download integrity — REMOVED as security theater",
+      "detail": "Ported in 35c0360 + pin dict expanded in 120706e, then REMOVED wholesale in d9558dd on user direction. The pins were digests we computed from the same GitHub release zips they vouched for = trust-on-first-use, no root of trust (DuckDB ships no signed checksum). Same trust pip already extends to the duckdb wheel; the pin bought no real defense while fail-closing macOS users on every new duckdb release until a human added a pin. Removed the pin table, NUMBDUCK_LIBDUCKDB_SHA256 override, _expected_zip_sha256, _verify_cached_dylib, sidecar, _sha256_file, and the fail-closed refusal, plus their tests. KEPT (genuine, not theater): bounded urlopen timeout, post-download C-API symbol re-check, atomic os.replace cache write via unique temp file, EOF/non-TTY-safe consent.",
       "campaignCommit": "ba2820a",
-      "tests": ["test_verify_cached_dylib_roundtrip", "test_load_duckdb_rejects_tampered_cache", "test_download_refuses_unpinned_version_without_override"],
-      "model": "main-context (deterministic port)",
-      "status": "completed",
-      "commit": "35c0360"
+      "model": "main-context",
+      "status": "removed",
+      "commit": "35c0360 (add) -> d9558dd (remove)"
     },
     {
       "id": "T10",
       "title": "Loader refactor for testability",
-      "detail": "Split _download_libduckdb into _consent_to_download + _fetch_and_cache(url,dest,sha) drivable via file://; EOF/non-TTY-safe consent; side-effect-free locator; end-anchored regexes; explicit legacy-cache migration. utils.py.",
+      "detail": "Split _download_libduckdb into _consent_to_download + _fetch_and_cache(url,dest) drivable via file://; EOF/non-TTY-safe consent; side-effect-free locator; end-anchored regexes; explicit legacy-cache migration. (Simplified when T9 pinning was removed: _fetch_and_cache no longer takes/verifies a digest.)",
       "campaignCommit": "f9f8af7",
-      "tests": ["_build_fake_libduckdb_zip", "test_fetch_and_cache_local_zip_roundtrip", "test_fetch_and_cache_wrong_digest_refuses", "test_download_consent_headless_raises_branded", "test_load_duckdb_non_darwin_message"],
       "model": "main-context (deterministic port)",
       "status": "completed",
-      "commit": "dad21be"
+      "commit": "dad21be (+ d9558dd simplification)"
     },
     {
       "id": "T11",
       "title": "Pybridge input validation + docstring",
-      "detail": "Null-guard the two walked pointers; exact-type-identity (not isinstance); RuntimeError on closed/null connection; corrected docstring (SELECT 1 = liveness smoke-test, borrowed-pointer lifetime contract). pybridge.py.",
+      "detail": "Null-guard the walked pointers; exact-type-identity; RuntimeError on closed/null connection. Docstring later trimmed to its load-bearing contract (9712e5d) after the reviewer/user flagged it as code narration.",
       "campaignCommit": "30da2b3",
-      "tests": ["test_pybridge_closed_connection_raises_runtime_error"],
       "model": "main-context (deterministic port)",
       "status": "completed",
-      "commit": "0c33144"
+      "commit": "0c33144 (+ 9712e5d docstring trim)"
     },
     {
       "id": "RF",
       "title": "Fold in review hardening",
-      "detail": "Snapped utils.py/pybridge.py to campaign tip: atomic os.replace cache staging (9e48b06), unique tempfile.mkstemp write to avoid concurrent-download race (c9e51e8), pybridge docstring trim (9d03b2a). Companion commit 2f11870 re-synced the Stage-2 tests to the tip (dropped the dead _LIBDUCKDB_SIDECAR monkeypatches the review fix removed).",
+      "detail": "Snapped utils.py/pybridge.py to campaign tip (atomic cache staging, concurrent-download race fix, pybridge docstring trim). Companion 2f11870 re-synced tests.",
       "campaignCommit": "review/numbduck-2026-06-29 (tip)",
       "model": "main-context (deterministic port)",
       "status": "completed",
       "commit": "7b7e070 + 2f11870"
     },
     {
-      "id": "PIN",
-      "title": "Expand pin dict 3 -> 12 versions",
-      "detail": "Expanded _PINNED_LIBDUCKDB_SHA256 from the 3 CI versions to all 12 in-range (1.3.2..1.5.4), digests double-verified 2026-07-09 (reference_numbduck_libduckdb_sha256). macOS users on latest (1.5.4) else fail closed.",
+      "id": "REVIEW",
+      "title": "Fork PR #57 bot review",
+      "detail": "gemini + Copilot, 4 inline comments. (1) fail early on unreadable standalone version -> DONE (d9558dd). (4) platform-aware C-API guidance -> DONE (d9558dd). (2) partial-rename cleanup + (3) brand _verify_cached_dylib OSError -> SUPERSEDED: the whole pinning/sidecar mechanism they touched was removed. Replies drafted, pending user approval before posting.",
       "model": "main-context",
-      "status": "completed",
-      "commit": "120706e"
-    },
-    {
-      "id": "GATE",
-      "title": "Full local gate",
-      "detail": "flake8 gating (E9,F63,F7,F82) clean; zero new max-line-length=120 violations from Stage-2 code; cache-cleared suite 158 passed / 1 skipped. doc-codeblock + lychee no-ops (no doc/link surface changed). Code + tests verified byte-identical to the campaign tip, which passed #50's adversarial verification + gemini review; pin digests double-verified independently.",
-      "model": "verify: byte-identity to CI-green tip + suite",
-      "status": "completed",
-      "commit": null
+      "status": "in_progress",
+      "commit": "d9558dd + 9712e5d"
     },
     {
       "id": "SHIP",
       "title": "Fork PR",
-      "detail": "Push feat/upstream-stage2; open fork PR (bots review). Upstream PR only with per-PR approval.",
+      "detail": "feat/upstream-stage2 = fork PR #57 (open). Upstream PR only with per-PR approval, built fresh by cherry-pick so the pinning add-then-remove never appears upstream.",
       "model": "main-context",
       "status": "in_progress",
       "commit": null
