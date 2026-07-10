@@ -23,50 +23,23 @@ DUCKDBPY_CONNECTION_OFFSET = 32
 
 
 def extract_connection_ptr(conn):
-    """Extract the raw C API ``Connection*`` from a Python duckdb connection.
+    """Return the raw C API ``Connection*`` borrowed from a Python duckdb connection.
 
-    Walks the pybind11 instance layout via two chained ``c_void_p.from_address``
-    reads — first to the held ``DuckDBPyConnection*``, then to its
-    ``unique_ptr<Connection>`` field, yielding the ``Connection*``
-    (``duckdb_connection`` in the C API) — using the module-level
+    Reads the pointer out of *conn*'s pybind11 instance layout using the
     ``PYBIND11_HELD_OBJECT_OFFSET`` / ``DUCKDBPY_CONNECTION_OFFSET`` constants
-    (see those for the offset derivations).
+    (which document the offset derivations). Those offsets are an implementation
+    detail of the duckdb Python package, validated on duckdb 1.3.2 / Linux x86-64
+    / libstdc++; re-verify them when upgrading duckdb, since stale offsets yield a
+    wild pointer whose dereference inside ``duckdb_query`` is undefined behavior
+    the ``SELECT 1`` check below cannot catch.
 
-    Before the pointer is walked, :func:`~numbduck.utils.libraries_coordinated`
-    checks that the libduckdb backing numbduck's JIT bindings is the same version
-    as the Python ``duckdb`` module that minted *conn*. When they differ — the
-    macOS dual-runtime seam where numbduck loads a standalone libduckdb while the
-    wheel keeps its own — this raises rather than hand a wheel-minted
-    ``Connection*`` to a possibly-different libduckdb build (a cross-runtime
-    dereference under a mismatched internal layout is undefined behavior that the
-    ``SELECT 1`` smoke-test cannot catch).
-
-    Each intermediate pointer is checked for null before it is used. A closed (or
-    otherwise null-backed) ``DuckDBPyConnection`` resets its
-    ``unique_ptr<Connection>`` to null, so the ``+32`` read yields ``None``; that
-    is reported as ``RuntimeError`` before any pointer arithmetic or C-API call,
-    instead of surfacing as an opaque numba typing error or a NULL-connection
-    dereference.
-
-    The extracted pointer is then handed to ``SELECT 1`` via the C API as a
-    best-effort liveness smoke-test: it confirms only that a *plausibly-correct*
-    pointer resolves to a connection that can run a trivial query. It is not a
-    validation of the ABI offsets and cannot catch a structurally-wrong (wild)
-    pointer — dereferencing one inside ``duckdb_query`` is undefined behavior
-    (typically a segfault) that happens before any result code is produced, so
-    the ``SELECT 1`` check never observes it. Offset drift across a duckdb release
-    is exactly this uncatchable case: the offsets are validated on duckdb 1.3.2 /
-    Linux x86-64 / libstdc++, and the pybind11 instance layout and the
-    ``DuckDBPyConnection`` struct layout are implementation details of the duckdb
-    Python package that may change with major duckdb releases. Re-verify the
-    offsets when upgrading duckdb.
-
-    The type guard uses exact-type identity (``type(conn) is
-    duckdb.DuckDBPyConnection``); it is a convenience check, not a proof of memory
-    layout. Passing a non-canonical object that merely satisfies ``isinstance``
-    (a subclass, or one spoofing ``__class__`` / ``__instancecheck__``) is
-    undefined behavior — the two chained ``from_address`` reads would dereference
-    arbitrary addresses taken from that object.
+    The pointer is handed out only after four guards: exact-type identity (not
+    ``isinstance`` — a subclass or an object spoofing ``__class__`` would steer
+    the raw pointer walk through arbitrary memory); runtime coordination (refuse
+    when numbduck's JIT libduckdb and the wheel that minted *conn* are different
+    builds — the macOS dual-runtime seam); a null check on each intermediate
+    pointer (a closed connection nulls its ``unique_ptr<Connection>``); and a
+    best-effort ``SELECT 1`` liveness smoke-test.
 
     Parameters
     ----------
