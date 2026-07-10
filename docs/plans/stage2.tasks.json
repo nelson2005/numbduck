@@ -1,0 +1,83 @@
+{
+  "campaign": "numbduck Stage 2 — loader/supply-chain upstream contribution",
+  "source": "Ported from the deep-review campaign branch review/numbduck-2026-06-29 (fork PR #50). utils.py/pybridge.py on origin/main are pristine upstream (Stage 1 did not touch them), so each task's code is snapped from its campaign commit; final code equals the CI-green campaign tip by construction.",
+  "featureBranch": "feat/upstream-stage2 (base origin/main)",
+  "upstreamPrBranch": "upstream-pr/stage2 (base upstream/main) — built later by cherry-pick, per-PR approval required",
+  "order": "T2 -> T9 -> T10 -> T11 -> review-hardening -> pin-expansion",
+  "lastUpdated": "2026-07-10",
+  "tasks": [
+    {
+      "id": "T2",
+      "title": "Dual-runtime coordination guard",
+      "detail": "load_duckdb compares a standalone libduckdb duckdb_library_version() vs the wheel version and refuses on mismatch; libraries_coordinated() + extract_connection_ptr refuse an uncoordinated runtime. utils.py + pybridge.py.",
+      "campaignCommit": "f714b7f",
+      "tests": ["test_load_duckdb_refuses_version_mismatch", "test_pybridge_refuses_uncoordinated_runtime"],
+      "model": "main-context (deterministic port)",
+      "status": "pending",
+      "commit": null
+    },
+    {
+      "id": "T9",
+      "title": "Fail-closed SHA-256 download integrity",
+      "detail": "Pin per-version SHA-256 of libduckdb-osx-universal.zip; verify downloaded ZIP + cached dylib (sidecar) fail-closed; 0700/0600 perms; bounded timeout; symbol re-check. utils.py.",
+      "campaignCommit": "ba2820a",
+      "tests": ["test_verify_cached_dylib_roundtrip", "test_load_duckdb_rejects_tampered_cache", "test_download_refuses_unpinned_version_without_override"],
+      "model": "main-context (deterministic port)",
+      "status": "pending",
+      "commit": null
+    },
+    {
+      "id": "T10",
+      "title": "Loader refactor for testability",
+      "detail": "Split _download_libduckdb into _consent_to_download + _fetch_and_cache(url,dest,sha) drivable via file://; EOF/non-TTY-safe consent; side-effect-free locator; end-anchored regexes; explicit legacy-cache migration. utils.py.",
+      "campaignCommit": "f9f8af7",
+      "tests": ["_build_fake_libduckdb_zip", "test_fetch_and_cache_local_zip_roundtrip", "test_fetch_and_cache_wrong_digest_refuses", "test_download_consent_headless_raises_branded", "test_load_duckdb_non_darwin_message"],
+      "model": "main-context (deterministic port)",
+      "status": "pending",
+      "commit": null
+    },
+    {
+      "id": "T11",
+      "title": "Pybridge input validation + docstring",
+      "detail": "Null-guard the two walked pointers; exact-type-identity (not isinstance); RuntimeError on closed/null connection; corrected docstring (SELECT 1 = liveness smoke-test, borrowed-pointer lifetime contract). pybridge.py.",
+      "campaignCommit": "30da2b3",
+      "tests": ["test_pybridge_closed_connection_raises_runtime_error"],
+      "model": "main-context (deterministic port)",
+      "status": "pending",
+      "commit": null
+    },
+    {
+      "id": "RF",
+      "title": "Fold in review hardening",
+      "detail": "Snap utils.py/pybridge.py to campaign tip to fold the post-task review fixes: atomic os.replace cache staging (9e48b06), unique tempfile.mkstemp write to avoid concurrent-download race (c9e51e8), pybridge docstring trim (9d03b2a). Final code == campaign tip by construction.",
+      "campaignCommit": "review/numbduck-2026-06-29 (tip)",
+      "model": "main-context (deterministic port)",
+      "status": "pending",
+      "commit": null
+    },
+    {
+      "id": "PIN",
+      "title": "Expand pin dict 3 -> 12 versions",
+      "detail": "Expand _PINNED_LIBDUCKDB_SHA256 from the 3 CI versions to all 12 in-range (1.3.2..1.5.4), digests double-verified 2026-07-09 (reference_numbduck_libduckdb_sha256). macOS users on latest (1.5.4) else fail closed.",
+      "model": "main-context",
+      "status": "pending",
+      "commit": null
+    },
+    {
+      "id": "GATE",
+      "title": "Full local gate",
+      "detail": "Cache-cleared venv pytest, gating flake8 (E9,F63,F7,F82), doc-codeblock, lychee. Then adversarial verification of the security-critical guards (Sonnet floor).",
+      "model": "verify: sonnet+",
+      "status": "pending",
+      "commit": null
+    },
+    {
+      "id": "SHIP",
+      "title": "Fork PR",
+      "detail": "Push feat/upstream-stage2; open fork PR (bots review). Upstream PR only with per-PR approval.",
+      "model": "main-context",
+      "status": "pending",
+      "commit": null
+    }
+  ]
+}
