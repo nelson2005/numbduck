@@ -1,6 +1,5 @@
 import ctypes
 import functools
-import importlib.util
 import math
 import os
 import subprocess
@@ -4880,17 +4879,14 @@ def test_irr_example_combine_path_nrt_balanced():
 
 
 def _load_examples_common():
-    """Load examples/_common.py by absolute path. It lives outside the numbduck
-    package and is not importable as a module from the test directory, so the
-    examples add their own directory to sys.path; here we exec it directly."""
-    common_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "examples", "_common.py",
-    )
-    spec = importlib.util.spec_from_file_location("_common", common_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    """Import examples/_common.py (the shared example utilities), using the same
+    examples/ sys.path insertion as _import_irr_example."""
+    examples_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "examples")
+    if examples_dir not in sys.path:
+        sys.path.insert(0, examples_dir)
+    import _common
+    return _common
 
 
 _examples_common = _load_examples_common()

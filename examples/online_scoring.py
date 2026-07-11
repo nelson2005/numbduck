@@ -115,10 +115,14 @@ def _score_jit_loop(stmt_p, ids, x, scores_out, latencies_out):
         t0 = monotonic_ns()
 
         bind_rc = ducklib.duckdb_bind_int64(stmt_p, numpy.uint64(1), ids[i])
+        if bind_rc != ducklib.DuckDBSuccess:
+            # Bind failed before any result was produced -- nothing to destroy.
+            raise RuntimeError("bind failed in scoring loop")
         exec_rc = ducklib.duckdb_execute_prepared(stmt_p, result_p)
-        if bind_rc != ducklib.DuckDBSuccess or exec_rc != ducklib.DuckDBSuccess:
+        if exec_rc != ducklib.DuckDBSuccess:
+            # execute_prepared fills an error result even on failure; destroy it.
             ducklib.duckdb_destroy_result(result_p)
-            raise RuntimeError("bind/execute failed in scoring loop")
+            raise RuntimeError("execute failed in scoring loop")
         result_tup = (
             result_buf[0], result_buf[1], result_buf[2],
             result_buf[3], result_buf[4], result_buf[5],
@@ -206,7 +210,9 @@ def run_latency_block(conn, ids, x):
 
 
 def run_scaling_block(conn_factory, ids, x):
-    """Each worker uses its own connection. Returns dict {variant: {T: total_wall}}."""
+    """For each T in the thread counts, launch T workers that each score n/T of
+    the events; each worker uses its own connection. Returns dict
+    {variant: {T: total_wall}}."""
     n = len(ids)
     out = {"python": {}, "jit": {}}
     if os.environ.get("NUMBDUCK_BENCH_TINY") == "1":

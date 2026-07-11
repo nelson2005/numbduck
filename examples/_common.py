@@ -1,8 +1,7 @@
 """Shared utilities for numbduck example scripts.
 
-Intentionally tiny. If this file grows past ~80 lines or gains
-DuckDB-specific knowledge, shrink it or inline its bits back into
-the example files.
+Keep it small: only utilities shared across the example scripts belong here.
+Push any DuckDB-specific logic back into the example that needs it.
 """
 import math
 import os
@@ -90,18 +89,3 @@ def assert_results_match(*results, label: str) -> None:
             raise AssertionError(
                 f"{label}: variant 0 produced {first!r} but variant {i} produced {other!r}"
             )
-
-
-if __name__ == "__main__":
-    print_env()
-    demo = format_table(
-        headers=["Variant", "Time", "Speedup"],
-        rows=[
-            ["Python", "1.000s", "1.0x"],
-            ["JIT", "0.010s", "100.0x"],
-        ],
-        alignments=["<", ">", ">"],
-    )
-    print(demo)
-    assert_results_match(42, 42, label="demo")
-    print("  _common.py self-test OK")

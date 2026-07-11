@@ -61,6 +61,8 @@ PY_MAX_N = 10_000
 # binds no validity-write helper), so a row with any NULL input is scored with
 # an out-of-range sentinel. Every rule adds non-negative points, so a real
 # score is always >= 0 and -1 unambiguously marks a NULL/unknown transaction.
+# Note the demo's SELECT sum(...) folds these -1s into the total; a real query
+# would filter them out (SQL sum() skips true NULLs but not this sentinel).
 NULL_SCORE = -1
 
 
