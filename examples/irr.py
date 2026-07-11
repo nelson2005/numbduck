@@ -128,13 +128,18 @@ def irr_bisect(cashflows, periods, n, investment, target_npv):
         return r_hi
     if (npv_lo > 0.0) == (npv_hi > 0.0):
         return IRR_NO_BRACKET
+    # Keep the half that still straddles the sign change. NPV can either fall
+    # (conventional: pay first, receive later -> npv_lo > 0) or rise
+    # (financing: receive first, repay later -> npv_lo < 0) across the bracket,
+    # so bisect against npv_lo's sign rather than assuming a fixed orientation.
+    lo_positive = npv_lo > 0.0
     rate_tol = 1e-12
     for _ in range(100):
         if (r_hi - r_lo) < rate_tol:
             break
         r_mid = (r_lo + r_hi) / 2.0
         npv = _irr_npv(cashflows, periods, n, investment, target_npv, r_mid)
-        if npv > 0.0:
+        if (npv > 0.0) == lo_positive:
             r_lo = r_mid
         else:
             r_hi = r_mid

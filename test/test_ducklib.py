@@ -4497,6 +4497,26 @@ def test_irr_bisect_out_of_bracket_sentinel():
         numpy.array([1.0], dtype=numpy.float64), 1, 1000.0, 0.0)
     assert low == irr.IRR_NO_BRACKET
     assert not math.isnan(low)
+
+
+def test_irr_bisect_financing_direction_converges():
+    """A financing-direction stream -- cash received up front, repaid later --
+    makes NPV increase in r (npv_lo < 0 < npv_hi) instead of decrease, yet it
+    still changes sign exactly once inside the bracket. The solver must follow
+    the sign change to that root rather than walk the bracket the wrong way to
+    an endpoint (which would fabricate a ~10.0 rate).
+    """
+    irr = _import_irr_example()
+    # Receive 1000 now (investment = -1000), repay 1300 at month 12:
+    # NPV(r) = 1000 - 1300 / (1 + r)^12 -- negative at r=-0.99, positive at
+    # r=10, with its single root at (1300/1000)^(1/12) - 1.
+    rate = irr.irr_bisect(
+        numpy.array([-1300.0], dtype=numpy.float64),
+        numpy.array([12.0], dtype=numpy.float64), 1, -1000.0, 0.0)
+    expected = (1300.0 / 1000.0) ** (1.0 / 12.0) - 1.0
+    assert math.isfinite(rate), rate
+    assert rate != irr.IRR_NO_BRACKET
+    assert abs(rate - expected) < 1e-9, (rate, expected)
 # --- @cfunc exception-guard coverage for structref-backed UDAF callbacks ---
 #
 # A Python exception raised from an @njit impl invoked through a @cfunc is
