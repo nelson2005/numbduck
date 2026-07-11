@@ -35,7 +35,6 @@ import sys
 
 import duckdb
 import numpy
-import pyarrow.compute as pc
 from numba import cfunc, njit, carray
 from numba import types as nb_types
 from numbox.utils.lowlevel import _cast_int_to_void_p, get_unicode_data_p
@@ -68,6 +67,9 @@ def haversine_py(lat1, lon1, lat2, lon2):
 
 
 def haversine_arrow(lat1, lon1, lat2, lon2):
+    # Lazy import: only the Arrow cross-check variant needs pyarrow, so importing
+    # this module for the JIT path (or a test) does not require it.
+    import pyarrow.compute as pc
     R = 6371.0
     pi_180 = 3.141592653589793 / 180.0
     p1 = pc.multiply(lat1, pi_180)

@@ -40,7 +40,6 @@ import sys
 
 import duckdb
 import numpy
-import pyarrow.compute as pc
 from numba import carray, cfunc, njit
 from numba import types as nb_types
 from numbox.utils.lowlevel import _cast_int_to_void_p, get_unicode_data_p
@@ -86,6 +85,9 @@ def fraud_score_py(amount, country, home_country, hour, risk_tier, recent_txns):
 
 
 def fraud_score_arrow(amount, country, home_country, hour, risk_tier, recent_txns):
+    # Lazy import: only the Arrow cross-check variant needs pyarrow, so importing
+    # this module for the JIT path (or a test) does not require it.
+    import pyarrow.compute as pc
     s_amt = pc.if_else(
         pc.greater(amount, 1000.0),
         3,
