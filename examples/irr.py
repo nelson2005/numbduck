@@ -92,12 +92,16 @@ irr_state_type = IRRStateType(_irr_state_fields)
 IRR_NO_BRACKET = math.inf
 
 
-@njit
+@njit(error_model="numpy")
 def _irr_npv(cashflows, periods, n, investment, target_npv, r):
+    # error_model="numpy": at the r=-0.99 bracket end (1+r)**period underflows
+    # to 0.0 for period >= ~162, and the default 'python' error model would
+    # raise ZeroDivisionError on the divide; "numpy" yields +inf instead, which
+    # keeps the far-future present value astronomically large (its true limit)
+    # and lets the sign-based bracket test below stay correct.
     npv = -investment - target_npv
     for i in range(n):
-        iu = numpy.uint64(i)
-        npv += cashflows[iu] / (1.0 + r) ** periods[iu]
+        npv += cashflows[i] / (1.0 + r) ** periods[i]
     return npv
 
 
@@ -122,6 +126,12 @@ def irr_bisect(cashflows, periods, n, investment, target_npv):
     r_hi = 10.0
     npv_lo = _irr_npv(cashflows, periods, n, investment, target_npv, r_lo)
     npv_hi = _irr_npv(cashflows, periods, n, investment, target_npv, r_hi)
+    if math.isnan(npv_lo) or math.isnan(npv_hi):
+        # A NaN cashflow/investment/target is a legal DOUBLE (not SQL NULL, so
+        # the validity gate never skipped it) and makes an endpoint NaN. Return
+        # the empty-group NaN rather than misreport it as the +inf out-of-bracket
+        # sentinel, which callers read as "root above the bracket".
+        return math.nan
     if npv_lo == 0.0:
         return r_lo
     if npv_hi == 0.0:
@@ -153,14 +163,16 @@ def irr_bisect(cashflows, periods, n, investment, target_npv):
 # Each receives raw pointers; we use the bridge intrinsics to
 # reconstruct the structref from the state slot.
 #
-# Every impl body runs under a bare try/except. A Python exception escaping an
-# @njit impl invoked from a @cfunc is swallowed at the C boundary: numba prints
-# it, returns the zero/void default WITHOUT unwinding into DuckDB (a silent
-# wrong result), and skips the scope-exit decref of any borrowed structref that
-# is still live at the raise point (an NRT meminfo leak). Catching the exception
-# in-frame runs that decref and lets each callback write a defined sentinel
-# instead. The guard must be try/except, not try/finally -- try/finally re-raises
-# on numba 0.65.1, which reintroduces both the swallow and the leak.
+# The callbacks that borrow a structref (update/combine/finalize) run their body
+# under a bare try/except. A Python exception escaping an @njit impl invoked from
+# a @cfunc is swallowed at the C boundary: numba prints it, returns the zero/void
+# default WITHOUT unwinding into DuckDB (a silent wrong result), and skips the
+# scope-exit decref of any borrowed structref still live at the raise point (an
+# NRT meminfo leak). Catching the exception in-frame runs that decref and lets
+# the callback write a defined sentinel instead. The guard must be try/except,
+# not try/finally -- try/finally re-raises on numba 0.65.1, reintroducing both
+# the swallow and the leak. state_size and destroy borrow nothing and their
+# bodies cannot raise, so they carry no guard.
 
 @njit
 def _irr_state_size_impl(info):
@@ -321,13 +333,10 @@ def _irr_destroy_impl(states, count):
     for i in range(count):
         iu = numpy.uint64(i)
         slot = carray(_cast_int_to_void_p(state_slots[iu]), (1,), dtype=numpy.intp)
-        # Skip the null sentinel a failed init leaves behind, and never let a
-        # release raise back across the @cfunc boundary.
-        try:
-            if slot[0] != 0:
-                release_meminfo(slot[0])
-        except Exception:
-            pass
+        # Skip the null sentinel a failed init leaves behind. release_meminfo is
+        # a direct NRT decref that cannot raise, so no exception guard is needed.
+        if slot[0] != 0:
+            release_meminfo(slot[0])
 
 
 @cfunc(nb_types.void(nb_types.intp, nb_types.uint64))

@@ -69,7 +69,7 @@ def _both_nan(a, b) -> bool:
     """True only when a and b are both floating-point NaN. Non-numbers are not NaN."""
     try:
         return math.isnan(a) and math.isnan(b)
-    except (TypeError, ValueError):
+    except (TypeError, OverflowError):
         return False
 
 

@@ -4517,6 +4517,34 @@ def test_irr_bisect_financing_direction_converges():
     assert math.isfinite(rate), rate
     assert rate != irr.IRR_NO_BRACKET
     assert abs(rate - expected) < 1e-9, (rate, expected)
+
+
+def test_irr_bisect_large_period_converges():
+    """At r=-0.99 the discount factor (1+r)**period underflows to 0.0 for
+    period >= ~162; numba's default 'python' error model would raise
+    ZeroDivisionError on the divide, which finalize turns into the empty-group
+    NaN -- misreporting a valid group as "no data". error_model="numpy" yields
+    +inf there instead, so the solver still converges on the true rate.
+    """
+    irr = _import_irr_example()
+    rate = irr.irr_bisect(
+        numpy.array([13000.0], dtype=numpy.float64),
+        numpy.array([200.0], dtype=numpy.float64), 1, 10000.0, 0.0)
+    expected = (13000.0 / 10000.0) ** (1.0 / 200.0) - 1.0
+    assert math.isfinite(rate), rate
+    assert abs(rate - expected) < 1e-9, (rate, expected)
+
+
+def test_irr_bisect_nan_input_returns_nan():
+    """A NaN cashflow is a legal DOUBLE (not SQL NULL), so it reaches the solver
+    and makes an endpoint NaN. It must return the empty-group NaN, not the +inf
+    out-of-bracket sentinel a caller reads as "root above the bracket".
+    """
+    irr = _import_irr_example()
+    rate = irr.irr_bisect(
+        numpy.array([math.nan], dtype=numpy.float64),
+        numpy.array([12.0], dtype=numpy.float64), 1, 10000.0, 0.0)
+    assert math.isnan(rate), rate
 # --- @cfunc exception-guard coverage for structref-backed UDAF callbacks ---
 #
 # A Python exception raised from an @njit impl invoked through a @cfunc is
