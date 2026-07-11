@@ -180,7 +180,8 @@ def _irr_state_size_cb(info):
 @njit
 def _irr_init_impl(info, state):
     slot = carray(_cast_int_to_void_p(state), (1,), dtype=numpy.intp)
-    # Sentinel on failure: a null state pointer, which destroy skips.
+    # Sentinel on failure: a null state pointer, which every later callback
+    # (update/combine/finalize/destroy) skips rather than deref.
     try:
         cfs = Float64Vector(64)
         pds = Float64Vector(64)
@@ -227,6 +228,10 @@ def _irr_update_impl(info, chunk, states):
         # per-group error channel the offending row is dropped rather than
         # leaked, and finalize reflects the reduced data.
         try:
+            # A failed init leaves a null slot; borrowing it would deref a null
+            # meminfo (a segfault the try/except cannot catch), so skip it.
+            if slot[0] == 0:
+                continue
             s = borrow_structref(irr_state_type, slot[0])
             vector_push(s.cashflows, cf_data[iu])
             vector_push(s.periods, pd_data[iu])
@@ -254,6 +259,10 @@ def _irr_combine_impl(info, source, target, count):
         try:
             src_slot = carray(_cast_int_to_void_p(src_slots[iu]), (1,), dtype=numpy.intp)
             tgt_slot = carray(_cast_int_to_void_p(tgt_slots[iu]), (1,), dtype=numpy.intp)
+            # Skip if either side's init failed (null slot) -- borrowing a null
+            # meminfo would segfault past the try/except.
+            if src_slot[0] == 0 or tgt_slot[0] == 0:
+                continue
             src = borrow_structref(irr_state_type, src_slot[0])
             tgt = borrow_structref(irr_state_type, tgt_slot[0])
             vector_extend(tgt.cashflows, src.cashflows)
@@ -282,6 +291,11 @@ def _irr_finalize_impl(info, source, result, count, offset):
         # borrow lives inside the guard so a raise in irr_bisect releases it.
         try:
             src_slot = carray(_cast_int_to_void_p(src_slots[iu]), (1,), dtype=numpy.intp)
+            # A failed init leaves a null slot; emit the empty-group NaN rather
+            # than deref a null meminfo (an uncatchable segfault).
+            if src_slot[0] == 0:
+                out_vals[numpy.uint64(offset + iu)] = math.nan
+                continue
             s = borrow_structref(irr_state_type, src_slot[0])
             n = len(s.cashflows)
             if n == 0:
