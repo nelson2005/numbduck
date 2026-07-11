@@ -58,12 +58,11 @@ PY_MAX_N = 10_000
 
 def haversine_py(lat1, lon1, lat2, lon2):
     # Reference variant; assumes finite, in-domain coordinates (the demo's
-    # generated data). CPython math.cos/asin RAISE on a non-finite or
-    # out-of-domain argument -- an infinite coordinate, or an exact-antipode
-    # pair where rounding pushes the asin argument past 1.0 -- which aborts the
-    # query, whereas the @njit variant returns NaN and its a>1 clamp keeps the
-    # distance finite. So the JIT clamp is load-bearing on adversarial inputs,
-    # not merely defensive.
+    # generated data). An infinite coordinate makes CPython math.cos/asin raise
+    # and abort the query, whereas the @njit variant returns NaN. The JIT path's
+    # a>1/a<0 clamps are defensive: the float64 formula's worst antipodal
+    # overshoot (~2 ULP over 1.0) is absorbed by sqrt before asin, so they do
+    # not change results on real inputs.
     R = 6371.0
     p1 = math.radians(lat1)
     p2 = math.radians(lat2)
