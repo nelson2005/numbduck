@@ -114,6 +114,8 @@ def _score_jit_loop(stmt_p, ids, x, scores_out, latencies_out):
     for i in range(n):
         t0 = monotonic_ns()
 
+        # The bind/execute return-code checks below are defensive: this demo's
+        # fixed point-lookup with a valid parameter index never fails them.
         bind_rc = ducklib.duckdb_bind_int64(stmt_p, numpy.uint64(1), ids[i])
         if bind_rc != ducklib.DuckDBSuccess:
             # Bind failed before any result was produced -- nothing to destroy.
@@ -141,6 +143,23 @@ def _score_jit_loop(stmt_p, ids, x, scores_out, latencies_out):
         v1 = ducklib.duckdb_data_chunk_get_vector(chunk_p, 1)
         v2 = ducklib.duckdb_data_chunk_get_vector(chunk_p, 2)
         v3 = ducklib.duckdb_data_chunk_get_vector(chunk_p, 3)
+        # A NULL feature cell would be read as stale storage and silently score
+        # wrong; the Python reference raises on None*float, so match that here.
+        # Free the chunk+result before raising inside the nogil loop.
+        val0 = ducklib.duckdb_vector_get_validity(v0)
+        val1 = ducklib.duckdb_vector_get_validity(v1)
+        val2 = ducklib.duckdb_vector_get_validity(v2)
+        val3 = ducklib.duckdb_vector_get_validity(v3)
+        if (
+            (val0 != 0 and not ducklib.duckdb_validity_row_is_valid(val0, 0))
+            or (val1 != 0 and not ducklib.duckdb_validity_row_is_valid(val1, 0))
+            or (val2 != 0 and not ducklib.duckdb_validity_row_is_valid(val2, 0))
+            or (val3 != 0 and not ducklib.duckdb_validity_row_is_valid(val3, 0))
+        ):
+            chunk_buf[0] = chunk_p
+            ducklib.duckdb_destroy_data_chunk(chunk_pp)
+            ducklib.duckdb_destroy_result(result_p)
+            raise RuntimeError("NULL feature value in scoring loop")
         d0 = ducklib.duckdb_vector_get_data(v0)
         d1 = ducklib.duckdb_vector_get_data(v1)
         d2 = ducklib.duckdb_vector_get_data(v2)

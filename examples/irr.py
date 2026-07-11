@@ -30,7 +30,11 @@ Run via ``python examples/run_irr.py``. This module must be imported
 (not executed as ``__main__``) so ``IRRStateType`` has a stable
 ``__module__`` across processes; otherwise numba's warm cache fails
 type inference with ``No conversion from numba.IRRStateType(...) to
-numba.IRRStateType(...)``.
+numba.IRRStateType(...)``. Import it only under the name ``irr`` (as
+run_irr.py and the tests do): the generated structref's numba disk cache is
+keyed without the importer's module name, so importing it under a different
+qualified name (e.g. ``examples.irr``) after the cache was warmed as ``irr``
+fails with a bare ModuleNotFoundError from numba's cache unpickler.
 """
 import math
 import sys
@@ -115,14 +119,21 @@ def irr_bisect(cashflows, periods, n, investment, target_npv):
     width in r falls below ``rate_tol``; the midpoint is then within
     ``rate_tol / 2`` of the true root, regardless of cashflow magnitude.
 
-    Assumes NPV(r) changes sign exactly once inside the bracket, which holds
-    for a cashflow stream with a single sign change. When NPV has the same
-    sign at both bracket ends the root lies outside [-0.99, 10.0] (a monthly
-    return above 1000% or a near-total loss below -99%), or the stream lacks a
-    single sign change; the solver then returns the ``IRR_NO_BRACKET`` sentinel
-    (+inf). That sentinel is deliberately distinct from the NaN the finalize
-    step emits for an empty group, so callers can distinguish "no root in the
-    bracket" from "no data".
+    Assumes NPV(r) changes sign exactly once inside the bracket -- true for a
+    conventional stream with a single sign change (an outlay followed by
+    returns). The only guard is on the two bracket endpoints: when they share
+    NPV sign the solver returns the ``IRR_NO_BRACKET`` sentinel (+inf). That
+    covers a root outside [-0.99, 10.0] (a monthly return above 1000% or a
+    near-total loss below -99%) and any EVEN number of in-bracket roots. The
+    sentinel is deliberately distinct from the NaN the finalize step emits for
+    an empty group, so callers can distinguish "no single root in the bracket"
+    from "no data".
+
+    A non-conventional stream with an ODD number of in-bracket sign changes
+    (multiple IRRs) has opposite-sign endpoints, so the endpoint guard does not
+    fire: bisection converges to ONE of the roots and returns it WITHOUT
+    signalling that the single-IRR assumption was violated. Pass only
+    conventional (single-sign-change) streams where a well-defined IRR matters.
     """
     r_lo = -0.99
     r_hi = 10.0

@@ -4969,6 +4969,35 @@ def test_haversine_udf_nulls_and_antipodal():
     assert null_row is not None and math.isnan(null_row), null_row
 
 
+def test_haversine_udf_null_aggregation_divergence():
+    """hv_jit emits NaN for a NULL-input row while the reference hv_py yields SQL
+    NULL. Under the demo's filtering count (WHERE dist < 50) the two agree (NaN
+    < 50 and NULL < 50 both exclude the row), but under sum() the NaN poisons the
+    JIT aggregate while hv_py skips the NULL -- the NaN sentinel round-trips as
+    NULL only for filtering predicates."""
+    hv = _import_example("haversine")
+    conn = duckdb.connect()
+    conn.create_function("hv_py", hv.haversine_py, ["DOUBLE"] * 4, "DOUBLE")
+    hv.register_jit_udf(conn)
+    conn.execute(
+        "CREATE TABLE pts AS SELECT * FROM (VALUES "
+        "(0.0, 0.0, 0.0, 0.0), "
+        "(0.0, 0.0, 89.0, 179.0), "
+        "(CAST(NULL AS DOUBLE), 0.0, 10.0, 20.0)) "
+        "AS t(lat1, lon1, lat2, lon2)")
+    args = "lat1, lon1, lat2, lon2"
+    c_py = conn.execute(
+        f"SELECT count(*) FROM pts WHERE hv_py({args}) < 50").fetchone()[0]
+    c_jit = conn.execute(
+        f"SELECT count(*) FROM pts WHERE hv_jit({args}) < 50").fetchone()[0]
+    assert c_py == c_jit == 1, (c_py, c_jit)
+    s_py = conn.execute(f"SELECT sum(hv_py({args})) FROM pts").fetchone()[0]
+    s_jit = conn.execute(f"SELECT sum(hv_jit({args})) FROM pts").fetchone()[0]
+    conn.close()
+    assert s_py is not None and math.isfinite(s_py), s_py
+    assert s_jit is not None and math.isnan(s_jit), s_jit
+
+
 def test_fraud_score_udf_null_sentinel():
     """fr_jit scores a normal row with its positive rule sum and any NULL-input
     row with the -1 sentinel (a scalar UDF cannot write SQL NULL here)."""
@@ -4990,6 +5019,41 @@ def test_fraud_score_udf_null_sentinel():
     assert rows[1][0] == fr.NULL_SCORE, rows[1]
 
 
+def test_fraud_score_udf_null_divergence():
+    """The JIT variant cannot emit SQL NULL, so on a NULL-input row it writes the
+    -1 sentinel while the reference fr_py yields SQL NULL. A naive sum() therefore
+    diverges (fr_py skips NULLs, fr_jit folds in -1); filtering the sentinel
+    restores agreement -- the contract the NULL_SCORE comment documents."""
+    fr = _import_example("fraud_score")
+    types = ["DOUBLE", "TINYINT", "TINYINT", "TINYINT", "TINYINT", "INTEGER"]
+    conn = duckdb.connect()
+    conn.create_function("fr_py", fr.fraud_score_py, types, "INTEGER")
+    fr.register_jit_udf(conn)
+    conn.execute(
+        "CREATE TABLE tx AS SELECT * FROM (VALUES "
+        "(1500.0, CAST(1 AS TINYINT), CAST(2 AS TINYINT), CAST(3 AS TINYINT), "
+        "CAST(4 AS TINYINT), CAST(20 AS INTEGER)), "
+        "(CAST(NULL AS DOUBLE), CAST(1 AS TINYINT), CAST(1 AS TINYINT), "
+        "CAST(12 AS TINYINT), CAST(0 AS TINYINT), CAST(0 AS INTEGER))) "
+        "AS t(amount, country, home_country, hour, risk_tier, recent_txns)")
+    cols = "amount, country, home_country, hour, risk_tier, recent_txns"
+    per_row = conn.execute(
+        f"SELECT fr_py({cols}), fr_jit({cols}) FROM tx ORDER BY amount NULLS LAST"
+    ).fetchall()
+    assert per_row[0] == (17, 17), per_row[0]
+    assert per_row[1][0] is None, per_row[1]           # fr_py -> SQL NULL
+    assert per_row[1][1] == fr.NULL_SCORE, per_row[1]  # fr_jit -> -1 sentinel
+    s_py, s_jit = conn.execute(
+        f"SELECT sum(fr_py({cols})), sum(fr_jit({cols})) FROM tx").fetchone()
+    assert s_py == 17, s_py            # SQL sum skips the NULL row
+    assert s_jit == 16, s_jit          # -1 sentinel folded into the total
+    s_jit_filtered = conn.execute(
+        f"SELECT sum(s) FROM (SELECT fr_jit({cols}) AS s FROM tx) q "
+        f"WHERE s <> {fr.NULL_SCORE}").fetchone()[0]
+    conn.close()
+    assert s_jit_filtered == s_py, s_jit_filtered
+
+
 def test_online_scoring_missing_key_raises():
     """score_jit's point lookup matches exactly one feature row; a missing id
     yields an empty fetched chunk, which the loop turns into a RuntimeError
@@ -4999,6 +5063,23 @@ def test_online_scoring_missing_key_raises():
     osc.setup_features(conn, 8)
     ids = numpy.array([0, 999999], dtype=numpy.int64)
     x = numpy.zeros((2, 4), dtype=numpy.float64)
+    with pytest.raises(RuntimeError):
+        osc.score_jit(conn, ids, x)
+    conn.close()
+
+
+def test_online_scoring_null_feature_raises():
+    """A NULL feature value for a matched id would be read as stale storage and
+    silently mis-scored; the JIT loop reads the validity mask and raises, matching
+    the pure-Python reference (which raises on None*float)."""
+    osc = _import_example("online_scoring")
+    conn = duckdb.connect()
+    osc.setup_features(conn, 8)
+    conn.execute("UPDATE features SET w2 = NULL WHERE id = 3")
+    ids = numpy.array([3], dtype=numpy.int64)
+    x = numpy.ones((1, 4), dtype=numpy.float64)
+    with pytest.raises(TypeError):
+        osc.score_python(conn, ids, x)
     with pytest.raises(RuntimeError):
         osc.score_jit(conn, ids, x)
     conn.close()
@@ -5102,11 +5183,17 @@ def _register_irr_with_update(conn, name, update_cb):
 @pytest.mark.filterwarnings(
     "ignore::pytest.PytestUnraisableExceptionWarning")
 def test_irr_update_rollback_drops_poison_row_cleanly():
-    """A mid-row push failure (the poison row, period < 0) is rolled back to the
-    row boundary so the group's cashflows/periods stay paired: the aggregate
-    equals the same group without the poison row, and NRT stays balanced. Under
-    the old min()-only truncation the surviving 99999 cashflow would misalign
-    the group and the rate assertion would fail."""
+    """Validate the update-callback rollback LOGIC via a structural stand-in.
+
+    The real _irr_update_cb rollback (examples/irr.py) fires only on an actual
+    vector_push allocation failure mid-row, which SQL input cannot trigger, so
+    it is not directly reachable from a test. _irr_update_rollback_probe_cb is a
+    verbatim copy of that logic with an injected raise on a poison row
+    (period < 0), exercising the same rollback: the failure is rolled back to the
+    row boundary so the group's cashflows/periods stay paired, the aggregate
+    equals the same group without the poison row, and NRT stays balanced. This
+    pins the rollback logic but does NOT by itself guard the example's real
+    callback against regression -- they share source, not this registration."""
     from numba.core.runtime import _nrt_python as _nrt
     _nrt.memsys_enable_stats()
     from numba.core.runtime.nrt import rtsys

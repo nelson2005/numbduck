@@ -56,12 +56,17 @@ if os.environ.get("NUMBDUCK_BENCH_BIG") == "1":
 if os.environ.get("NUMBDUCK_BENCH_TINY") == "1":
     ROW_COUNTS = [1_000]
 PY_MAX_N = 10_000
-# A scalar UDF has no way to write SQL NULL back through this C API (ducklib
-# binds no validity-write helper), so a row with any NULL input is scored with
-# an out-of-range sentinel. Every rule adds non-negative points, so a real
-# score is always >= 0 and -1 unambiguously marks a NULL/unknown transaction.
-# Note the demo's SELECT sum(...) folds these -1s into the total; a real query
-# would filter them out (SQL sum() skips true NULLs but not this sentinel).
+# A @cfunc scalar callback cannot emit SQL NULL (ducklib binds no validity-write
+# helper) and cannot raise either -- an exception escaping the C boundary is
+# swallowed, not propagated -- so a NULL-input row must be written as some
+# in-band value. We use an out-of-range sentinel: every rule adds non-negative
+# points, so a real score is always >= 0 and -1 unambiguously flags a
+# NULL/unknown transaction. This sentinel is NOT SQL NULL: the reference
+# fr_py/fr_arrow variants yield SQL NULL for a NULL-input row (which sum() skips),
+# whereas sum(fr_jit(...)) folds each -1 into the total. So the three variants
+# are interchangeable ONLY on non-NULL input -- which this benchmark generates;
+# a caller with real NULLs must filter the sentinel (or the NULL rows) before
+# aggregating. See test_fraud_score_udf_null_divergence for the exact contract.
 NULL_SCORE = -1
 
 
@@ -233,6 +238,9 @@ def run_one(conn, n):
     conn.execute(sql_arrow).fetchone()
     conn.execute(sql_jit).fetchone()
 
+    # The three variants agree only on non-NULL input (setup_data generates
+    # none); on a NULL row fr_jit's -1 sentinel would diverge from the
+    # references' SQL NULL under sum(). See the NULL_SCORE note above.
     r_arrow = conn.execute(sql_arrow).fetchone()[0]
     r_jit = conn.execute(sql_jit).fetchone()[0]
     if run_py:

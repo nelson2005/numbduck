@@ -57,6 +57,13 @@ PY_MAX_N = 10_000
 
 
 def haversine_py(lat1, lon1, lat2, lon2):
+    # Reference variant; assumes finite, in-domain coordinates (the demo's
+    # generated data). CPython math.cos/asin RAISE on a non-finite or
+    # out-of-domain argument -- an infinite coordinate, or an exact-antipode
+    # pair where rounding pushes the asin argument past 1.0 -- which aborts the
+    # query, whereas the @njit variant returns NaN and its a>1 clamp keeps the
+    # distance finite. So the JIT clamp is load-bearing on adversarial inputs,
+    # not merely defensive.
     R = 6371.0
     p1 = math.radians(lat1)
     p2 = math.radians(lat2)
@@ -118,6 +125,11 @@ def _haversine_chunk_impl(info, chunk, output):
         # validity mask and emit the same NaN sentinel rather than folding a
         # garbage coordinate into the distance. A zero validity pointer means
         # the vector carries no NULLs, so the per-row check is skipped.
+        # This NaN equals the references' SQL NULL only under a filtering
+        # predicate: NaN < 50 and NULL < 50 both exclude the row, as in this
+        # demo's WHERE dist < 50 count -- but under sum/avg/max the NaN would
+        # poison the aggregate while SQL NULL is skipped. Inputs here are
+        # non-NULL, so this path is defensive.
         null_in = (
             (val_lat1 != 0 and not ducklib.duckdb_validity_row_is_valid(val_lat1, i))
             or (val_lon1 != 0 and not ducklib.duckdb_validity_row_is_valid(val_lon1, i))
