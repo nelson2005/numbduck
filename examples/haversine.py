@@ -96,21 +96,60 @@ def _haversine_chunk_impl(info, chunk, output):
     d_lat2 = ducklib.duckdb_vector_get_data(v_lat2)
     d_lon2 = ducklib.duckdb_vector_get_data(v_lon2)
     d_out = ducklib.duckdb_vector_get_data(output)
+    val_lat1 = ducklib.duckdb_vector_get_validity(v_lat1)
+    val_lon1 = ducklib.duckdb_vector_get_validity(v_lon1)
+    val_lat2 = ducklib.duckdb_vector_get_validity(v_lat2)
+    val_lon2 = ducklib.duckdb_vector_get_validity(v_lon2)
     a_lat1 = carray(_cast_int_to_void_p(d_lat1), (n,), dtype=numpy.float64)
     a_lon1 = carray(_cast_int_to_void_p(d_lon1), (n,), dtype=numpy.float64)
     a_lat2 = carray(_cast_int_to_void_p(d_lat2), (n,), dtype=numpy.float64)
     a_lon2 = carray(_cast_int_to_void_p(d_lon2), (n,), dtype=numpy.float64)
     a_out = carray(_cast_int_to_void_p(d_out), (n,), dtype=numpy.float64)
     R = 6371.0
-    for i in range(n):
-        p1 = math.radians(a_lat1[i])
-        p2 = math.radians(a_lat2[i])
-        dp = math.radians(a_lat2[i] - a_lat1[i])
-        dl = math.radians(a_lon2[i] - a_lon1[i])
-        s_dp = math.sin(dp / 2.0)
-        s_dl = math.sin(dl / 2.0)
-        a = s_dp * s_dp + math.cos(p1) * math.cos(p2) * s_dl * s_dl
-        a_out[i] = 2.0 * R * math.asin(math.sqrt(a))
+    # A raise inside this impl is swallowed at the @cfunc boundary (numba prints
+    # it and returns the void default without unwinding into DuckDB), which would
+    # hand DuckDB the partially-written output vector as a silent success. The
+    # guard wraps the whole compute -- outside the hot loop so throughput is
+    # unaffected -- and on failure fills the chunk with a NaN sentinel instead of
+    # leaving garbage in the un-reached rows. No structref is borrowed here, so
+    # there is nothing to leak; the sole hazard is the silent corrupt output.
+    try:
+        for i in range(n):
+            # DuckDB can hand this callback rows whose inputs are NULL, and the
+            # data slot of a NULL row holds stale bytes. Consult each input's
+            # validity mask and emit the same NaN sentinel rather than folding a
+            # garbage coordinate into the distance. A zero validity pointer means
+            # the vector carries no NULLs, so the per-row check is skipped.
+            null_in = (
+                (val_lat1 != 0 and not ducklib.duckdb_validity_row_is_valid(val_lat1, i))
+                or (val_lon1 != 0 and not ducklib.duckdb_validity_row_is_valid(val_lon1, i))
+                or (val_lat2 != 0 and not ducklib.duckdb_validity_row_is_valid(val_lat2, i))
+                or (val_lon2 != 0 and not ducklib.duckdb_validity_row_is_valid(val_lon2, i))
+            )
+            if null_in:
+                a_out[i] = math.nan
+                continue
+            p1 = math.radians(a_lat1[i])
+            p2 = math.radians(a_lat2[i])
+            dp = math.radians(a_lat2[i] - a_lat1[i])
+            dl = math.radians(a_lon2[i] - a_lon1[i])
+            s_dp = math.sin(dp / 2.0)
+            s_dl = math.sin(dl / 2.0)
+            a = s_dp * s_dp + math.cos(p1) * math.cos(p2) * s_dl * s_dl
+            # Rounding can nudge a a hair past 1.0 (or below 0.0); inside @njit
+            # asin/sqrt don't raise on an out-of-domain value, they return NaN, so
+            # a near-1.0 row would silently come back NaN. Clamp with comparisons
+            # rather than min/max so a genuine NaN a (an Inf/NaN input coordinate,
+            # which min/max would pin to 1.0 and a bogus max distance) still falls
+            # through to the NaN sentinel this callback emits for invalid rows.
+            if a > 1.0:
+                a = 1.0
+            elif a < 0.0:
+                a = 0.0
+            a_out[i] = 2.0 * R * math.asin(math.sqrt(a))
+    except Exception:
+        for i in range(n):
+            a_out[i] = math.nan
 
 
 @cfunc(nb_types.void(nb_types.intp, nb_types.intp, nb_types.intp))
@@ -132,9 +171,11 @@ def register_jit_udf(conn):
     ducklib.duckdb_destroy_logical_type(type_buf.ctypes.data)
     ducklib.duckdb_scalar_function_set_function(func_p, _haversine_chunk_cb.address)
     rc = ducklib.duckdb_register_scalar_function(conn_ptr, func_p)
-    assert rc == ducklib.DuckDBSuccess
+    # Registration never takes ownership of func_p, so destroy it on both the
+    # success and failure paths — i.e. before asserting on the return code.
     func_buf = numpy.array([func_p], dtype=numpy.intp)
     ducklib.duckdb_destroy_scalar_function(func_buf.ctypes.data)
+    assert rc == ducklib.DuckDBSuccess
 
 
 def setup_data(conn, n):
