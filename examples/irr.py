@@ -164,12 +164,9 @@ def irr_bisect(cashflows, periods, n, investment, target_npv):
 
 @njit
 def _irr_state_size_impl(info):
-    # A swallowed raise here would return the 0 default -- a 0-byte state slot
-    # that corrupts every later callback -- so the guard returns the true size.
-    try:
-        return numpy.uint64(8)
-    except Exception:
-        return numpy.uint64(8)
+    # One meminfo pointer per group: 8 bytes. No allocation or borrow here and
+    # a constant return cannot raise, so this callback needs no exception guard.
+    return numpy.uint64(8)
 
 
 @cfunc(nb_types.uint64(nb_types.intp))
@@ -223,10 +220,11 @@ def _irr_update_impl(info, chunk, states):
             continue
         iu = numpy.uint64(i)
         slot = carray(_cast_int_to_void_p(state_slots[iu]), (1,), dtype=numpy.intp)
-        # Borrow inside the guard: if vector_push raises (e.g. OOM growing the
-        # buffer), catching in-frame runs the borrow's decref; without a
-        # per-group error channel the offending row is dropped rather than
-        # leaked, and finalize reflects the reduced data.
+        # Borrow inside the guard: any exception escaping this impl is swallowed
+        # at the @cfunc boundary (see the module note above), which skips the
+        # borrow's scope-exit decref. Catching it in-frame runs that decref, so
+        # the offending row is dropped rather than leaked and finalize reflects
+        # the reduced data.
         try:
             # A failed init leaves a null slot; borrowing it would deref a null
             # meminfo (a segfault the try/except cannot catch), so skip it.
@@ -254,8 +252,9 @@ def _irr_combine_impl(info, source, target, count):
     tgt_slots = carray(_cast_int_to_void_p(target), (count,), dtype=numpy.intp)
     for i in range(count):
         iu = numpy.uint64(i)
-        # Both borrows live inside the guard: a raise in vector_extend releases
-        # source and target in-frame instead of leaking their meminfos.
+        # Both borrows live inside the guard: an exception escaping this impl,
+        # swallowed at the @cfunc boundary, would skip their decref -- catching
+        # it in-frame releases source and target instead of leaking them.
         try:
             src_slot = carray(_cast_int_to_void_p(src_slots[iu]), (1,), dtype=numpy.intp)
             tgt_slot = carray(_cast_int_to_void_p(tgt_slots[iu]), (1,), dtype=numpy.intp)
@@ -288,7 +287,8 @@ def _irr_finalize_impl(info, source, result, count, offset):
     for i in range(count):
         iu = numpy.uint64(i)
         # Sentinel on failure: NaN, matching the empty-group output below. The
-        # borrow lives inside the guard so a raise in irr_bisect releases it.
+        # borrow lives inside the guard so an exception escaping this impl --
+        # swallowed at the @cfunc boundary -- releases it instead of leaking.
         try:
             src_slot = carray(_cast_int_to_void_p(src_slots[iu]), (1,), dtype=numpy.intp)
             # A failed init leaves a null slot; emit the empty-group NaN rather
@@ -297,7 +297,10 @@ def _irr_finalize_impl(info, source, result, count, offset):
                 out_vals[numpy.uint64(offset + iu)] = math.nan
                 continue
             s = borrow_structref(irr_state_type, src_slot[0])
-            n = len(s.cashflows)
+            # cashflows and periods grow in lockstep; take the shorter length so
+            # _irr_npv can never read past the end of either if an exception
+            # caught mid-update ever left one vector longer than the other.
+            n = min(len(s.cashflows), len(s.periods))
             if n == 0:
                 out_vals[numpy.uint64(offset + iu)] = math.nan
             else:
