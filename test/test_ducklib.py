@@ -5150,6 +5150,23 @@ def test_fraud_score_udf_null_divergence():
     assert s_jit_filtered == s_py, s_jit_filtered
 
 
+def test_fraud_score_udf_all_valid_fast_path():
+    """With no NULL inputs every validity pointer is zero, so fr_jit runs the
+    check-free fast loop; its per-row scores must still match fr_py exactly."""
+    fr = _import_example("fraud_score")
+    types = ["DOUBLE", "TINYINT", "TINYINT", "TINYINT", "TINYINT", "INTEGER"]
+    conn = duckdb.connect()
+    conn.create_function("fr_py", fr.fraud_score_py, types, "INTEGER")
+    fr.register_jit_udf(conn)
+    fr.setup_data(conn, 5000)
+    cols = "amount, country, home_country, hour, risk_tier, recent_txns"
+    mism = conn.execute(
+        f"SELECT count(*) FROM transactions "
+        f"WHERE fr_py({cols}) IS DISTINCT FROM fr_jit({cols})").fetchone()[0]
+    conn.close()
+    assert mism == 0, mism
+
+
 def test_online_scoring_missing_key_raises():
     """score_jit's point lookup matches exactly one feature row; a missing id
     yields an empty fetched chunk, which the loop turns into a RuntimeError
