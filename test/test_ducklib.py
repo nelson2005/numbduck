@@ -5039,6 +5039,10 @@ def test_haversine_udf_nulls_and_antipodal():
     conn.create_function("hv_py", hv.haversine_py, ["DOUBLE"] * 4, "DOUBLE")
     variants = ["hv_py", "hv_jit"]
     try:
+        # haversine_arrow imports pyarrow lazily at call time, so probe it
+        # eagerly here: without this, registration succeeds on a pyarrow-less
+        # host and the ImportError surfaces mid-query as a _duckdb.Error.
+        import pyarrow.compute  # noqa: F401
         conn.create_function(
             "hv_arrow", hv.haversine_arrow, ["DOUBLE"] * 4, "DOUBLE",
             type="arrow")
