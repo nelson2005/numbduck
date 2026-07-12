@@ -5198,6 +5198,18 @@ def test_online_scoring_null_feature_raises():
     conn.close()
 
 
+def test_online_scoring_big_knob_scales_workload():
+    """NUMBDUCK_BENCH_BIG must enlarge the actually-scored workload, not just the
+    allocated dataset: the latency/scaling sample sizes are derived from the
+    dataset size, so a 10x-bigger dataset scores proportionally more events while
+    the default sizes stay put (and scaling always scores fewer than latency)."""
+    osc = _import_example("online_scoring")
+    assert osc.sample_sizes(50_000) == (5_000, 2_000)
+    lat_big, scale_big = osc.sample_sizes(500_000)
+    assert lat_big > 5_000 and scale_big > 2_000
+    assert scale_big < lat_big
+
+
 def test_irr_udaf_group_sentinels():
     """Through the real irr aggregate under GROUP BY: an all-NULL group yields
     NaN (no data), an out-of-bracket group yields +inf, and a normal group
