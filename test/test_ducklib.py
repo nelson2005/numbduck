@@ -4949,24 +4949,56 @@ def _import_example(name):
 
 def test_haversine_udf_nulls_and_antipodal():
     """hv_jit emits the NaN sentinel for a NULL-input row (validity gating) and
-    clamps an antipodal pair to the half-circumference (~pi*R km) instead of
-    returning NaN from an asin domain overshoot."""
+    clamps a genuine ~2-ULP antipodal overshoot to the half-circumference
+    (~pi*R km) instead of returning NaN from an asin domain overshoot. The
+    per-row Python/Arrow/JIT variants agree on the antipodal and overshoot rows
+    (aligned s*s form)."""
     hv = _import_example("haversine")
     conn = duckdb.connect()
+    conn.create_function("hv_py", hv.haversine_py, ["DOUBLE"] * 4, "DOUBLE")
+    variants = ["hv_py", "hv_jit"]
+    try:
+        conn.create_function(
+            "hv_arrow", hv.haversine_arrow, ["DOUBLE"] * 4, "DOUBLE",
+            type="arrow")
+        variants.insert(1, "hv_arrow")
+    except ImportError:
+        pass
     hv.register_jit_udf(conn)
-    conn.execute(
-        "CREATE TABLE pts AS SELECT * FROM (VALUES "
+    # Row 3 is a real finite near-antipodal pair whose float64 `a` overshoots 1.0
+    # by ~2 ULP: unclamped, math.asin(sqrt(a)) raises (hv_py) or yields NaN
+    # (hv_jit). Read the UDFs directly off the VALUES relation (no intervening
+    # TABLE): a materialized NULL DOUBLE decodes to NaN, but the VALUES vector
+    # leaves the NULL row's data slot as finite zero-page bytes, so an ungated
+    # read would fold them into a real distance -- that is what makes the
+    # validity gate observable here rather than coinciding with a stored NaN.
+    pts = (
+        "(VALUES "
         "(0.0, 0.0, 0.0, 0.0), "
         "(0.0, 0.0, 0.0, 180.0), "
-        "(CAST(NULL AS DOUBLE), 0.0, 10.0, 20.0)) "
-        "AS t(lat1, lon1, lat2, lon2)")
-    rows = conn.execute(
-        "SELECT hv_jit(lat1, lon1, lat2, lon2) FROM pts").fetchall()
+        "(58.1876182035592, 101.86801103432617, "
+        "-58.187618203558735, -78.13198896566404), "
+        "(CAST(NULL AS DOUBLE), 0.0, 10.0, 20.0)) AS t(lat1, lon1, lat2, lon2)")
+    cols = ", ".join(f"{v}(lat1, lon1, lat2, lon2)" for v in variants)
+    same, antipode, overshoot, null_row = conn.execute(
+        f"SELECT {cols} FROM {pts}").fetchall()
     conn.close()
-    same, antipodal, null_row = rows[0][0], rows[1][0], rows[2][0]
-    assert abs(same) < 1e-6, same
-    assert abs(antipodal - math.pi * 6371.0) < 1.0, antipodal
-    assert null_row is not None and math.isnan(null_row), null_row
+    jit = variants.index("hv_jit")
+    half = math.pi * 6371.0
+    for v in same:
+        assert v is not None and abs(v) < 1e-6, same
+    # Exact antipode and the 2-ULP overshoot both clamp to the half-circumference
+    # and the variants agree there (a would otherwise diverge near the asin
+    # singularity if the formula forms were not aligned).
+    for label, row in (("antipode", antipode), ("overshoot", overshoot)):
+        assert all(v is not None and math.isfinite(v) for v in row), (label, row)
+        assert abs(row[jit] - half) < 1.0, (label, row)
+        assert max(row) - min(row) < 1e-6, (label, row)
+    # NULL-input row: hv_jit writes the NaN sentinel; hv_py/hv_arrow yield NULL.
+    assert null_row[jit] is not None and math.isnan(null_row[jit]), null_row
+    for i, v in enumerate(variants):
+        if v != "hv_jit":
+            assert null_row[i] is None, (v, null_row)
 
 
 def test_haversine_udf_null_aggregation_divergence():
@@ -4979,20 +5011,24 @@ def test_haversine_udf_null_aggregation_divergence():
     conn = duckdb.connect()
     conn.create_function("hv_py", hv.haversine_py, ["DOUBLE"] * 4, "DOUBLE")
     hv.register_jit_udf(conn)
-    conn.execute(
-        "CREATE TABLE pts AS SELECT * FROM (VALUES "
+    # Query straight off VALUES (not a stored TABLE): a materialized NULL DOUBLE
+    # decodes to NaN bytes, which would mask the validity gate, whereas the
+    # VALUES vector leaves the NULL row's data slot as finite zero-page bytes --
+    # so without the gate hv_jit folds a real distance in and the sum assertion
+    # below (isnan) would fail instead of passing vacuously.
+    pts = (
+        "(VALUES "
         "(0.0, 0.0, 0.0, 0.0), "
         "(0.0, 0.0, 89.0, 179.0), "
-        "(CAST(NULL AS DOUBLE), 0.0, 10.0, 20.0)) "
-        "AS t(lat1, lon1, lat2, lon2)")
+        "(CAST(NULL AS DOUBLE), 0.0, 10.0, 20.0)) AS t(lat1, lon1, lat2, lon2)")
     args = "lat1, lon1, lat2, lon2"
     c_py = conn.execute(
-        f"SELECT count(*) FROM pts WHERE hv_py({args}) < 50").fetchone()[0]
+        f"SELECT count(*) FROM {pts} WHERE hv_py({args}) < 50").fetchone()[0]
     c_jit = conn.execute(
-        f"SELECT count(*) FROM pts WHERE hv_jit({args}) < 50").fetchone()[0]
+        f"SELECT count(*) FROM {pts} WHERE hv_jit({args}) < 50").fetchone()[0]
     assert c_py == c_jit == 1, (c_py, c_jit)
-    s_py = conn.execute(f"SELECT sum(hv_py({args})) FROM pts").fetchone()[0]
-    s_jit = conn.execute(f"SELECT sum(hv_jit({args})) FROM pts").fetchone()[0]
+    s_py = conn.execute(f"SELECT sum(hv_py({args})) FROM {pts}").fetchone()[0]
+    s_jit = conn.execute(f"SELECT sum(hv_jit({args})) FROM {pts}").fetchone()[0]
     conn.close()
     assert s_py is not None and math.isfinite(s_py), s_py
     assert s_jit is not None and math.isnan(s_jit), s_jit

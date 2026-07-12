@@ -59,16 +59,25 @@ PY_MAX_N = 10_000
 def haversine_py(lat1, lon1, lat2, lon2):
     # Reference variant; assumes finite, in-domain coordinates (the demo's
     # generated data). An infinite coordinate makes CPython math.cos/asin raise
-    # and abort the query, whereas the @njit variant returns NaN. The JIT path's
-    # a>1/a<0 clamps are defensive: the float64 formula's worst antipodal
-    # overshoot (~2 ULP over 1.0) is absorbed by sqrt before asin, so they do
-    # not change results on real inputs.
+    # and abort the query, whereas the @njit variant returns NaN. The a > 1.0
+    # clamp is load-bearing, not decorative: on real finite near-antipodal
+    # coordinates the float64 `a` rounds up to ~2 ULP over 1.0, and sqrt does not
+    # pull that back (sqrt(1 + 2*2**-52) == 1 + 2**-52 > 1.0; only a 1-ULP
+    # overshoot rounds back through sqrt), so an unclamped math.asin(math.sqrt(a))
+    # would raise ValueError and abort the whole query. The overshoot is pure
+    # float error and the true value is asin(1) -- the antipodal distance pi*R --
+    # so clamp to it. All three variants share this s*s form and this clamp, so
+    # they agree even at the asin singularity near a == 1.0.
     R = 6371.0
     p1 = math.radians(lat1)
     p2 = math.radians(lat2)
     dp = math.radians(lat2 - lat1)
     dl = math.radians(lon2 - lon1)
-    a = math.sin(dp / 2.0) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2.0) ** 2
+    s_dp = math.sin(dp / 2.0)
+    s_dl = math.sin(dl / 2.0)
+    a = s_dp * s_dp + math.cos(p1) * math.cos(p2) * s_dl * s_dl
+    if a > 1.0:
+        a = 1.0
     return 2.0 * R * math.asin(math.sqrt(a))
 
 
@@ -82,13 +91,17 @@ def haversine_arrow(lat1, lon1, lat2, lon2):
     p2 = pc.multiply(lat2, pi_180)
     dp = pc.multiply(pc.subtract(lat2, lat1), pi_180)
     dl = pc.multiply(pc.subtract(lon2, lon1), pi_180)
+    s_dp = pc.sin(pc.divide(dp, 2.0))
+    s_dl = pc.sin(pc.divide(dl, 2.0))
     a = pc.add(
-        pc.power(pc.sin(pc.divide(dp, 2.0)), 2),
-        pc.multiply(
-            pc.multiply(pc.cos(p1), pc.cos(p2)),
-            pc.power(pc.sin(pc.divide(dl, 2.0)), 2),
-        ),
+        pc.multiply(s_dp, s_dp),
+        pc.multiply(pc.multiply(pc.cos(p1), pc.cos(p2)), pc.multiply(s_dl, s_dl)),
     )
+    # Same load-bearing clamp as the other two variants (matched s*s form, so `a`
+    # rounds identically): a ~2-ULP antipodal overshoot makes pc.asin silently
+    # return NaN, so pin `a` to 1.0 and return asin(1) = the antipodal distance.
+    # skip_nulls=False keeps a NULL-input row NULL instead of clamping it to 1.0.
+    a = pc.min_element_wise(a, 1.0, skip_nulls=False)
     return pc.multiply(2.0 * R, pc.asin(pc.sqrt(a)))
 
 
@@ -238,8 +251,10 @@ def main():
     register_jit_udf(conn)
 
     rows = []
+    timings = []
     for n in ROW_COUNTS:
         t_py, t_arrow, t_jit = run_one(conn, n)
+        timings.append((n, t_py, t_arrow, t_jit))
         py_str = f"{t_py:.3f}s" if t_py is not None else "n/a"
         py_ratio = f"{t_py/t_jit:.0f}x" if t_py is not None else "n/a"
         rows.append([
@@ -257,17 +272,23 @@ def main():
         alignments=[">", ">", ">", ">", ">", ">"],
     ))
     print()
+    # Interpolate every ratio/timing straight from the measurements above so the
+    # prose can never contradict the printed table (only the qualitative story is
+    # fixed). The first tier runs all three variants; the last is the widest N.
+    n0, t_py0, t_arrow0, t_jit0 = timings[0]
+    nL, _, t_arrowL, t_jitL = timings[-1]
     print(
         "  Discussion:\n"
-        "    At 10K rows the JIT chunk callback is ~400x faster than the per-row\n"
-        "    Python scalar UDF and ~8x faster than the PyArrow expression UDF.\n"
-        "    The gap to Arrow widens with N: at 1M rows the JIT runs in ~14ms\n"
-        "    while the Arrow chain takes ~1.4s — a ~100x gap. The win comes from\n"
-        "    no Python crossings per chunk, LLVM-fused math (sin/cos/asin/sqrt\n"
-        "    inlined into one tight loop), and no intermediate Arrow arrays for\n"
-        "    each pc.* step. Python's per-row interpreter round-trip is so\n"
-        "    expensive at 100K+ that we omit it from the table — extrapolating\n"
-        "    from the 10K timing, it would dominate the runtime budget by far."
+        f"    At {n0:,d} rows the JIT chunk callback is ~{t_py0 / t_jit0:.0f}x\n"
+        f"    faster than the per-row Python scalar UDF and ~{t_arrow0 / t_jit0:.0f}x\n"
+        f"    faster than the PyArrow expression UDF. The gap to Arrow widens with\n"
+        f"    N: at {nL:,d} rows the JIT runs in ~{t_jitL * 1000:.0f}ms while the\n"
+        f"    Arrow chain takes ~{t_arrowL:.2f}s — a ~{t_arrowL / t_jitL:.0f}x gap.\n"
+        "    The win comes from no Python crossings per chunk, LLVM-fused math\n"
+        "    (sin/cos/asin/sqrt inlined into one tight loop), and no intermediate\n"
+        "    Arrow arrays for each pc.* step. Python's per-row interpreter\n"
+        "    round-trip is so expensive at 100K+ that we omit it from the table —\n"
+        "    extrapolating from the 10K timing, it would dominate the budget."
     )
     conn.close()
 
