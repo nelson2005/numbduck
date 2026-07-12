@@ -98,17 +98,48 @@ irr_state_type = IRRStateType(_irr_state_fields)
 IRR_NO_BRACKET = math.inf
 
 
-@njit(error_model="numpy")
-def _irr_npv(cashflows, periods, n, investment, target_npv, r):
-    # error_model="numpy": at the r=-0.99 bracket end (1+r)**period underflows
-    # to 0.0 for period >= ~162, and the default 'python' error model would
-    # raise ZeroDivisionError on the divide; "numpy" yields +inf instead, which
-    # keeps the far-future present value astronomically large (its true limit)
-    # and lets the sign-based bracket test below stay correct.
-    npv = -investment - target_npv
+@njit
+def _irr_npv_sign(cashflows, periods, n, investment, target_npv, r):
+    # Return a value with the SAME SIGN as NPV(r), evaluated in log space so no
+    # term can overflow or divide by zero. Bisection converges on the width of
+    # the rate bracket and only ever needs the sign of NPV at a probe rate, so an
+    # overflow-free sign is all that is required.
+    #
+    #   NPV(r) = -investment - target_npv + sum_i cashflows[i] * (1+r)**(-p_i)
+    #          = -investment - target_npv + sum_i cashflows[i] * exp(-p_i * L)
+    #
+    # with L = log1p(r). Factoring out the largest exponent M over the nonzero
+    # terms (the -investment-target_npv constant sits at period 0, exponent 0):
+    #   sign(NPV(r)) == sign( sum_i c_i * exp(-p_i*L - M) )
+    # because exp(M) > 0. Every scaled term then has magnitude <= |c_i|, so the
+    # sum cannot overflow and the r=-0.99 far-period underflow (1+r)**p -> 0 that
+    # produced 0*inf -> NaN and inf + -inf -> NaN in a raw NPV can no longer
+    # arise. Zero cashflows are skipped: they contribute nothing at any rate but
+    # would otherwise inflate M (a zero flow at a far period) and underflow the
+    # real terms to a spurious 0. A NaN input still propagates into the sum, so
+    # the caller's isnan check keeps detecting a NaN DOUBLE; an exactly-0.0
+    # result carries no sign information.
+    log1p_r = math.log1p(r)
+    const = -investment - target_npv
+    have_term = const != 0.0
+    max_exp = 0.0
     for i in range(n):
-        npv += cashflows[i] / (1.0 + r) ** periods[i]
-    return npv
+        if cashflows[i] == 0.0:
+            continue
+        e = -periods[i] * log1p_r
+        if not have_term or e > max_exp:
+            max_exp = e
+            have_term = True
+    if not have_term:
+        return 0.0
+    scaled = 0.0
+    if const != 0.0:
+        scaled += const * math.exp(-max_exp)
+    for i in range(n):
+        if cashflows[i] == 0.0:
+            continue
+        scaled += cashflows[i] * math.exp(-periods[i] * log1p_r - max_exp)
+    return scaled
 
 
 @njit
@@ -137,32 +168,37 @@ def irr_bisect(cashflows, periods, n, investment, target_npv):
     """
     r_lo = -0.99
     r_hi = 10.0
-    npv_lo = _irr_npv(cashflows, periods, n, investment, target_npv, r_lo)
-    npv_hi = _irr_npv(cashflows, periods, n, investment, target_npv, r_hi)
-    if math.isnan(npv_lo) or math.isnan(npv_hi):
-        # A NaN cashflow/investment/target is a legal DOUBLE (not SQL NULL, so
-        # the validity gate never skipped it) and makes an endpoint NaN. Return
-        # the empty-group NaN rather than misreport it as the +inf out-of-bracket
-        # sentinel, which callers read as "root above the bracket".
+    sign_lo = _irr_npv_sign(cashflows, periods, n, investment, target_npv, r_lo)
+    sign_hi = _irr_npv_sign(cashflows, periods, n, investment, target_npv, r_hi)
+    if math.isnan(sign_lo) or math.isnan(sign_hi):
+        # A NaN cashflow/period/investment/target is a legal DOUBLE (not SQL
+        # NULL, so the validity gate never skipped it) and propagates into the
+        # sign sum. Return the empty-group NaN rather than misreport it as the
+        # +inf out-of-bracket sentinel, which callers read as "root above the
+        # bracket". The overflow-free sign evaluation cannot manufacture this NaN
+        # from a finite far-period stream, so an endpoint NaN now means only a
+        # NaN DOUBLE input -- never a valid group.
         return math.nan
-    if npv_lo == 0.0:
-        return r_lo
-    if npv_hi == 0.0:
-        return r_hi
-    if (npv_lo > 0.0) == (npv_hi > 0.0):
+    if (sign_lo > 0.0) == (sign_hi > 0.0):
+        # Endpoints share a sign, OR one carries no sign information (an
+        # exactly-0.0 sign sum -- e.g. an all-zero-cashflow group): no single
+        # sign change straddles the bracket. Return the IRR_NO_BRACKET sentinel,
+        # kept distinct from the empty-group NaN so a fully valid group is never
+        # read as "no data". This covers a root outside [-0.99, 10.0] and any
+        # EVEN number of in-bracket roots.
         return IRR_NO_BRACKET
     # Keep the half that still straddles the sign change. NPV can either fall
-    # (conventional: pay first, receive later -> npv_lo > 0) or rise
-    # (financing: receive first, repay later -> npv_lo < 0) across the bracket,
-    # so bisect against npv_lo's sign rather than assuming a fixed orientation.
-    lo_positive = npv_lo > 0.0
+    # (conventional: pay first, receive later -> sign_lo > 0) or rise
+    # (financing: receive first, repay later -> sign_lo < 0) across the bracket,
+    # so bisect against sign_lo's sign rather than assuming a fixed orientation.
+    lo_positive = sign_lo > 0.0
     rate_tol = 1e-12
     for _ in range(100):
         if (r_hi - r_lo) < rate_tol:
             break
         r_mid = (r_lo + r_hi) / 2.0
-        npv = _irr_npv(cashflows, periods, n, investment, target_npv, r_mid)
-        if (npv > 0.0) == lo_positive:
+        sign_mid = _irr_npv_sign(cashflows, periods, n, investment, target_npv, r_mid)
+        if (sign_mid > 0.0) == lo_positive:
             r_lo = r_mid
         else:
             r_hi = r_mid
@@ -329,7 +365,7 @@ def _irr_finalize_impl(info, source, result, count, offset):
             s = borrow_structref(irr_state_type, src_slot[0])
             # update/combine roll back on a mid-row failure, so the two vectors
             # are always paired; take the shorter length anyway as a cheap read
-            # bound so _irr_npv can never index past either.
+            # bound so _irr_npv_sign can never index past either.
             n = min(len(s.cashflows), len(s.periods))
             if n == 0:
                 out_vals[offset + i] = math.nan

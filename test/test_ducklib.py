@@ -4545,6 +4545,66 @@ def test_irr_bisect_nan_input_returns_nan():
         numpy.array([math.nan], dtype=numpy.float64),
         numpy.array([12.0], dtype=numpy.float64), 1, 10000.0, 0.0)
     assert math.isnan(rate), rate
+
+
+def test_irr_bisect_zero_cashflow_far_period_matches():
+    """A zero cashflow at a far period (>= 162) contributes nothing to NPV at
+    any rate, so a fully valid group plus one such row must return the SAME root
+    as the group without it. A raw NPV at r=-0.99 instead evaluates 0.0 * inf =
+    NaN there (the discount factor underflows to 0.0 for period >= ~162), so the
+    old solver misreported the valid group as the empty-group NaN.
+    """
+    irr = _import_irr_example()
+    with_zero = irr.irr_bisect(
+        numpy.array([13000.0, 0.0], dtype=numpy.float64),
+        numpy.array([12.0, 200.0], dtype=numpy.float64), 2, 10000.0, 0.0)
+    without_zero = irr.irr_bisect(
+        numpy.array([13000.0], dtype=numpy.float64),
+        numpy.array([12.0], dtype=numpy.float64), 1, 10000.0, 0.0)
+    expected = (13000.0 / 10000.0) ** (1.0 / 12.0) - 1.0
+    assert math.isfinite(with_zero), with_zero
+    assert with_zero == without_zero, (with_zero, without_zero)
+    assert abs(with_zero - expected) < 1e-9, (with_zero, expected)
+
+
+def test_irr_bisect_mixed_sign_far_period_converges():
+    """A mixed-sign stream whose opposite-sign cashflows both sit at far periods
+    (>= 162) makes a raw NPV at r=-0.99 evaluate inf + -inf = NaN, which the old
+    solver misreported as the empty-group NaN. The overflow-free sign evaluation
+    keeps both endpoint signs correct, so the single in-bracket root is found.
+    Cross-checked against an exact-rational bisection over the same bracket --
+    Fraction arithmetic never underflows, so it is independent of the solver's
+    floating-point sign trick.
+    """
+    from fractions import Fraction
+    irr = _import_irr_example()
+    cashflows = [150.0, -1.0, 1.0]
+    periods = [1.0, 200.0, 201.0]
+    rate = irr.irr_bisect(
+        numpy.array(cashflows, dtype=numpy.float64),
+        numpy.array(periods, dtype=numpy.float64), 3, 100.0, 0.0)
+
+    def npv_sign(r):
+        total = Fraction(-100)
+        for c, p in zip(cashflows, periods):
+            total += Fraction(c) / (1 + r) ** int(p)
+        return (total > 0) - (total < 0)
+
+    lo, hi = Fraction(-99, 100), Fraction(10)
+    lo_pos = npv_sign(lo) > 0
+    for _ in range(200):
+        if hi - lo < Fraction(1, 10 ** 15):
+            break
+        mid = (lo + hi) / 2
+        if (npv_sign(mid) > 0) == lo_pos:
+            lo = mid
+        else:
+            hi = mid
+    ref = float((lo + hi) / 2)
+    assert math.isfinite(rate), rate
+    assert abs(rate - ref) < 1e-9, (rate, ref)
+
+
 # --- @cfunc exception-guard coverage for structref-backed UDAF callbacks ---
 #
 # A Python exception raised from an @njit impl invoked through a @cfunc is
