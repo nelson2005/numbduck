@@ -4645,11 +4645,6 @@ def _welford_update_raise_unguarded_impl(info, chunk, states):
         welford_update(s, _cfunc_guard_raise(in_vals[i]))
 
 
-@cfunc(nb_types.void(nb_types.intp, nb_types.intp, nb_types.intp))
-def _welford_update_raise_unguarded_cb(info, chunk, states):
-    _welford_update_raise_unguarded_impl(info, chunk, states)
-
-
 @njit
 def _welford_update_raise_guarded_impl(info, chunk, states):
     n = ducklib.duckdb_data_chunk_get_size(chunk)
@@ -4670,9 +4665,20 @@ def _welford_update_raise_guarded_impl(info, chunk, states):
             pass
 
 
-@cfunc(nb_types.void(nb_types.intp, nb_types.intp, nb_types.intp))
-def _welford_update_raise_guarded_cb(info, chunk, states):
-    _welford_update_raise_guarded_impl(info, chunk, states)
+@functools.cache
+def _welford_raise_callbacks():
+    """Compile the raising-update @cfunc probes on first use, keeping their eager
+    compilation out of module import so collection cost stays near base."""
+
+    @cfunc(nb_types.void(nb_types.intp, nb_types.intp, nb_types.intp))
+    def unguarded_cb(info, chunk, states):
+        _welford_update_raise_unguarded_impl(info, chunk, states)
+
+    @cfunc(nb_types.void(nb_types.intp, nb_types.intp, nb_types.intp))
+    def guarded_cb(info, chunk, states):
+        _welford_update_raise_guarded_impl(info, chunk, states)
+
+    return unguarded_cb, guarded_cb
 
 
 def _register_raising_welford(conn, name, update_cb):
@@ -4730,7 +4736,8 @@ def test_udaf_cfunc_unguarded_raise_leaks_borrowed_state():
 
     The swallow makes numba print the ignored exception, which pytest surfaces
     as an unraisable-exception warning; it is expected here and filtered."""
-    leak, _ = _run_raising_udaf_nrt_delta(_welford_update_raise_unguarded_cb)
+    unguarded_cb, _ = _welford_raise_callbacks()
+    leak, _ = _run_raising_udaf_nrt_delta(unguarded_cb)
     assert leak > 0, f"expected an NRT leak without the guard, got delta {leak}"
 
 
@@ -4739,7 +4746,8 @@ def test_udaf_cfunc_guarded_raise_no_leak():
     the exception in-frame, so numba runs the borrow's decref: NRT alloc == free
     even though every row's update raises. This is the guard the example
     aggregate callbacks use."""
-    leak, value = _run_raising_udaf_nrt_delta(_welford_update_raise_guarded_cb)
+    _, guarded_cb = _welford_raise_callbacks()
+    leak, value = _run_raising_udaf_nrt_delta(guarded_cb)
     assert leak == 0, f"guarded raise must not leak, got NRT delta {leak}"
     # Every row's update raised, so the guard dropped them all: the Welford
     # finalize sees an empty state and yields no real number. This pins that the
@@ -4755,8 +4763,15 @@ class _MergeStateType(nb_types.StructRef):
 
 
 _merge_state_fields = [("total", nb_types.float64), ("merges", nb_types.int64)]
+# cache=False keeps numbox's generated structref constructor out of numba's
+# on-disk cache. That cache is keyed by struct name + fields only and resolves
+# _MergeStateType through the module name it was first compiled under, so once it
+# is warm, importing this file under any other qualified name fails type
+# inference (examples/irr.py documents the same trap for IRRState). Disabling the
+# cache has no measurable cost here and keeps the module importable under any name.
 _MergeState = make_structref(
-    "_MergeState", dict(_merge_state_fields), _MergeStateType)
+    "_MergeState", dict(_merge_state_fields), _MergeStateType,
+    jit_options={"cache": False})
 merge_state_type = _MergeStateType(_merge_state_fields)
 
 
@@ -4765,21 +4780,11 @@ def _merge_state_size_impl(info):
     return numpy.uint64(8)
 
 
-@cfunc(nb_types.uint64(nb_types.intp))
-def _merge_state_size_cb(info):
-    return _merge_state_size_impl(info)
-
-
 @njit
 def _merge_init_impl(info, state):
     s = _MergeState(0.0, 0)
     slot = carray(_cast_int_to_void_p(state), (1,), dtype=numpy.intp)
     slot[0] = export_meminfo(s)
-
-
-@cfunc(nb_types.void(nb_types.intp, nb_types.intp))
-def _merge_init_cb(info, state):
-    _merge_init_impl(info, state)
 
 
 @njit
@@ -4796,11 +4801,6 @@ def _merge_update_impl(info, chunk, states):
             _cast_int_to_void_p(state_slots[i]), (1,), dtype=numpy.intp)
         s = borrow_structref(merge_state_type, slot[0])
         s.total += in_vals[i]
-
-
-@cfunc(nb_types.void(nb_types.intp, nb_types.intp, nb_types.intp))
-def _merge_update_cb(info, chunk, states):
-    _merge_update_impl(info, chunk, states)
 
 
 @njit
@@ -4822,12 +4822,6 @@ def _merge_combine_impl(info, source, target, count):
         tgt.merges += src.merges + 1
 
 
-@cfunc(nb_types.void(nb_types.intp, nb_types.intp,
-                     nb_types.intp, nb_types.uint64))
-def _merge_combine_cb(info, source, target, count):
-    _merge_combine_impl(info, source, target, count)
-
-
 @njit
 def _merge_finalize_impl(info, source, result, count, offset):
     out_data = ducklib.duckdb_vector_get_data(result)
@@ -4844,12 +4838,6 @@ def _merge_finalize_impl(info, source, result, count, offset):
         out_vals[numpy.uint64(offset + iu)] = numpy.float64(s.merges)
 
 
-@cfunc(nb_types.void(nb_types.intp, nb_types.intp, nb_types.intp,
-                     nb_types.uint64, nb_types.uint64))
-def _merge_finalize_cb(info, source, result, count, offset):
-    _merge_finalize_impl(info, source, result, count, offset)
-
-
 @njit
 def _merge_destroy_impl(states, count):
     state_slots = carray(
@@ -4861,14 +4849,46 @@ def _merge_destroy_impl(states, count):
         release_meminfo(slot[0])
 
 
-@cfunc(nb_types.void(nb_types.intp, nb_types.uint64))
-def _merge_destroy_cb(states, count):
-    _merge_destroy_impl(states, count)
+@functools.cache
+def _merge_probe_callbacks():
+    """Compile the merge-counter UDAF @cfunc callbacks on first use, keeping their
+    eager compilation out of module import so collection cost stays near base.
+    Returns the six callbacks in DuckDB's callback order."""
+
+    @cfunc(nb_types.uint64(nb_types.intp))
+    def state_size_cb(info):
+        return _merge_state_size_impl(info)
+
+    @cfunc(nb_types.void(nb_types.intp, nb_types.intp))
+    def init_cb(info, state):
+        _merge_init_impl(info, state)
+
+    @cfunc(nb_types.void(nb_types.intp, nb_types.intp, nb_types.intp))
+    def update_cb(info, chunk, states):
+        _merge_update_impl(info, chunk, states)
+
+    @cfunc(nb_types.void(nb_types.intp, nb_types.intp,
+                         nb_types.intp, nb_types.uint64))
+    def combine_cb(info, source, target, count):
+        _merge_combine_impl(info, source, target, count)
+
+    @cfunc(nb_types.void(nb_types.intp, nb_types.intp, nb_types.intp,
+                         nb_types.uint64, nb_types.uint64))
+    def finalize_cb(info, source, result, count, offset):
+        _merge_finalize_impl(info, source, result, count, offset)
+
+    @cfunc(nb_types.void(nb_types.intp, nb_types.uint64))
+    def destroy_cb(states, count):
+        _merge_destroy_impl(states, count)
+
+    return state_size_cb, init_cb, update_cb, combine_cb, finalize_cb, destroy_cb
 
 
 def _register_merge_probe(conn):
     from numbduck.pybridge import extract_connection_ptr
 
+    (state_size_cb, init_cb, update_cb, combine_cb, finalize_cb,
+     destroy_cb) = _merge_probe_callbacks()
     conn_p = extract_connection_ptr(conn)
     func_p = ducklib.duckdb_create_aggregate_function()
     ducklib.duckdb_aggregate_function_set_name(
@@ -4879,11 +4899,11 @@ def _register_merge_probe(conn):
     tb = numpy.array([dbl], dtype=numpy.intp)
     ducklib.duckdb_destroy_logical_type(tb.ctypes.data)
     ducklib.duckdb_aggregate_function_set_functions(
-        func_p, _merge_state_size_cb.address, _merge_init_cb.address,
-        _merge_update_cb.address, _merge_combine_cb.address,
-        _merge_finalize_cb.address)
+        func_p, state_size_cb.address, init_cb.address,
+        update_cb.address, combine_cb.address,
+        finalize_cb.address)
     ducklib.duckdb_aggregate_function_set_destructor(
-        func_p, _merge_destroy_cb.address)
+        func_p, destroy_cb.address)
     rc = ducklib.duckdb_register_aggregate_function(conn_p, func_p)
     assert rc == ducklib.DuckDBSuccess
     fb = numpy.array([func_p], dtype=numpy.intp)
@@ -4955,35 +4975,36 @@ def _load_examples_common():
     return _common
 
 
-_examples_common = _load_examples_common()
-
-
 def test_assert_results_match_both_nan_equal():
     """Variants that all legitimately produce NaN agree; NaN != NaN under
     IEEE-754 must not be reported as a spurious mismatch."""
-    _examples_common.assert_results_match(math.nan, math.nan, label="both nan")
+    common = _load_examples_common()
+    common.assert_results_match(math.nan, math.nan, label="both nan")
 
 
 def test_assert_results_match_nan_vs_number_fails():
     """A NaN against a real value is a genuine disagreement and still fails."""
+    common = _load_examples_common()
     with pytest.raises(AssertionError):
-        _examples_common.assert_results_match(math.nan, 1.0, label="nan vs number")
+        common.assert_results_match(math.nan, 1.0, label="nan vs number")
 
 
 def test_format_table_wrong_width_row_raises():
     """A row whose cell count differs from the header count is rejected up front,
     both when it is too long (would IndexError) and too short (would truncate)."""
+    common = _load_examples_common()
     headers = ["A", "B"]
     alignments = ["<", "<"]
     with pytest.raises(ValueError):
-        _examples_common.format_table(headers, [["1", "2", "3"]], alignments)
+        common.format_table(headers, [["1", "2", "3"]], alignments)
     with pytest.raises(ValueError):
-        _examples_common.format_table(headers, [["1"]], alignments)
+        common.format_table(headers, [["1"]], alignments)
 
 
 def test_format_table_renders():
     """A well-formed table renders one line per header row and data row."""
-    out = _examples_common.format_table(
+    common = _load_examples_common()
+    out = common.format_table(
         ["Variant", "Time"],
         [["Python", "1.000s"], ["JIT", "0.010s"]],
         ["<", ">"],
@@ -5034,14 +5055,17 @@ def test_haversine_udf_nulls_and_antipodal():
     # validity gate observable here rather than coinciding with a stored NaN.
     pts = (
         "(VALUES "
-        "(0.0, 0.0, 0.0, 0.0), "
-        "(0.0, 0.0, 0.0, 180.0), "
-        "(58.1876182035592, 101.86801103432617, "
+        "(0, 0.0, 0.0, 0.0, 0.0), "
+        "(1, 0.0, 0.0, 0.0, 180.0), "
+        "(2, 58.1876182035592, 101.86801103432617, "
         "-58.187618203558735, -78.13198896566404), "
-        "(CAST(NULL AS DOUBLE), 0.0, 10.0, 20.0)) AS t(lat1, lon1, lat2, lon2)")
+        "(3, CAST(NULL AS DOUBLE), 0.0, 10.0, 20.0)) "
+        "AS t(rid, lat1, lon1, lat2, lon2)")
     cols = ", ".join(f"{v}(lat1, lon1, lat2, lon2)" for v in variants)
+    # ORDER BY an explicit row id so the positional unpack below is independent
+    # of VALUES scan order (mirrors the sibling divergence/sentinel tests).
     same, antipode, overshoot, null_row = conn.execute(
-        f"SELECT {cols} FROM {pts}").fetchall()
+        f"SELECT {cols} FROM {pts} ORDER BY rid").fetchall()
     conn.close()
     jit = variants.index("hv_jit")
     half = math.pi * 6371.0
@@ -5109,10 +5133,10 @@ def test_fraud_score_udf_null_sentinel():
         "AS t(amount, country, home_country, hour, risk_tier, recent_txns)")
     rows = conn.execute(
         "SELECT fr_jit(amount, country, home_country, hour, risk_tier, "
-        "recent_txns) FROM tx").fetchall()
+        "recent_txns) FROM tx ORDER BY amount NULLS LAST").fetchall()
     conn.close()
-    assert rows[0][0] > 0, rows[0]
-    assert rows[1][0] == fr.NULL_SCORE, rows[1]
+    assert rows[0][0] > 0, rows[0]              # valid row (amount = 5000)
+    assert rows[1][0] == fr.NULL_SCORE, rows[1]  # NULL-amount row sorts last
 
 
 def test_fraud_score_udf_null_divergence():
@@ -5169,8 +5193,10 @@ def test_fraud_score_udf_all_valid_fast_path():
 
 def test_online_scoring_missing_key_raises():
     """score_jit's point lookup matches exactly one feature row; a missing id
-    yields an empty fetched chunk, which the loop turns into a RuntimeError
-    rather than dereferencing a NULL chunk pointer."""
+    makes duckdb_fetch_chunk return a NULL chunk (chunk_p == 0), which the loop's
+    null-pointer guard turns into a RuntimeError instead of dereferencing it. The
+    companion ``size == 0`` half of that guard is defensive: this missing-key path
+    reaches the null-pointer half, not the empty-chunk half."""
     osc = _import_example("online_scoring")
     conn = duckdb.connect()
     osc.setup_features(conn, 8)
@@ -5236,53 +5262,59 @@ def test_irr_udaf_group_sentinels():
 
 # irr raising-update harness: pins that update rolls a mid-row push failure back
 # to the row boundary so cashflows/periods stay paired (not just truncated).
-_irr_example = _import_example("irr")
-_irr_state_type = _irr_example.irr_state_type
+# Built lazily so importing the irr example and compiling this probe stay out of
+# module import; the first test that needs it pays the cost.
+@functools.cache
+def _irr_rollback_probe():
+    irr = _import_example("irr")
+    irr_state_type = irr.irr_state_type
 
+    @njit
+    def probe_impl(info, chunk, states):
+        n = ducklib.duckdb_data_chunk_get_size(chunk)
+        cf = carray(_cast_int_to_void_p(ducklib.duckdb_vector_get_data(
+            ducklib.duckdb_data_chunk_get_vector(chunk, 0))), (n,), dtype=numpy.float64)
+        pd = carray(_cast_int_to_void_p(ducklib.duckdb_vector_get_data(
+            ducklib.duckdb_data_chunk_get_vector(chunk, 1))), (n,), dtype=numpy.float64)
+        inv = carray(_cast_int_to_void_p(ducklib.duckdb_vector_get_data(
+            ducklib.duckdb_data_chunk_get_vector(chunk, 2))), (n,), dtype=numpy.float64)
+        tgt = carray(_cast_int_to_void_p(ducklib.duckdb_vector_get_data(
+            ducklib.duckdb_data_chunk_get_vector(chunk, 3))), (n,), dtype=numpy.float64)
+        slots = carray(_cast_int_to_void_p(states), (n,), dtype=numpy.intp)
+        for i in range(n):
+            slot = carray(_cast_int_to_void_p(slots[i]), (1,), dtype=numpy.intp)
+            if slot[0] == 0:
+                continue
+            s = borrow_structref(irr_state_type, slot[0])
+            n0 = s.cashflows.size
+            try:
+                vector_push(s.cashflows, cf[i])
+                vector_push(s.periods, pd[i])
+                # A negative period marks the poison row: raise via a nested call
+                # AFTER both pushes have grown the vectors, so the except path
+                # must reset BOTH lengths to the row boundary -- exercising both
+                # rollback lines rather than leaving the periods reset a no-op.
+                if pd[i] < 0.0:
+                    _cfunc_guard_raise(1.0)
+                if s.initialized == 0:
+                    s.investment = inv[i]
+                    s.target_npv = tgt[i]
+                    s.initialized = 1
+            except Exception:
+                s.cashflows.size = n0
+                s.periods.size = n0
 
-@njit
-def _irr_update_rollback_probe_impl(info, chunk, states):
-    n = ducklib.duckdb_data_chunk_get_size(chunk)
-    cf = carray(_cast_int_to_void_p(ducklib.duckdb_vector_get_data(
-        ducklib.duckdb_data_chunk_get_vector(chunk, 0))), (n,), dtype=numpy.float64)
-    pd = carray(_cast_int_to_void_p(ducklib.duckdb_vector_get_data(
-        ducklib.duckdb_data_chunk_get_vector(chunk, 1))), (n,), dtype=numpy.float64)
-    inv = carray(_cast_int_to_void_p(ducklib.duckdb_vector_get_data(
-        ducklib.duckdb_data_chunk_get_vector(chunk, 2))), (n,), dtype=numpy.float64)
-    tgt = carray(_cast_int_to_void_p(ducklib.duckdb_vector_get_data(
-        ducklib.duckdb_data_chunk_get_vector(chunk, 3))), (n,), dtype=numpy.float64)
-    slots = carray(_cast_int_to_void_p(states), (n,), dtype=numpy.intp)
-    for i in range(n):
-        slot = carray(_cast_int_to_void_p(slots[i]), (1,), dtype=numpy.intp)
-        if slot[0] == 0:
-            continue
-        s = borrow_structref(_irr_state_type, slot[0])
-        n0 = s.cashflows.size
-        try:
-            vector_push(s.cashflows, cf[i])
-            # A negative period marks the poison row: raise via a nested call
-            # after the first push but before the second, mirroring a mid-row
-            # push failure. The rollback must drop it, not misalign the group.
-            if pd[i] < 0.0:
-                _cfunc_guard_raise(1.0)
-            vector_push(s.periods, pd[i])
-            if s.initialized == 0:
-                s.investment = inv[i]
-                s.target_npv = tgt[i]
-                s.initialized = 1
-        except Exception:
-            s.cashflows.size = n0
-            s.periods.size = n0
+    @cfunc(nb_types.void(nb_types.intp, nb_types.intp, nb_types.intp))
+    def probe_cb(info, chunk, states):
+        probe_impl(info, chunk, states)
 
-
-@cfunc(nb_types.void(nb_types.intp, nb_types.intp, nb_types.intp))
-def _irr_update_rollback_probe_cb(info, chunk, states):
-    _irr_update_rollback_probe_impl(info, chunk, states)
+    return irr, probe_cb
 
 
 def _register_irr_with_update(conn, name, update_cb):
     from numbduck.pybridge import extract_connection_ptr
 
+    irr = _import_example("irr")
     conn_p = extract_connection_ptr(conn)
     func_p = ducklib.duckdb_create_aggregate_function()
     ducklib.duckdb_aggregate_function_set_name(func_p, get_unicode_data_p(name))
@@ -5293,12 +5325,12 @@ def _register_irr_with_update(conn, name, update_cb):
     tb = numpy.array([dbl], dtype=numpy.intp)
     ducklib.duckdb_destroy_logical_type(tb.ctypes.data)
     ducklib.duckdb_aggregate_function_set_functions(
-        func_p, _irr_example._irr_state_size_cb.address,
-        _irr_example._irr_init_cb.address, update_cb.address,
-        _irr_example._irr_combine_cb.address,
-        _irr_example._irr_finalize_cb.address)
+        func_p, irr._irr_state_size_cb.address,
+        irr._irr_init_cb.address, update_cb.address,
+        irr._irr_combine_cb.address,
+        irr._irr_finalize_cb.address)
     ducklib.duckdb_aggregate_function_set_destructor(
-        func_p, _irr_example._irr_destroy_cb.address)
+        func_p, irr._irr_destroy_cb.address)
     rc = ducklib.duckdb_register_aggregate_function(conn_p, func_p)
     assert rc == ducklib.DuckDBSuccess
     fb = numpy.array([func_p], dtype=numpy.intp)
@@ -5312,19 +5344,26 @@ def test_irr_update_rollback_drops_poison_row_cleanly():
 
     The real _irr_update_cb rollback (examples/irr.py) fires only on an actual
     vector_push allocation failure mid-row, which SQL input cannot trigger, so
-    it is not directly reachable from a test. _irr_update_rollback_probe_cb is a
-    verbatim copy of that logic with an injected raise on a poison row
-    (period < 0), exercising the same rollback: the failure is rolled back to the
-    row boundary so the group's cashflows/periods stay paired, the aggregate
-    equals the same group without the poison row, and NRT stays balanced. This
-    pins the rollback logic but does NOT by itself guard the example's real
-    callback against regression -- they share source, not this registration."""
+    it is not directly reachable from a test. _irr_rollback_probe builds a copy
+    of that rollback logic with an injected raise on a poison row (period < 0)
+    placed AFTER both pushes have grown the vectors, so the except path must
+    reset both lengths -- both rollback lines are load-bearing here. The failure
+    is rolled back to the row boundary so the group's cashflows/periods stay
+    paired, the aggregate equals the same group without the poison row, and NRT
+    stays balanced. This pins the rollback logic but does NOT by itself guard the
+    example's real callback against regression -- they share source, not this
+    registration. The example's real finalize and combine except guards share
+    this coverage gap: they defend against faults SQL input cannot trigger
+    (finalize confirmed undrivable across an adversarial input battery; combine
+    can fault only on a vector-allocation failure), so no test drives their
+    except branch -- they are pinned by inspection, not execution."""
     from numba.core.runtime import _nrt_python as _nrt
     _nrt.memsys_enable_stats()
     from numba.core.runtime.nrt import rtsys
 
+    _, probe_cb = _irr_rollback_probe()
     conn = duckdb.connect()
-    _register_irr_with_update(conn, "irr_probe", _irr_update_rollback_probe_cb)
+    _register_irr_with_update(conn, "irr_probe", probe_cb)
     conn.execute(
         "CREATE TABLE cfp AS SELECT * FROM (VALUES "
         "(-10000.0, 0.0, 0.0, 0.0), "
