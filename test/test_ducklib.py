@@ -5033,7 +5033,8 @@ def test_haversine_udf_nulls_and_antipodal():
     clamps a genuine ~2-ULP antipodal overshoot to the half-circumference
     (~pi*R km) instead of returning NaN from an asin domain overshoot. The
     per-row Python/Arrow/JIT variants agree on the antipodal and overshoot rows
-    (aligned s*s form)."""
+    (aligned s*s form); a NaN coordinate surfaces as NaN from hv_jit/hv_arrow
+    and as SQL NULL from hv_py (the scalar-UDF bridge maps its NaN return)."""
     hv = _import_example("haversine")
     conn = duckdb.connect()
     conn.create_function("hv_py", hv.haversine_py, ["DOUBLE"] * 4, "DOUBLE")
@@ -5063,12 +5064,13 @@ def test_haversine_udf_nulls_and_antipodal():
         "(1, 0.0, 0.0, 0.0, 180.0), "
         "(2, 58.1876182035592, 101.86801103432617, "
         "-58.187618203558735, -78.13198896566404), "
-        "(3, CAST(NULL AS DOUBLE), 0.0, 10.0, 20.0)) "
+        "(3, CAST(NULL AS DOUBLE), 0.0, 10.0, 20.0), "
+        "(4, CAST('nan' AS DOUBLE), 0.0, 10.0, 20.0)) "
         "AS t(rid, lat1, lon1, lat2, lon2)")
     cols = ", ".join(f"{v}(lat1, lon1, lat2, lon2)" for v in variants)
     # ORDER BY an explicit row id so the positional unpack below is independent
     # of VALUES scan order (mirrors the sibling divergence/sentinel tests).
-    same, antipode, overshoot, null_row = conn.execute(
+    same, antipode, overshoot, null_row, nan_row = conn.execute(
         f"SELECT {cols} FROM {pts} ORDER BY rid").fetchall()
     conn.close()
     jit = variants.index("hv_jit")
@@ -5087,6 +5089,16 @@ def test_haversine_udf_nulls_and_antipodal():
     for i, v in enumerate(variants):
         if v != "hv_jit":
             assert null_row[i] is None, (v, null_row)
+    # NaN-coordinate row: every variant computes through the NaN. hv_jit and
+    # hv_arrow surface it as NaN -- pinning the Arrow clamp's if_else form,
+    # since a min-based clamp would collapse the NaN `a` to 1.0 and fabricate
+    # the antipodal distance -- while DuckDB's scalar-UDF bridge maps hv_py's
+    # NaN return to SQL NULL.
+    assert nan_row[jit] is not None and math.isnan(nan_row[jit]), nan_row
+    assert nan_row[variants.index("hv_py")] is None, nan_row
+    if "hv_arrow" in variants:
+        arrow = variants.index("hv_arrow")
+        assert nan_row[arrow] is not None and math.isnan(nan_row[arrow]), nan_row
 
 
 def test_haversine_udf_null_aggregation_divergence():
@@ -5094,7 +5106,8 @@ def test_haversine_udf_null_aggregation_divergence():
     NULL. Under the demo's filtering count (WHERE dist < 50) the two agree (NaN
     < 50 and NULL < 50 both exclude the row), but under sum() the NaN poisons the
     JIT aggregate while hv_py skips the NULL -- the NaN sentinel round-trips as
-    NULL only for filtering predicates."""
+    NULL only under predicates that exclude the row (DuckDB orders NaN as the
+    largest DOUBLE, so dist >= X, negations, and ORDER BY retain it)."""
     hv = _import_example("haversine")
     conn = duckdb.connect()
     conn.create_function("hv_py", hv.haversine_py, ["DOUBLE"] * 4, "DOUBLE")

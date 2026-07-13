@@ -59,15 +59,22 @@ PY_MAX_N = 10_000
 def haversine_py(lat1, lon1, lat2, lon2):
     # Reference variant; assumes finite, in-domain coordinates (the demo's
     # generated data). An infinite coordinate makes CPython math.cos/asin raise
-    # and abort the query, whereas the @njit variant returns NaN. The a > 1.0
-    # clamp is load-bearing, not decorative: on real finite near-antipodal
-    # coordinates the float64 `a` rounds up to ~2 ULP over 1.0, and sqrt does not
+    # and abort the query, whereas the @njit and Arrow variants return NaN; a
+    # NaN coordinate computes through to NaN in all three, though DuckDB's
+    # scalar-UDF bridge surfaces this function's NaN as SQL NULL while
+    # hv_arrow/hv_jit surface NaN. The a > 1.0 clamp is
+    # load-bearing, not decorative: on real finite near-antipodal coordinates
+    # the float64 `a` rounds up to ~2 ULP over 1.0, and sqrt does not
     # pull that back (sqrt(1 + 2*2**-52) == 1 + 2**-52 > 1.0; only a 1-ULP
     # overshoot rounds back through sqrt), so an unclamped math.asin(math.sqrt(a))
     # would raise ValueError and abort the whole query. The overshoot is pure
     # float error and the true value is asin(1) -- the antipodal distance pi*R --
     # so clamp to it. All three variants share this s*s form and this clamp, so
-    # they agree even at the asin singularity near a == 1.0.
+    # `a` rounds identically and clamped rows agree exactly (pi*R). Just below
+    # the clamp, pyarrow's sin/cos kernels differ from libm by ULPs, which asin
+    # amplifies near its singularity: the Arrow variant can differ from the
+    # bit-identical py/JIT results by ~0.2 m there -- the same order as this
+    # formulation's inherent near-antipodal error.
     R = 6371.0
     p1 = math.radians(lat1)
     p2 = math.radians(lat2)
@@ -100,8 +107,11 @@ def haversine_arrow(lat1, lon1, lat2, lon2):
     # Same load-bearing clamp as the other two variants (matched s*s form, so `a`
     # rounds identically): a ~2-ULP antipodal overshoot makes pc.asin silently
     # return NaN, so pin `a` to 1.0 and return asin(1) = the antipodal distance.
-    # skip_nulls=False keeps a NULL-input row NULL instead of clamping it to 1.0.
-    a = pc.min_element_wise(a, 1.0, skip_nulls=False)
+    # if_else rather than min_element_wise: greater() is false for a NaN `a` and
+    # null for a NULL row, so a non-finite coordinate's NaN propagates to the
+    # result (matching the JIT variant) and a NULL-input row stays NULL -- a min
+    # would collapse both to 1.0 and fabricate the antipodal distance.
+    a = pc.if_else(pc.greater(a, 1.0), 1.0, a)
     return pc.multiply(2.0 * R, pc.asin(pc.sqrt(a)))
 
 
@@ -137,10 +147,12 @@ def _haversine_chunk_impl(info, chunk, output):
         # validity mask and emit the same NaN sentinel rather than folding a
         # garbage coordinate into the distance. A zero validity pointer means
         # the vector carries no NULLs, so the per-row check is skipped.
-        # This NaN equals the references' SQL NULL only under a filtering
-        # predicate: NaN < 50 and NULL < 50 both exclude the row, as in this
-        # demo's WHERE dist < 50 count -- but under sum/avg/max the NaN would
-        # poison the aggregate while SQL NULL is skipped. Inputs here are
+        # This NaN equals the references' SQL NULL only under a predicate that
+        # excludes the row: NaN < 50 and NULL < 50 both drop it, as in this
+        # demo's WHERE dist < 50 count. DuckDB orders NaN as the largest DOUBLE,
+        # so dist >= X, negated predicates, and ORDER BY keep the sentinel row
+        # where SQL NULL would drop out -- and under sum/avg/max the NaN
+        # poisons the aggregate while SQL NULL is skipped. Inputs here are
         # non-NULL, so this path is defensive.
         null_in = (
             (val_lat1 != 0 and not ducklib.duckdb_validity_row_is_valid(val_lat1, i))
