@@ -63,7 +63,7 @@ def haversine_py(lat1, lon1, lat2, lon2):
     # NaN coordinate computes through to NaN in all three, though DuckDB's
     # scalar-UDF bridge surfaces this function's NaN as SQL NULL while
     # hv_arrow/hv_jit surface NaN. The a > 1.0 clamp is
-    # load-bearing, not decorative: on real finite near-antipodal coordinates
+    # required, not decorative: on real finite near-antipodal coordinates
     # the float64 `a` rounds up to ~2 ULP over 1.0, and sqrt does not
     # pull that back (sqrt(1 + 2*2**-52) == 1 + 2**-52 > 1.0; only a 1-ULP
     # overshoot rounds back through sqrt), so an unclamped math.asin(math.sqrt(a))
@@ -104,7 +104,7 @@ def haversine_arrow(lat1, lon1, lat2, lon2):
         pc.multiply(s_dp, s_dp),
         pc.multiply(pc.multiply(pc.cos(p1), pc.cos(p2)), pc.multiply(s_dl, s_dl)),
     )
-    # Same load-bearing clamp as the other two variants (matched s*s form, so `a`
+    # Same required clamp as the other two variants (matched s*s form, so `a`
     # rounds identically): a ~2-ULP antipodal overshoot makes pc.asin silently
     # return NaN, so pin `a` to 1.0 and return asin(1) = the antipodal distance.
     # if_else rather than min_element_wise: greater() is false for a NaN `a` and

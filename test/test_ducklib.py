@@ -4732,7 +4732,7 @@ def test_udaf_cfunc_unguarded_raise_leaks_borrowed_state():
     """Control: without the guard, a raise from a nested call while a borrowed
     structref is live leaks the borrow's incref -- the C boundary swallows the
     exception and skips the scope-exit decref. This establishes that the raise
-    is real and load-bearing, so the guarded assertion below is meaningful.
+    is real and consequential, so the guarded assertion below is meaningful.
 
     The swallow makes numba print the ignored exception, which pytest surfaces
     as an unraisable-exception warning; it is expected here and filtered."""
@@ -5364,7 +5364,7 @@ def test_irr_update_rollback_drops_poison_row_cleanly():
     it is not directly reachable from a test. _irr_rollback_probe builds a copy
     of that rollback logic with an injected raise on a poison row (period < 0)
     placed AFTER both pushes have grown the vectors, so the except path must
-    reset both lengths -- both rollback lines are load-bearing here. The failure
+    reset both lengths -- both rollback lines are required here. The failure
     is rolled back to the row boundary so the group's cashflows/periods stay
     paired, the aggregate equals the same group without the poison row, and NRT
     stays balanced. This pins the rollback logic but does NOT by itself guard the
