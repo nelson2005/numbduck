@@ -83,7 +83,7 @@ Cross-project preferences live in the user's MEMORY.md. Only numbduck-specific w
 
 ## Related Projects
 
-- **[numbox](https://github.com/Goykhman/numbox)** — bindings toolkit that numbduck is built on. Provides `signatures` dict, `_call_lib_func`, `@cres` decorator, and shared library loading patterns. Read numbox source before implementing new binding patterns.
+- **[numbox](https://github.com/Goykhman/numbox)** — bindings toolkit that numbduck is built on. Provides `signatures` dict, `_call_lib_func`, `@cres` decorator, and shared library loading patterns. **Read the relevant numbox source before planning, reviewing, or implementing anything here that depends on it** — not only new binding patterns. [`numbox/utils/lowlevel.py`](https://github.com/Goykhman/numbox/blob/main/numbox/utils/lowlevel.py) is the one to check first for low-level helpers. We once hand-rolled typed pointer intrinsics (`i32_ptr`, `i64_ptr`, `f64_ptr`) that duplicated numbox's existing [`_cast_int_to_void_p`](https://github.com/Goykhman/numbox/blob/main/numbox/utils/lowlevel.py#L49); review caught it and they were removed.
 - **[numbarrow](https://github.com/Goykhman/numbarrow)** — bridges PyArrow arrays into numba `@njit` code (Arrow → numpy direction). Read numbarrow source before designing any Arrow-based features in numbduck (e.g., virtual tables). numbduck's Arrow work would be the inverse direction (numpy → Arrow/DuckDB).
 
 ## Project Status
