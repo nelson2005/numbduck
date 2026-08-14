@@ -1,3 +1,5 @@
+import re
+
 import pytest
 
 
@@ -9,8 +11,11 @@ def pytest_collection_modifyitems(config, items):
     keeps ``pytest -m benchmark`` working: pytest ANDs multiple ``-m`` values, so
     a default ``-m 'not benchmark'`` turned an explicit ``-m benchmark`` into
     ``not benchmark and benchmark`` and silently collected zero tests.
+
+    The expression is matched on a word boundary so that an unrelated marker
+    whose name merely contains ``benchmark`` does not suppress the skip.
     """
-    if "benchmark" in config.getoption("markexpr"):
+    if re.search(r"\bbenchmark\b", config.getoption("markexpr")):
         return
     skip_benchmark = pytest.mark.skip(reason="benchmark; run with -m benchmark")
     for item in items:
