@@ -56,11 +56,11 @@ jobs:
         REF_NAME: ${{ github.ref_name }}
         RUN_NUMBER: ${{ github.run_number }}
       run: |
-        if [ "${REF_TYPE}" == "tag" ]; then
-          echo "VERSION=${REF_NAME}" >> $GITHUB_ENV
+        if [ "${REF_TYPE}" = "tag" ]; then
+          printf 'VERSION=%s\n' "${REF_NAME}" >> "$GITHUB_ENV"
         else
           BUILD_VERSION="0.1.${RUN_NUMBER}"
-          echo "VERSION=${BUILD_VERSION}" >> $GITHUB_ENV
+          printf 'VERSION=%s\n' "${BUILD_VERSION}" >> "$GITHUB_ENV"
         fi
     - name: Write version to __init__.py
       shell: bash
@@ -70,7 +70,7 @@ jobs:
         import pathlib
 
         pathlib.Path("numbduck/__init__.py").write_text(
-            f"__version__ = {os.environ['VERSION']!r}\n")
+            f"__version__ = {os.environ['VERSION']!r}\n", encoding="utf-8")
         PY
     - name: Install dependencies
       run: |
