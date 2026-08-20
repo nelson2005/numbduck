@@ -72,6 +72,11 @@ jobs:
           # --max-retries and --timeout are left at their defaults (3 and 20s);
           # the previous 2 retries was below default and made 429s more likely
           # to surface, not less.
+          # A path is a filename chosen by a pull request author, so it can begin
+          # with a dash. lychee parses those as options and exits 2 ("unexpected
+          # argument"); `--` ends option parsing so every following word is an
+          # input path. Quoting alone does not cover this: %q leaves --foo.md
+          # untouched, since it holds no shell metacharacters.
           args: >-
             --no-progress
             --max-concurrency 4
@@ -79,6 +84,7 @@ jobs:
             --exclude '^mailto:'
             --exclude-path .git
             --exclude-path venv
+            --
             ${{ steps.scope.outputs.files }}
           fail: true
           # Don't fail when the changed-file set contains no links at all
