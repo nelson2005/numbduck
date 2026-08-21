@@ -50,7 +50,7 @@ For C functions that pass or return structs by value, `ducklib.py` provides:
 - **`_emit_byval_call`** — shared codegen helper for alloca+store+call-via-pointer
 - **`_build_packed_interval`** — packs `{i32, i32, i64}` interval into `{i64, i64}` (LLVM drops the second i32 on SysV x86-64)
 
-Custom `@intrinsic` functions are used for >16-byte structs (decimal 24B, varint 24B) and interval (16B but needs repacking). These use `byval` + `optnone` on SysV x86-64 to prevent LLVM from optimizing away stack copies. See [llvmlite#300 comment](https://github.com/numba/llvmlite/issues/300#issuecomment-327235846) for the ABI rationale.
+Custom `@intrinsic` functions are used for >16-byte structs (decimal 24B, bignum 24B) and interval (16B but needs repacking). These use `byval` + `optnone` on SysV x86-64 to prevent LLVM from optimizing away stack copies. See [llvmlite#300 comment](https://github.com/numba/llvmlite/issues/300#issuecomment-327235846) for the ABI rationale.
 
 ## Follow-ups
 
