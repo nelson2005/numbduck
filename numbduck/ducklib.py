@@ -89,6 +89,14 @@ _BIGNUM_GET = next(
      if hasattr(duckdb_lib, name)), None)
 
 
+# numba's cache key hashes bytecode and closure cells only, so the symbol chosen
+# above reaches it by neither route: a cached object built against one spelling
+# would be served to a process needing the other and abort at import. Upgrading
+# duckdb across 1.4.0 with a warm cache is enough, so keep these two off the disk
+# cache. Every other binding still caches.
+_bignum_jit_options = {name: value for name, value in jit_options.items() if name != "cache"}
+
+
 def _bignum_proxy(sym, bignum_name):
     """Proxy decorator for a bignum binding that calls the C symbol ``sym``.
 
@@ -97,8 +105,9 @@ def _bignum_proxy(sym, bignum_name):
     that raises a clear, named error from Python and at ``@njit`` typing time.
     """
     if sym is None:
-        return proxy_if_available(duckdb_lib, signatures.get(bignum_name), jit_options=jit_options)
-    return proxy(signatures.get(sym), jit_options=jit_options)
+        return proxy_if_available(duckdb_lib, signatures.get(bignum_name),
+                                  jit_options=_bignum_jit_options)
+    return proxy(signatures.get(sym), jit_options=_bignum_jit_options)
 
 
 signatures["duckdb_array_type_array_size"] = uint64(intp)

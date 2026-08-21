@@ -1850,6 +1850,18 @@ def test_create_get_bignum():
         aux_destroy_value(val_p)
 
 
+def test_bignum_bindings_are_not_disk_cached():
+    """numba's cache key hashes bytecode and closure cells only, so the symbol
+    the bignum pair resolves at import reaches neither. A cached object built
+    against one spelling is served to a process needing the other, and importing
+    ducklib aborts with LLVM ERROR: Symbol not found."""
+    assert "cache" not in ducklib._bignum_jit_options
+    cache_dir = os.path.join(os.path.dirname(ducklib.__file__), "__pycache__")
+    names = os.listdir(cache_dir) if os.path.isdir(cache_dir) else []
+    cached = [n for n in names if "bignum" in n and n.endswith((".nbi", ".nbc"))]
+    assert not cached, cached
+
+
 def test_bignum_binds_the_spelling_this_libduckdb_exports():
     """The binding resolves to the bignum spelling on duckdb >=1.4 and to the
     varint spelling below it, and never to a symbol the library lacks."""
