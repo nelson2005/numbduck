@@ -55,9 +55,10 @@ DUCKDB_TYPE_TIMESTAMP_TZ = 31
 DUCKDB_TYPE_UHUGEINT = 32
 DUCKDB_TYPE_ARRAY = 33
 DUCKDB_TYPE_ANY = 34
-# VARINT (duckdb ≤1.4) and BIGNUM (duckdb ≥1.5) are the same type —
+# VARINT (duckdb ≤1.3) and BIGNUM (duckdb ≥1.4) are the same type:
 # same enum value, same struct layout ({byte_ptr, size, is_negative}).
-# Both names are defined for cross-version portability.
+# duckdb renamed the type and its value functions in 1.4.0. Both names are
+# defined for cross-version portability.
 DUCKDB_TYPE_VARINT = 35
 DUCKDB_TYPE_BIGNUM = 35
 DUCKDB_TYPE_SQLNULL = 36
@@ -73,6 +74,7 @@ duckdb_decimal_ty = Tuple((uint8, uint8, uint64, int64))
 duckdb_blob_ty = Tuple((intp, uint64))
 duckdb_bit_ty = Tuple((intp, uint64))
 duckdb_varint_ty = Tuple((intp, uint64, int8))
+duckdb_bignum_ty = duckdb_varint_ty
 
 
 signatures["duckdb_array_type_array_size"] = uint64(intp)
@@ -150,6 +152,7 @@ signatures["duckdb_create_uint64"] = intp(uint64)
 signatures["duckdb_create_union_type"] = intp(intp, intp, uint64)
 signatures["duckdb_create_union_value"] = intp(intp, uint64, intp)
 signatures["duckdb_create_uuid"] = intp(duckdb_uhugeint_ty)
+signatures["duckdb_create_bignum"] = intp(duckdb_bignum_ty)
 signatures["duckdb_create_varint"] = intp(duckdb_varint_ty)
 signatures["duckdb_create_varchar"] = intp(intp)
 signatures["duckdb_create_varchar_length"] = intp(intp, uint64)
@@ -207,6 +210,7 @@ signatures["duckdb_get_uint64"] = uint64(intp)
 signatures["duckdb_get_uuid"] = duckdb_uhugeint_ty(intp)
 signatures["duckdb_get_value_type"] = intp(intp)
 signatures["duckdb_get_varchar"] = intp(intp)
+signatures["duckdb_get_bignum"] = duckdb_bignum_ty(intp)
 signatures["duckdb_get_varint"] = duckdb_varint_ty(intp)
 signatures["duckdb_is_null_value"] = int8(intp)
 signatures["duckdb_list_type_child_type"] = intp(intp)
@@ -723,6 +727,12 @@ def duckdb_create_uuid(val):
     return _call_lib_func("duckdb_create_uuid", (val,))
 
 
+@proxy_if_available(duckdb_lib, signatures.get("duckdb_create_bignum"), jit_options=jit_options)
+def duckdb_create_bignum(val):
+    """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_create_bignum """
+    return _call_lib_func("duckdb_create_bignum", (val,))
+
+
 @proxy_if_available(duckdb_lib, signatures.get("duckdb_create_varint"), jit_options=jit_options)
 def duckdb_create_varint(val):
     """ https://duckdb.org/docs/1.3/clients/c/api#duckdb_create_varint """
@@ -1046,6 +1056,12 @@ def duckdb_get_uhugeint(val_p):
 def duckdb_get_uuid(val_p):
     """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_get_uuid """
     return _call_lib_func("duckdb_get_uuid", (val_p,))
+
+
+@proxy_if_available(duckdb_lib, signatures.get("duckdb_get_bignum"), jit_options=jit_options)
+def duckdb_get_bignum(val_p):
+    """ https://duckdb.org/docs/stable/clients/c/api.html#duckdb_get_bignum """
+    return _call_lib_func("duckdb_get_bignum", (val_p,))
 
 
 @proxy_if_available(duckdb_lib, signatures.get("duckdb_get_varint"), jit_options=jit_options)

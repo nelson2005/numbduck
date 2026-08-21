@@ -1829,6 +1829,31 @@ def test_create_get_uuid():
 
 
 @pytest.mark.skipif(
+    not (hasattr(ducklib.duckdb_lib, 'duckdb_create_bignum') and hasattr(ducklib.duckdb_lib, 'duckdb_get_bignum')),
+    reason="duckdb_create_bignum or duckdb_get_bignum not available in this duckdb version",
+)
+def test_create_get_bignum():
+    """duckdb renamed duckdb_create_varint/duckdb_get_varint to the bignum
+    spellings in 1.4.0. Same enum value, same struct, different C symbols.
+
+    Covers a multi-byte magnitude and both settings of the negative flag,
+    neither of which the varint test below exercises."""
+    payload = b"\x01\x02\x03\x04\x05"
+    data_bytes = ctypes.create_string_buffer(payload, len(payload))
+    data_p = ctypes.cast(data_bytes, ctypes.c_void_p).value
+    for is_negative in (0, 1):
+        val_p = ducklib.duckdb_create_bignum((data_p, len(payload), is_negative))
+        assert val_p != 0, f"create failed for is_negative={is_negative}"
+        out_p, size, out_negative = ducklib.duckdb_get_bignum(val_p)
+        assert size == len(payload), f"expected size {len(payload)}, got {size}"
+        assert out_negative == is_negative, f"expected {is_negative}, got {out_negative}"
+        raw = (ctypes.c_char * size).from_address(out_p)
+        assert raw[:] == payload, f"expected {payload!r}, got {raw[:]!r}"
+        ducklib.duckdb_free(out_p)
+        aux_destroy_value(val_p)
+
+
+@pytest.mark.skipif(
     not (hasattr(ducklib.duckdb_lib, 'duckdb_create_varint') and hasattr(ducklib.duckdb_lib, 'duckdb_get_varint')),
     reason="duckdb_create_varint or duckdb_get_varint not available in this duckdb version",
 )
