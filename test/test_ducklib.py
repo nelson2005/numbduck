@@ -1828,16 +1828,13 @@ def test_create_get_uuid():
     aux_destroy_value(val_p)
 
 
-@pytest.mark.skipif(
-    not (hasattr(ducklib.duckdb_lib, 'duckdb_create_bignum') and hasattr(ducklib.duckdb_lib, 'duckdb_get_bignum')),
-    reason="duckdb_create_bignum or duckdb_get_bignum not available in this duckdb version",
-)
 def test_create_get_bignum():
     """duckdb renamed duckdb_create_varint/duckdb_get_varint to the bignum
     spellings in 1.4.0. Same enum value, same struct, different C symbols.
 
-    Covers a multi-byte magnitude and both settings of the negative flag,
-    neither of which the varint test below exercises."""
+    The binding calls whichever spelling the loaded libduckdb exports, so this
+    runs unskipped across the whole supported duckdb range. Covers a multi-byte
+    magnitude and both settings of the negative flag."""
     payload = b"\x01\x02\x03\x04\x05"
     data_bytes = ctypes.create_string_buffer(payload, len(payload))
     data_p = ctypes.cast(data_bytes, ctypes.c_void_p).value
@@ -1853,22 +1850,20 @@ def test_create_get_bignum():
         aux_destroy_value(val_p)
 
 
-@pytest.mark.skipif(
-    not (hasattr(ducklib.duckdb_lib, 'duckdb_create_varint') and hasattr(ducklib.duckdb_lib, 'duckdb_get_varint')),
-    reason="duckdb_create_varint or duckdb_get_varint not available in this duckdb version",
-)
-def test_create_get_varint():
-    data_bytes = ctypes.create_string_buffer(b"\x01\x00", 2)
-    data_p = ctypes.cast(data_bytes, ctypes.c_void_p).value
-    val_p = ducklib.duckdb_create_varint((data_p, 2, 0))
-    assert val_p != 0
-    result = ducklib.duckdb_get_varint(val_p)
-    size = result[1]
-    assert size == 2
-    raw = (ctypes.c_char * size).from_address(result[0])
-    assert raw[:] == b"\x01\x00"
-    ducklib.duckdb_free(result[0])
-    aux_destroy_value(val_p)
+def test_bignum_binds_the_spelling_this_libduckdb_exports():
+    """The binding resolves to the bignum spelling on duckdb >=1.4 and to the
+    varint spelling below it, and never to a symbol the library lacks."""
+    resolved = ducklib._BIGNUM_CREATE, ducklib._BIGNUM_GET
+    expected = (
+        ("duckdb_create_bignum", "duckdb_get_bignum")
+        if hasattr(ducklib.duckdb_lib, "duckdb_create_bignum")
+        else ("duckdb_create_varint", "duckdb_get_varint")
+    )
+    assert resolved == expected
+    for name in resolved:
+        assert hasattr(ducklib.duckdb_lib, name)
+    assert not hasattr(ducklib, "duckdb_create_varint")
+    assert not hasattr(ducklib, "duckdb_get_varint")
 
 
 def test_gated_binding_missing_symbol_raises_clear_njit_error():
@@ -1882,26 +1877,26 @@ def test_gated_binding_missing_symbol_raises_clear_njit_error():
         pass
 
     @proxy_if_available(
-        _NoSymLib(), ducklib.signatures.get("duckdb_create_varint"),
+        _NoSymLib(), ducklib.signatures.get("duckdb_create_bignum"),
         jit_options=ducklib.jit_options)
-    def duckdb_create_varint(val):
-        return _call_lib_func("duckdb_create_varint", (val,))
+    def duckdb_create_bignum(val):
+        return _call_lib_func("duckdb_create_bignum", (val,))
 
     @njit
     def use_gated(x):
-        return duckdb_create_varint(x)
+        return duckdb_create_bignum(x)
 
     with pytest.raises(TypingError) as excinfo:
         use_gated(0)
     message = str(excinfo.value)
-    assert "duckdb_create_varint" in message
+    assert "duckdb_create_bignum" in message
     assert "not available" in message
     assert "C symbol missing" in message
 
 
 @pytest.mark.skipif(
-    hasattr(ducklib.duckdb_lib, 'duckdb_create_varint'),
-    reason="duckdb_create_varint present in this libduckdb; absent-symbol path not exercised",
+    hasattr(ducklib.duckdb_lib, 'duckdb_scalar_function_set_init'),
+    reason="duckdb_scalar_function_set_init present in this libduckdb; absent-symbol path not exercised",
 )
 def test_gated_binding_unavailable_real_name_njit_error():
     """The actual version-gated ducklib binding, when absent from the loaded
@@ -1910,13 +1905,13 @@ def test_gated_binding_unavailable_real_name_njit_error():
     the binding as ducklib actually built it."""
 
     @njit
-    def use_varint(val):
-        return ducklib.duckdb_create_varint(val)
+    def use_set_init(scalar_function_p, init_p):
+        return ducklib.duckdb_scalar_function_set_init(scalar_function_p, init_p)
 
     with pytest.raises(TypingError) as excinfo:
-        use_varint((0, 0, 0))
+        use_set_init(0, 0)
     message = str(excinfo.value)
-    assert "duckdb_create_varint" in message
+    assert "duckdb_scalar_function_set_init" in message
     assert "not available" in message
 
 
@@ -5725,6 +5720,38 @@ def test_irr_update_rollback_drops_poison_row_cleanly():
 
 # --- Binding source integrity ---
 
+def _called_c_symbol(arg):
+    """The C symbol named by ``_call_lib_func``'s first argument: the string
+    itself, or — for a binding whose symbol is resolved at import, like the
+    bignum pair — the value the module global it names resolved to."""
+    if isinstance(arg, ast.Constant):
+        return arg.value
+    if isinstance(arg, ast.Name):
+        return getattr(ducklib, arg.id, None)
+    return None
+
+
+def _decorator_signature_key(node):
+    """The registered signatures key named in a wrapper's decorator: the string
+    passed to ``signatures.get(...)``, or the canonical name passed to
+    ``_bignum_proxy(<resolved symbol>, "<canonical bignum name>")``."""
+    key = None
+    for dec in node.decorator_list:
+        if (isinstance(dec, ast.Call) and isinstance(dec.func, ast.Name)
+                and dec.func.id == "_bignum_proxy"):
+            key = dec.args[1].value
+        args = list(getattr(dec, "args", []))
+        args += [kw.value for kw in getattr(dec, "keywords", [])]
+        for arg in args:
+            if (isinstance(arg, ast.Call) and isinstance(arg.func, ast.Attribute)
+                    and arg.func.attr == "get"
+                    and isinstance(arg.func.value, ast.Name)
+                    and arg.func.value.id == "signatures"
+                    and arg.args and isinstance(arg.args[0], ast.Constant)):
+                key = arg.args[0].value
+    return key
+
+
 def _wrapper_name_triples(source):
     """For every ``_call_lib_func`` wrapper defined at module level in `source`,
     yield ``(def_name, decorator_key, body_literal, param_names, call_arg_names)``
@@ -5744,26 +5771,14 @@ def _wrapper_name_triples(source):
                 and isinstance(ret.value.func, ast.Name)
                 and ret.value.func.id == "_call_lib_func"):
             continue
-        first = ret.value.args[0]
-        body_literal = first.value if isinstance(first, ast.Constant) else None
+        body_literal = _called_c_symbol(ret.value.args[0])
         call_arg_names = None
         if len(ret.value.args) > 1 and isinstance(ret.value.args[1], ast.Tuple):
             elts = ret.value.args[1].elts
             if all(isinstance(e, ast.Name) for e in elts):
                 call_arg_names = [e.id for e in elts]
         param_names = [a.arg for a in node.args.args]
-        decorator_key = None
-        for dec in node.decorator_list:
-            args = list(getattr(dec, "args", []))
-            args += [kw.value for kw in getattr(dec, "keywords", [])]
-            for arg in args:
-                if (isinstance(arg, ast.Call) and isinstance(arg.func, ast.Attribute)
-                        and arg.func.attr == "get"
-                        and isinstance(arg.func.value, ast.Name)
-                        and arg.func.value.id == "signatures"
-                        and arg.args and isinstance(arg.args[0], ast.Constant)):
-                    decorator_key = arg.args[0].value
-        yield node.name, decorator_key, body_literal, param_names, call_arg_names
+        yield node.name, _decorator_signature_key(node), body_literal, param_names, call_arg_names
 
 
 def _proxy_decorated_names(source):
@@ -5777,9 +5792,17 @@ def _proxy_decorated_names(source):
             continue
         for dec in node.decorator_list:
             func = dec.func if isinstance(dec, ast.Call) else dec
-            if isinstance(func, ast.Name) and func.id in ("proxy", "proxy_if_available"):
+            if isinstance(func, ast.Name) and func.id in ("proxy", "proxy_if_available", "_bignum_proxy"):
                 names.add(node.name)
     return names
+
+
+# The bignum bindings call whichever spelling the loaded libduckdb exports, so
+# their body names a C symbol that differs from the def's own name below 1.4.0.
+_ALIASED_BINDINGS = {
+    "duckdb_create_bignum": {"duckdb_create_bignum", "duckdb_create_varint"},
+    "duckdb_get_bignum": {"duckdb_get_bignum", "duckdb_get_varint"},
+}
 
 
 def test_wrapper_name_integrity():
@@ -5809,9 +5832,12 @@ def test_wrapper_name_integrity():
         "unexpected": sorted(seen - _proxy_decorated_names(source)),
     }
     for name, decorator_key, body_literal, param_names, call_arg_names in triples:
-        assert body_literal == name, (name, body_literal)
+        assert body_literal in _ALIASED_BINDINGS.get(name, {name}), (name, body_literal)
         assert decorator_key == name, (name, decorator_key)
         assert name in ducklib.signatures, name
+        assert body_literal in ducklib.signatures, body_literal
         assert call_arg_names == param_names, (name, param_names, call_arg_names)
-        assert len(param_names) == len(ducklib.signatures[name].args), (
-            name, param_names, str(ducklib.signatures[name]))
+        # Check arity against the signature of the symbol actually called, which
+        # is the aliased spelling for a binding resolved at import.
+        assert len(param_names) == len(ducklib.signatures[body_literal].args), (
+            name, param_names, str(ducklib.signatures[body_literal]))
