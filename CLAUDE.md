@@ -36,7 +36,7 @@ def duckdb_func(arg):
     return _call_lib_func("duckdb_func", (arg,))
 ```
 4. Function names must match the DuckDB C API names exactly
-5. Docstring links must use `https://duckdb.org/docs/stable/clients/c/api.html#func_name`, not links to `duckdb.h` source
+5. Docstring links must use `https://duckdb.org/docs/current/clients/c/api.html#func_name`, not links to `duckdb.h` source. **Never `/stable/`**: that path serves a 545-byte meta-refresh stub pointing at `/current/`, and a meta refresh discards the fragment, so the anchor never resolves. A link checker will not catch it either, because the stub returns HTTP 200. Only a fragment-aware check (lychee `--include-fragments`) sees the breakage
 6. If a function returns a handle (e.g. `duckdb_logical_type`), also bind the corresponding destroy function (e.g. `duckdb_destroy_logical_type`)
 7. **Before submitting an upstream PR**, re-verify all signatures, parameter types, naming conventions (`_p`/`_pp`), and docstring links against `duckdb.h` — this is a second check; step 1 is the first
 
