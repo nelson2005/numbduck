@@ -4636,8 +4636,8 @@ def test_libraries_coordinated_compares_library_version_not_package(monkeypatch)
     """Coordination compares the wheel's own library version (PRAGMA version),
     not ``duckdb.__version__``. A dev build whose library version matches the
     standalone's is coordinated even though the Python package version uses a
-    different pre-release scheme. This is the pairing the old package-version compare
-    wrongly refused. A differing library version still fails closed.
+    different pre-release scheme. This is the pairing the old package-version
+    compare wrongly refused. A differing library version still fails closed.
     """
     from numbduck import utils
 

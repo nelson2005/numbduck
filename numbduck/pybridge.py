@@ -34,7 +34,7 @@ def extract_connection_ptr(conn):
     the ``SELECT 1`` check below cannot catch.
 
     The pointer is handed out only after four guards: exact-type identity (not
-    ``isinstance``, as a subclass or an object spoofing ``__class__`` would steer
+    ``isinstance``: a subclass or an object spoofing ``__class__`` would steer
     the raw pointer walk through arbitrary memory); runtime coordination (refuse
     when numbduck's JIT libduckdb and the wheel that minted *conn* are different
     builds, i.e. the macOS dual-runtime seam); a null check on each intermediate
