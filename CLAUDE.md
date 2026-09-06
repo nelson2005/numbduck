@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-numbduck — adapts DuckDB's C API for use inside numba `@njit` code. Built on the [numbox](https://github.com/Goykhman/numbox) bindings toolkit.
+numbduck adapts DuckDB's C API for use inside numba `@njit` code. Built on the [numbox](https://github.com/Goykhman/numbox) bindings toolkit.
 
 ## Build & Dev
 
@@ -21,9 +21,9 @@ numbduck — adapts DuckDB's C API for use inside numba `@njit` code. Built on t
 
 Wraps DuckDB C API functions for use in numba JIT code. Same pattern as numbox bindings:
 
-1. **`utils.py`** — finds and loads the DuckDB shared library via `ctypes.CDLL` with `RTLD_GLOBAL`
-2. **`ducklib.py`** — registers signatures in numbox's `signatures` dict, then wraps each function with `@cres` + `_call_lib_func`
-3. **`duckdb_utils.py`** — allocates numpy buffers for DuckDB C structs (database, connection, result, chunk, vector)
+1. **`utils.py`**: finds and loads the DuckDB shared library via `ctypes.CDLL` with `RTLD_GLOBAL`
+2. **`ducklib.py`**: registers signatures in numbox's `signatures` dict, then wraps each function with `@cres` + `_call_lib_func`
+3. **`duckdb_utils.py`**: allocates numpy buffers for DuckDB C structs (database, connection, result, chunk, vector)
 
 ### Adding a New Binding
 
@@ -36,59 +36,59 @@ def duckdb_func(arg):
     return _call_lib_func("duckdb_func", (arg,))
 ```
 4. Function names must match the DuckDB C API names exactly
-5. Docstring links must use `https://duckdb.org/docs/stable/clients/c/api.html#func_name`, not links to `duckdb.h` source
+5. Docstring links must use `https://duckdb.org/docs/current/clients/c/api.html#func_name`, not links to `duckdb.h` source. **Never `/stable/`**: that path serves a 545-byte meta-refresh stub pointing at `/current/`, and a meta refresh discards the fragment, so the anchor never resolves. A link checker will not catch it either, because the stub returns HTTP 200. Only a fragment-aware check (lychee `--include-fragments`) sees the breakage
 6. If a function returns a handle (e.g. `duckdb_logical_type`), also bind the corresponding destroy function (e.g. `duckdb_destroy_logical_type`)
-7. **Before submitting an upstream PR**, re-verify all signatures, parameter types, naming conventions (`_p`/`_pp`), and docstring links against `duckdb.h` — this is a second check; step 1 is the first
+7. **Before submitting an upstream PR**, re-verify all signatures, parameter types, naming conventions (`_p`/`_pp`), and docstring links against `duckdb.h`. This is a second check; step 1 is the first.
 
 ### Struct-by-value helpers (ducklib.py)
 
 For C functions that pass or return structs by value, `ducklib.py` provides:
 
-- **`_call_lib_func_struct_in`** — ≤16-byte struct passed by value (SysV x86-64) or by pointer (Windows)
-- **`_call_lib_func_struct_out`** — ≤16-byte struct returned by value (SysV x86-64) or via sret (Windows)
-- **`_call_lib_func_byval`** — arg passed by pointer regardless of platform (e.g. `duckdb_result *`)
-- **`_emit_byval_call`** — shared codegen helper for alloca+store+call-via-pointer
-- **`_build_packed_interval`** — packs `{i32, i32, i64}` interval into `{i64, i64}` (LLVM drops the second i32 on SysV x86-64)
+- **`_call_lib_func_struct_in`**: ≤16-byte struct passed by value (SysV x86-64) or by pointer (Windows)
+- **`_call_lib_func_struct_out`**: ≤16-byte struct returned by value (SysV x86-64) or via sret (Windows)
+- **`_call_lib_func_byval`**: arg passed by pointer regardless of platform (e.g. `duckdb_result *`)
+- **`_emit_byval_call`**: shared codegen helper for alloca+store+call-via-pointer
+- **`_build_packed_interval`**: packs `{i32, i32, i64}` interval into `{i64, i64}` (LLVM drops the second i32 on SysV x86-64)
 
 Custom `@intrinsic` functions are used for >16-byte structs (decimal 24B, bignum 24B) and interval (16B but needs repacking). These use `byval` + `optnone` on SysV x86-64 to prevent LLVM from optimizing away stack copies. See [llvmlite#300 comment](https://github.com/numba/llvmlite/issues/300#issuecomment-327235846) for the ABI rationale.
 
 ## Follow-ups
 
 - **Migrate `_duckdb_bind_hugeint`/`_uhugeint`/`_interval` to [`_call_lib_func`](https://github.com/Goykhman/numbox/blob/main/numbox/core/bindings/call.py).** Three hand-rolled intrinsics at [`ducklib.py:1525-1640`](numbduck/ducklib.py) (~116 lines) duplicate ABI lowering that `_call_lib_func` already does for the 18 sibling bind wrappers at [`ducklib.py:298-433`](numbduck/ducklib.py). All three are 16B by-value structs:
-  - `duckdb_hugeint_ty = Tuple((uint64, int64))` → `{i64, i64}` — already canonical, mechanical migration.
-  - `duckdb_uhugeint_ty = UniTuple(uint64, 2)` → `{i64, i64}` — already canonical, mechanical migration.
-  - `duckdb_interval_ty = Tuple((int32, int32, int64))` → `{i32, i32, i64}` — needs the SysV x86-64 eightbyte repack (LLVM drops the second `i32` when this is passed by-value; current `_build_packed_interval` repacks to `{i64, i64}` to work around). Gated on the corresponding numbox follow-up adding a generic INT/INT eightbyte repack to `_call_lib_func`. Once that lands, interval becomes mechanical too.
+  - `duckdb_hugeint_ty = Tuple((uint64, int64))` → `{i64, i64}`: already canonical, mechanical migration.
+  - `duckdb_uhugeint_ty = UniTuple(uint64, 2)` → `{i64, i64}`: already canonical, mechanical migration.
+  - `duckdb_interval_ty = Tuple((int32, int32, int64))` → `{i32, i32, i64}`: needs the SysV x86-64 eightbyte repack (LLVM drops the second `i32` when this is passed by-value; current `_build_packed_interval` repacks to `{i64, i64}` to work around). Gated on the corresponding numbox follow-up adding a generic INT/INT eightbyte repack to `_call_lib_func`. Once that lands, interval becomes mechanical too.
 
   Estimated diff after numbox repack lands: ~−116 lines / +12 lines / +0 sigs.
 
 ## Key Paths
 
-- `numbduck/ducklib.py` — all DuckDB C API bindings
-- `numbduck/duckdb_utils.py` — buffer allocators for DuckDB structs
-- `numbduck/utils.py` — shared library loader
-- `test/test_ducklib.py` — integration tests
+- `numbduck/ducklib.py`: all DuckDB C API bindings
+- `numbduck/duckdb_utils.py`: buffer allocators for DuckDB structs
+- `numbduck/utils.py`: shared library loader
+- `test/test_ducklib.py`: integration tests
 
 ## Error Handling
 
-Bindings must mirror the DuckDB C API error-handling protocol exactly — return state codes (`DuckDBSuccess`/`DuckDBError`) and pointers, never inject exceptions. Callers do C-style return code checks. See [numbox issue #5](https://github.com/Goykhman/numbox/issues/5) for rationale.
+Bindings must mirror the DuckDB C API error-handling protocol exactly: return state codes (`DuckDBSuccess`/`DuckDBError`) and pointers, never inject exceptions. Callers do C-style return code checks. See [numbox issue #5](https://github.com/Goykhman/numbox/issues/5) for rationale.
 
 ## Preferences
 
 Cross-project preferences live in the user's MEMORY.md. Only numbduck-specific workflow rules are kept here.
 
 - Always exclude CLAUDE.md, `.github/workflows/numbduck_ci.yml`, and `docs/plans/` from upstream PRs (use a dedicated branch based on `upstream/main`)
-- Never merge local feature branches into main — main must always match `upstream/main` (exception: CLAUDE.md and the fork-only CI workflow)
+- Never merge local feature branches into main; main must always match `upstream/main` (exception: CLAUDE.md and the fork-only CI workflow)
 - Feature branches: base off `origin/main` (has CLAUDE.md); upstream PR branches: base off `upstream/main` (no CLAUDE.md)
 - Do all coding work on the feature branch (has CLAUDE.md + fork CI), then cherry-pick to the upstream PR branch when ready
 
 ## Related Projects
 
-- **[numbox](https://github.com/Goykhman/numbox)** — bindings toolkit that numbduck is built on. Provides `signatures` dict, `_call_lib_func`, `@cres` decorator, and shared library loading patterns. **Read the relevant numbox source before planning, reviewing, or implementing anything here that depends on it** — not only new binding patterns. [`numbox/utils/lowlevel.py`](https://github.com/Goykhman/numbox/blob/main/numbox/utils/lowlevel.py) is the one to check first for low-level helpers. We once hand-rolled typed pointer intrinsics (`i32_ptr`, `i64_ptr`, `f64_ptr`) that duplicated numbox's existing [`_cast_int_to_void_p`](https://github.com/Goykhman/numbox/blob/main/numbox/utils/lowlevel.py#L49); review caught it and they were removed.
-- **[numbarrow](https://github.com/Goykhman/numbarrow)** — bridges PyArrow arrays into numba `@njit` code (Arrow → numpy direction). Read numbarrow source before designing any Arrow-based features in numbduck (e.g., virtual tables). numbduck's Arrow work would be the inverse direction (numpy → Arrow/DuckDB).
+- **[numbox](https://github.com/Goykhman/numbox)**: bindings toolkit that numbduck is built on. Provides `signatures` dict, `_call_lib_func`, `@cres` decorator, and shared library loading patterns. **Read the relevant numbox source before planning, reviewing, or implementing anything here that depends on it**, not only new binding patterns. [`numbox/utils/lowlevel.py`](https://github.com/Goykhman/numbox/blob/main/numbox/utils/lowlevel.py) is the one to check first for low-level helpers. We once hand-rolled typed pointer intrinsics (`i32_ptr`, `i64_ptr`, `f64_ptr`) that duplicated numbox's existing [`_cast_int_to_void_p`](https://github.com/Goykhman/numbox/blob/main/numbox/utils/lowlevel.py#L49); review caught it and they were removed.
+- **[numbarrow](https://github.com/Goykhman/numbarrow)**: bridges PyArrow arrays into numba `@njit` code (Arrow → numpy direction). Read numbarrow source before designing any Arrow-based features in numbduck (e.g., virtual tables). numbduck's Arrow work would be the inverse direction (numpy → Arrow/DuckDB).
 
 ## Project Status
 
-- **DuckDB Python issue**: duckdb/duckdb-python#404 — requesting C API symbols be exported from the Python wheel. Filed 2026-03-26; maintainer @evertlammerts responded 2026-04-12 committing to land the fix before 1.5.3. Still open.
+- **DuckDB Python issue**: duckdb/duckdb-python#404, requesting C API symbols be exported from the Python wheel. Filed 2026-03-26; maintainer @evertlammerts responded 2026-04-12 committing to land the fix before 1.5.3. Still open.
 - **macOS C API stripping is intentional**: [duckdb-python PR #81](https://github.com/duckdb/duckdb-python/pull/81) deliberately exports only `PyInit__duckdb` + `duckdb_adbc_init` via [CMakeLists.txt L83-L110](https://github.com/duckdb/duckdb-python/blob/main/CMakeLists.txt#L83-L110). macOS `-exported_symbol` enforces it; Linux `--export-dynamic-symbol` is additive so C API survives by accident.
 - **Structref-backed UDAF pattern (merged upstream 2026-04-22)**: [Goykhman/numbduck#24](https://github.com/Goykhman/numbduck/pull/24) merged as [`0ff1aee`](https://github.com/Goykhman/numbduck/commit/0ff1aee68c1a91256beaab141bf8be247d8c25e7). Bridges DuckDB aggregate lifecycle to numba structref state via `borrow_structref` (incref + raw deref) and `_deref_structref_raw_ptr` intrinsic. Design doc: [`test/test_ducklib.md`](test/test_ducklib.md) covers aggregate lifecycle, bridge intrinsics, removerefctpass interaction, and the `@cfunc`/`@njit` callback pattern. Reference impl: [`test/test_ducklib.py`](test/test_ducklib.py) (Welford stddev + array UDAF).
 
@@ -99,4 +99,4 @@ Cross-project preferences live in the user's MEMORY.md. Only numbduck-specific w
 4. Result reading in Python test bodies: use `(ctypes.c_int32 * N).from_address(data_p)` (not `carray` which only works in JIT)
 5. `duckdb_fetch_chunk(tuple(result))` for result fetching (not `duckdb_result_get_chunk` which doesn't exist in numbduck)
 6. Destroy handles via buffer: `buf = numpy.array([handle_p], dtype=numpy.intp); destroy_func(buf.ctypes.data)`
-7. Each function in a scalar function set must have its name set via `duckdb_scalar_function_set_name` — the name on the set alone is not sufficient
+7. Each function in a scalar function set must have its name set via `duckdb_scalar_function_set_name`; the name on the set alone is not sufficient
