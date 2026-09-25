@@ -146,7 +146,7 @@ def main(argv=None):
     ap.add_argument('paths', nargs='+')
     ap.add_argument('--max-line-length', type=int, default=120)
     ap.add_argument('--extend-ignore', default=DOC_SNIPPET_IGNORE,
-                    help=f'flake8 codes to ignore beyond defaults (default: {DOC_SNIPPET_IGNORE} — '
+                    help=f'flake8 codes to ignore beyond defaults (default: {DOC_SNIPPET_IGNORE}; '
                          'blank-line rules that do not apply to short snippets). Pass empty string to disable.')
     ap.add_argument('--flake8', default=None,
                     help='flake8 executable to invoke (default: run flake8 as a module of the interpreter '
