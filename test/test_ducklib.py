@@ -1511,11 +1511,13 @@ from numbduck.pybridge import extract_connection_ptr
 
 conn = duckdb.connect()
 conn.execute("SET threads = 2")
+conn.execute("SET enable_progress_bar = false")
 conn.execute("CREATE TABLE t AS SELECT range::DOUBLE AS x FROM range(250000)")
 conn.create_function("plus_one", lambda x: x + 1.0, ["DOUBLE"], "DOUBLE")
 conn_p = extract_connection_ptr(conn)
 result = create_duckdb_result()
-rc = ducklib.duckdb_query(conn_p, get_unicode_data_p("SELECT sum(plus_one(x)) FROM t"), result.ctypes.data)
+sql = "SELECT sum(plus_one(x)) FROM t WHERE x % 64 = 0"
+rc = ducklib.duckdb_query(conn_p, get_unicode_data_p(sql), result.ctypes.data)
 ducklib.duckdb_destroy_result(result.ctypes.data)
 print("QUERY_RC", rc)
 """
@@ -1526,8 +1528,9 @@ def test_binding_called_from_python_lets_duckdb_workers_take_the_gil():
     runs a query on its worker threads, and a worker that needs the GIL (here a
     Python UDF on the same connection) waits for it forever if the calling
     thread keeps it while it waits for the workers. 250000 rows is three row
-    groups, so the workers get some of them. Runs in a subprocess so a deadlock
-    is a timeout, not a hung suite."""
+    groups, so the workers get some of them, and the filter keeps the UDF to 1
+    row in 64, since a Python UDF costs tens of microseconds a row. Runs in a
+    subprocess so a deadlock is a timeout, not a hung suite."""
     env = dict(os.environ)
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     env["PYTHONPATH"] = os.pathsep.join(
@@ -1536,7 +1539,7 @@ def test_binding_called_from_python_lets_duckdb_workers_take_the_gil():
     try:
         proc = subprocess.run(
             [sys.executable, "-c", _GIL_WORKER_SCRIPT],
-            env=env, capture_output=True, text=True, timeout=120,
+            env=env, capture_output=True, encoding="utf-8", errors="replace", timeout=120,
         )
     except subprocess.TimeoutExpired:
         pytest.fail("duckdb_query called from Python never returned: the binding kept the GIL")
