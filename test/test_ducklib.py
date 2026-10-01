@@ -1815,10 +1815,11 @@ _BUFFER_LIFETIME_TESTS = [
 
 def _poison_on_free(tmp_path):
     """The environment under which the allocator overwrites freed memory: macOS
-    has libmalloc scribble 0x55 over every block it frees; Linux preloads a
-    free that does the same with 0xDE."""
+    has libmalloc scribble 0x55 over every block it frees, and not zero it
+    first as it does by default for a recent build; Linux preloads a free that
+    does the same with 0xDE."""
     if sys.platform == "darwin":
-        return {"MallocScribble": "1"}
+        return {"MallocScribble": "1", "MallocZeroOnFree": "0"}
     src = tmp_path / "poison_free.c"
     src.write_text(_POISON_FREE_C)
     lib = tmp_path / "poison_free.so"
@@ -1838,9 +1839,10 @@ def test_jit_destroy_calls_read_no_freed_buffer(tmp_path):
     already freed still passes. Under an allocator that overwrites memory as it
     is freed, the same code reads garbage and crashes, so these tests are run
     again under one. First a numba array is filled and dropped under the same
-    environment and its freed bytes are read back: a run in which they survive
-    is skipped rather than passed, since macOS ignores the variable for a
-    restricted python."""
+    environment and its freed bytes are read back, and a run in which they
+    survive, or were zeroed, is skipped rather than passed: macOS ignores the
+    variables for a restricted python, and a destroy that checks the handle
+    for NULL survives a zeroed buffer."""
     here = os.path.abspath(__file__)
     repo_root = os.path.dirname(os.path.dirname(here))
     env = dict(os.environ)
@@ -1853,6 +1855,8 @@ def test_jit_destroy_calls_read_no_freed_buffer(tmp_path):
     freed = check.stdout.split("FREED-BYTES", 1)[1].split()[0]
     if "1111" in freed:
         pytest.skip(f"freed memory keeps its bytes under this allocator: {freed}")
+    if freed.strip("0") == "":
+        pytest.skip(f"this allocator zeroes freed memory, which a destroy checking for NULL survives: {freed}")
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
         + [f"{here}::{name}" for name in _BUFFER_LIFETIME_TESTS],

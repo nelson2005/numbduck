@@ -85,7 +85,6 @@ jobs:
         import ctypes
         import numpy
         from numba import njit
-        from numba.core.runtime import rtsys
 
         def peek(addr):
             return bytes((ctypes.c_ubyte * 16).from_address(addr + 32)).hex()
@@ -117,21 +116,23 @@ jobs:
 
         addr = fill_and_drop()
         print("numba array            ", peek(addr))
-        print("nrt stats              ", rtsys.get_allocation_stats())
         PY
-        for variant in "" "MallocScribble=1" "MallocScribble=1 MallocNanoZone=0" "DYLD_INSERT_LIBRARIES=$PWD/poison_free.dylib"; do
+        for variant in "" "MallocZeroOnFree=0" "MallocScribble=1" "MallocScribble=1 MallocZeroOnFree=0" "MallocScribble=1 MallocNanoZone=0" "DYLD_INSERT_LIBRARIES=$PWD/poison_free.dylib" "DYLD_INSERT_LIBRARIES=$PWD/poison_free.dylib MallocZeroOnFree=0"; do
           echo "== env: ${variant:-plain}"
-          env $variant python freed.py 2>&1
+          env $variant python freed.py 2>&1 || true
         done
+        echo "== the system python, plain and under MallocZeroOnFree=0 MallocScribble=1"
+        /usr/bin/python3 -c "import ctypes; libc = ctypes.CDLL(None); libc.malloc.restype = ctypes.c_void_p; libc.malloc.argtypes = [ctypes.c_size_t]; libc.free.argtypes = [ctypes.c_void_p]; p = libc.malloc(96); ctypes.memset(p, 0x11, 96); libc.free(p); print(bytes((ctypes.c_ubyte * 16).from_address(p + 32)).hex())" || true
+        MallocZeroOnFree=0 MallocScribble=1 /usr/bin/python3 -c "import ctypes; libc = ctypes.CDLL(None); libc.malloc.restype = ctypes.c_void_p; libc.malloc.argtypes = [ctypes.c_size_t]; libc.free.argtypes = [ctypes.c_void_p]; p = libc.malloc(96); ctypes.memset(p, 0x11, 96); libc.free(p); print(bytes((ctypes.c_ubyte * 16).from_address(p + 32)).hex())" || true
     - name: The revised tests
       run: pytest -rs -v --durations=5 test/test_ducklib.py::test_jit_destroy_calls_read_no_freed_buffer test/test_ducklib.py::test_binding_called_from_python_lets_duckdb_workers_take_the_gil
     - name: Check out the pre-fix tree
       run: git worktree add "$RUNNER_TEMP/prefix" c59b049d0296c252819d67cba00e4206938d58bd
-    - name: The pre-fix tree under scribbling and under the dylib
+    - name: The pre-fix tree under scribbling, with and without zero-on-free
       working-directory: ${{ runner.temp }}/prefix
       run: |
         PYTHONPATH=$PWD python -c "import numbduck; print(numbduck.__file__)"
-        for variant in "MallocScribble=1" "DYLD_INSERT_LIBRARIES=$GITHUB_WORKSPACE/poison_free.dylib"; do
+        for variant in "MallocScribble=1" "MallocScribble=1 MallocZeroOnFree=0"; do
           set +e
           env $variant PYTHONPATH=$PWD python -m pytest -q -p no:cacheprovider test/test_ducklib.py::test_jit_open_close_database test/test_ducklib.py::test_jit_connect_query_disconnect test/test_ducklib.py::test_jit_query_invalid_sql test/test_ducklib.py::test_jit_prepare_bind_execute test/test_ducklib.py::test_online_scoring_missing_key_raises test/test_ducklib.py::test_online_scoring_null_feature_raises > out.txt 2>&1
           rc=$?
