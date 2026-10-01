@@ -51,26 +51,90 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e . pytest
         python -c "import os, sys, duckdb, numba, numbox; print(os.path.realpath(sys.executable), sys.version.split()[0], 'duckdb', duckdb.__version__, 'numba', numba.__version__, 'numbox', numbox.__version__)"
-    - name: libmalloc scribbling announces itself
+        python -c "import sysconfig; print('CONFIG_ARGS', sysconfig.get_config_var('CONFIG_ARGS')); print('LDFLAGS', sysconfig.get_config_var('LDFLAGS')); print('PY_CFLAGS', sysconfig.get_config_var('PY_CFLAGS'))"
+        otool -L "$(python -c 'import os, sys; print(os.path.realpath(sys.executable))')" || true
+    - name: Build the interposing allocator
       run: |
-        echo "== this job's python under MallocScribble=1 (expect a malloc line about scribbling on stderr)"
-        MallocScribble=1 python -c "print('python ran')"
-        echo "== the system python under MallocScribble=1 (restricted: expect no line)"
-        MallocScribble=1 /usr/bin/python3 -c "print('system python ran')" || true
+        cat > poison_free.c <<'C'
+        #include <malloc/malloc.h>
+        #include <stdio.h>
+        #include <stdlib.h>
+        #include <string.h>
+
+        static void poison_free(void *p) {
+            if (p) {
+                size_t n = malloc_size(p);
+                if (n > 0 && n < 4096) memset(p, 0xDE, n);
+            }
+            free(p);
+        }
+
+        __attribute__((used)) static struct { const void *replacement; const void *replacee; }
+        _interpose_free __attribute__((section("__DATA,__interpose"))) = {
+            (const void *)poison_free, (const void *)free
+        };
+
+        __attribute__((constructor)) static void poison_free_loaded(void) {
+            fputs("poison_free loaded\n", stderr);
+        }
+        C
+        cc -Wall -Wextra -dynamiclib -O2 -o poison_free.dylib poison_free.c
+    - name: Which frees are poisoned, per path and per environment
+      run: |
+        cat > freed.py <<'PY'
+        import ctypes
+        import numpy
+        from numba import njit
+        from numba.core.runtime import rtsys
+
+        def peek(addr):
+            return bytes((ctypes.c_ubyte * 16).from_address(addr + 32)).hex()
+
+        libc = ctypes.CDLL(None)
+        libc.malloc.restype = ctypes.c_void_p
+        libc.malloc.argtypes = [ctypes.c_size_t]
+        libc.free.argtypes = [ctypes.c_void_p]
+        p = libc.malloc(96)
+        ctypes.memset(p, 0x11, 96)
+        libc.free(p)
+        print("libc malloc/free       ", peek(p))
+
+        api = ctypes.pythonapi
+        api.PyMem_RawMalloc.restype = ctypes.c_void_p
+        api.PyMem_RawMalloc.argtypes = [ctypes.c_size_t]
+        api.PyMem_RawFree.argtypes = [ctypes.c_void_p]
+        p = api.PyMem_RawMalloc(96)
+        ctypes.memset(p, 0x11, 96)
+        api.PyMem_RawFree(p)
+        print("PyMem_RawMalloc/RawFree", peek(p))
+
+        @njit
+        def fill_and_drop():
+            a = numpy.empty(8, numpy.int64)
+            for i in range(8):
+                a[i] = 0x1111111111111111
+            return a.ctypes.data
+
+        addr = fill_and_drop()
+        print("numba array            ", peek(addr))
+        print("nrt stats              ", rtsys.get_allocation_stats())
+        PY
+        for variant in "" "MallocScribble=1" "MallocScribble=1 MallocNanoZone=0" "DYLD_INSERT_LIBRARIES=$PWD/poison_free.dylib"; do
+          echo "== env: ${variant:-plain}"
+          env $variant python freed.py 2>&1
+        done
     - name: The revised tests
       run: pytest -rs -v --durations=5 test/test_ducklib.py::test_jit_destroy_calls_read_no_freed_buffer test/test_ducklib.py::test_binding_called_from_python_lets_duckdb_workers_take_the_gil
     - name: Check out the pre-fix tree
       run: git worktree add "$RUNNER_TEMP/prefix" c59b049d0296c252819d67cba00e4206938d58bd
-    - name: The pre-fix tree dies under scribbling
+    - name: The pre-fix tree under scribbling and under the dylib
       working-directory: ${{ runner.temp }}/prefix
       run: |
         PYTHONPATH=$PWD python -c "import numbduck; print(numbduck.__file__)"
-        set +e
-        MallocScribble=1 PYTHONPATH=$PWD python -m pytest -q -p no:cacheprovider test/test_ducklib.py::test_jit_open_close_database test/test_ducklib.py::test_jit_connect_query_disconnect test/test_ducklib.py::test_jit_query_invalid_sql test/test_ducklib.py::test_jit_prepare_bind_execute test/test_ducklib.py::test_online_scoring_missing_key_raises test/test_ducklib.py::test_online_scoring_null_feature_raises > scribble.txt 2>&1
-        rc_scribble=$?
-        MallocScribble=1 MallocNanoZone=0 PYTHONPATH=$PWD python -m pytest -q -p no:cacheprovider test/test_ducklib.py::test_jit_open_close_database test/test_ducklib.py::test_jit_connect_query_disconnect test/test_ducklib.py::test_jit_query_invalid_sql test/test_ducklib.py::test_jit_prepare_bind_execute test/test_ducklib.py::test_online_scoring_missing_key_raises test/test_ducklib.py::test_online_scoring_null_feature_raises > nonano.txt 2>&1
-        rc_nonano=$?
-        set -e
-        echo "== MallocScribble=1: exit=$rc_scribble"; head -4 scribble.txt; tail -3 scribble.txt
-        echo "== MallocScribble=1 MallocNanoZone=0: exit=$rc_nonano"; head -4 nonano.txt; tail -3 nonano.txt
-        if [ "$rc_scribble" -eq 0 ]; then echo "the pre-fix tree passed under MallocScribble, so nothing was poisoned"; exit 1; fi
+        for variant in "MallocScribble=1" "DYLD_INSERT_LIBRARIES=$GITHUB_WORKSPACE/poison_free.dylib"; do
+          set +e
+          env $variant PYTHONPATH=$PWD python -m pytest -q -p no:cacheprovider test/test_ducklib.py::test_jit_open_close_database test/test_ducklib.py::test_jit_connect_query_disconnect test/test_ducklib.py::test_jit_query_invalid_sql test/test_ducklib.py::test_jit_prepare_bind_execute test/test_ducklib.py::test_online_scoring_missing_key_raises test/test_ducklib.py::test_online_scoring_null_feature_raises > out.txt 2>&1
+          rc=$?
+          set -e
+          echo "== $variant: exit=$rc"; head -3 out.txt; tail -2 out.txt
+        done
