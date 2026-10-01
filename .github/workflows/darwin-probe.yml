@@ -1,0 +1,82 @@
+name: darwin poison-on-free probe
+
+on:
+  push:
+    branches: [ "ci/darwin-poison-probe" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-source: "setup-python"
+            python-version: "3.12"
+          - python-source: "homebrew"
+            python-version: "3.12"
+          - python-source: "conda"
+            python-version: "3.12"
+    runs-on: macos-latest
+    env:
+      NUMBDUCK_LIBDUCKDB_DOWNLOAD: "1"
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Set up Python (setup-python)
+      if: matrix.python-source == 'setup-python'
+      uses: actions/setup-python@v6
+      with:
+        python-version: "${{ matrix.python-version }}"
+    - name: Set up Python (conda-forge)
+      if: matrix.python-source == 'conda'
+      run: |
+        curl -fsSL https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-MacOSX-arm64.sh -o miniforge.sh
+        bash miniforge.sh -b -p $HOME/miniforge
+        $HOME/miniforge/bin/conda create -n test python=${{ matrix.python-version }} -y
+        echo "$HOME/miniforge/envs/test/bin" >> $GITHUB_PATH
+    - name: Set up Python (Homebrew)
+      if: matrix.python-source == 'homebrew'
+      run: |
+        brew install python@${{ matrix.python-version }}
+        brew link --overwrite python@${{ matrix.python-version }}
+        /opt/homebrew/opt/python@${{ matrix.python-version }}/bin/python${{ matrix.python-version }} -m venv venv
+        echo "$PWD/venv/bin" >> $GITHUB_PATH
+    - name: Install
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e . pytest
+        python -c "import os, sys, duckdb, numba, numbox; print(os.path.realpath(sys.executable), sys.version.split()[0], 'duckdb', duckdb.__version__, 'numba', numba.__version__, 'numbox', numbox.__version__)"
+        echo "== code signature and entitlements of the interpreter"
+        codesign -dv --entitlements - "$(python -c 'import os, sys; print(os.path.realpath(sys.executable))')" 2>&1 | head -40 || true
+    - name: Build the allocator and check that it loads
+      run: |
+        python - <<'PY'
+        import pathlib, re
+        s = pathlib.Path("test/test_ducklib.py").read_text()
+        pathlib.Path("poison_free.c").write_text(re.search(r'_POISON_FREE_C = r"""(.*?)"""', s, re.S).group(1))
+        PY
+        cc -Wall -Wextra -dynamiclib -O2 -o poison_free.dylib poison_free.c
+        echo "== this job's python under DYLD_INSERT_LIBRARIES (expect: poison_free loaded)"
+        DYLD_INSERT_LIBRARIES=$PWD/poison_free.dylib python -c "print('python ran')"
+        echo "== the system python under DYLD_INSERT_LIBRARIES (SIP: expect no announcement)"
+        DYLD_INSERT_LIBRARIES=$PWD/poison_free.dylib /usr/bin/python3 -c "print('system python ran')" || true
+    - name: The revised tests
+      run: pytest -rs -v --durations=5 test/test_ducklib.py::test_jit_destroy_calls_read_no_freed_buffer test/test_ducklib.py::test_binding_called_from_python_lets_duckdb_workers_take_the_gil
+    - name: Check out the pre-fix tree
+      run: git worktree add "$RUNNER_TEMP/prefix" c59b049d0296c252819d67cba00e4206938d58bd
+    - name: The pre-fix tree dies under the allocator
+      working-directory: ${{ runner.temp }}/prefix
+      run: |
+        PYTHONPATH=$PWD python -c "import numbduck; print(numbduck.__file__)"
+        set +e
+        DYLD_INSERT_LIBRARIES=$GITHUB_WORKSPACE/poison_free.dylib PYTHONPATH=$PWD python -m pytest -q -p no:cacheprovider test/test_ducklib.py::test_jit_open_close_database test/test_ducklib.py::test_jit_connect_query_disconnect test/test_ducklib.py::test_jit_query_invalid_sql test/test_ducklib.py::test_jit_prepare_bind_execute test/test_ducklib.py::test_online_scoring_missing_key_raises test/test_ducklib.py::test_online_scoring_null_feature_raises > prefix.txt 2>&1
+        rc=$?
+        set -e
+        tail -20 prefix.txt
+        echo "exit=$rc"
+        if [ "$rc" -eq 0 ]; then echo "the pre-fix tree passed under the allocator, so the interposition did not reach the frees"; exit 1; fi
