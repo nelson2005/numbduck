@@ -51,32 +51,26 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e . pytest
         python -c "import os, sys, duckdb, numba, numbox; print(os.path.realpath(sys.executable), sys.version.split()[0], 'duckdb', duckdb.__version__, 'numba', numba.__version__, 'numbox', numbox.__version__)"
-        echo "== code signature and entitlements of the interpreter"
-        codesign -dv --entitlements - "$(python -c 'import os, sys; print(os.path.realpath(sys.executable))')" 2>&1 | head -40 || true
-    - name: Build the allocator and check that it loads
+    - name: libmalloc scribbling announces itself
       run: |
-        python - <<'PY'
-        import pathlib, re
-        s = pathlib.Path("test/test_ducklib.py").read_text()
-        pathlib.Path("poison_free.c").write_text(re.search(r'_POISON_FREE_C = r"""(.*?)"""', s, re.S).group(1))
-        PY
-        cc -Wall -Wextra -dynamiclib -O2 -o poison_free.dylib poison_free.c
-        echo "== this job's python under DYLD_INSERT_LIBRARIES (expect: poison_free loaded)"
-        DYLD_INSERT_LIBRARIES=$PWD/poison_free.dylib python -c "print('python ran')"
-        echo "== the system python under DYLD_INSERT_LIBRARIES (SIP: expect no announcement)"
-        DYLD_INSERT_LIBRARIES=$PWD/poison_free.dylib /usr/bin/python3 -c "print('system python ran')" || true
+        echo "== this job's python under MallocScribble=1 (expect a malloc line about scribbling on stderr)"
+        MallocScribble=1 python -c "print('python ran')"
+        echo "== the system python under MallocScribble=1 (restricted: expect no line)"
+        MallocScribble=1 /usr/bin/python3 -c "print('system python ran')" || true
     - name: The revised tests
       run: pytest -rs -v --durations=5 test/test_ducklib.py::test_jit_destroy_calls_read_no_freed_buffer test/test_ducklib.py::test_binding_called_from_python_lets_duckdb_workers_take_the_gil
     - name: Check out the pre-fix tree
       run: git worktree add "$RUNNER_TEMP/prefix" c59b049d0296c252819d67cba00e4206938d58bd
-    - name: The pre-fix tree dies under the allocator
+    - name: The pre-fix tree dies under scribbling
       working-directory: ${{ runner.temp }}/prefix
       run: |
         PYTHONPATH=$PWD python -c "import numbduck; print(numbduck.__file__)"
         set +e
-        DYLD_INSERT_LIBRARIES=$GITHUB_WORKSPACE/poison_free.dylib PYTHONPATH=$PWD python -m pytest -q -p no:cacheprovider test/test_ducklib.py::test_jit_open_close_database test/test_ducklib.py::test_jit_connect_query_disconnect test/test_ducklib.py::test_jit_query_invalid_sql test/test_ducklib.py::test_jit_prepare_bind_execute test/test_ducklib.py::test_online_scoring_missing_key_raises test/test_ducklib.py::test_online_scoring_null_feature_raises > prefix.txt 2>&1
-        rc=$?
+        MallocScribble=1 PYTHONPATH=$PWD python -m pytest -q -p no:cacheprovider test/test_ducklib.py::test_jit_open_close_database test/test_ducklib.py::test_jit_connect_query_disconnect test/test_ducklib.py::test_jit_query_invalid_sql test/test_ducklib.py::test_jit_prepare_bind_execute test/test_ducklib.py::test_online_scoring_missing_key_raises test/test_ducklib.py::test_online_scoring_null_feature_raises > scribble.txt 2>&1
+        rc_scribble=$?
+        MallocScribble=1 MallocNanoZone=0 PYTHONPATH=$PWD python -m pytest -q -p no:cacheprovider test/test_ducklib.py::test_jit_open_close_database test/test_ducklib.py::test_jit_connect_query_disconnect test/test_ducklib.py::test_jit_query_invalid_sql test/test_ducklib.py::test_jit_prepare_bind_execute test/test_ducklib.py::test_online_scoring_missing_key_raises test/test_ducklib.py::test_online_scoring_null_feature_raises > nonano.txt 2>&1
+        rc_nonano=$?
         set -e
-        tail -20 prefix.txt
-        echo "exit=$rc"
-        if [ "$rc" -eq 0 ]; then echo "the pre-fix tree passed under the allocator, so the interposition did not reach the frees"; exit 1; fi
+        echo "== MallocScribble=1: exit=$rc_scribble"; head -4 scribble.txt; tail -3 scribble.txt
+        echo "== MallocScribble=1 MallocNanoZone=0: exit=$rc_nonano"; head -4 nonano.txt; tail -3 nonano.txt
+        if [ "$rc_scribble" -eq 0 ]; then echo "the pre-fix tree passed under MallocScribble, so nothing was poisoned"; exit 1; fi
