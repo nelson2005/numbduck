@@ -1771,28 +1771,10 @@ def test_jit_prepare_bind_execute():
 
 _POISON_FREE_C = r"""
 #define _GNU_SOURCE
-#include <stdio.h>
-#include <string.h>
-
-#if defined(__APPLE__)
-#include <malloc/malloc.h>
-#include <stdlib.h>
-
-static void poison_free(void *p) {
-    if (p) {
-        size_t n = malloc_size(p);
-        if (n > 0 && n < 4096) memset(p, 0xDE, n);
-    }
-    free(p);
-}
-
-__attribute__((used)) static struct { const void *replacement; const void *replacee; }
-_interpose_free __attribute__((section("__DATA,__interpose"))) = {
-    (const void *)poison_free, (const void *)free
-};
-#else
 #include <dlfcn.h>
 #include <malloc.h>
+#include <stdio.h>
+#include <string.h>
 
 static void (*real_free)(void *) = 0;
 
@@ -1804,17 +1786,11 @@ void free(void *p) {
     }
     real_free(p);
 }
-#endif
 
 __attribute__((constructor)) static void poison_free_loaded(void) {
     fputs("poison_free loaded\n", stderr);
 }
 """
-
-if sys.platform == "darwin":
-    _POISON_FREE_BUILD = (["cc", "-dynamiclib", "-O2"], [], "poison_free.dylib", "DYLD_INSERT_LIBRARIES")
-else:
-    _POISON_FREE_BUILD = (["gcc", "-shared", "-fPIC", "-O2"], ["-ldl"], "poison_free.so", "LD_PRELOAD")
 
 _BUFFER_LIFETIME_TESTS = [
     "test_jit_open_close_database",
@@ -1826,36 +1802,46 @@ _BUFFER_LIFETIME_TESTS = [
 ]
 
 
+def _poison_on_free(tmp_path):
+    """The environment under which the allocator overwrites freed memory, and
+    the line its stderr carries once it does. macOS asks libmalloc, which
+    scribbles 0x55 over every freed block and says so; Linux preloads a free
+    that does the same with 0xDE."""
+    if sys.platform == "darwin":
+        return {"MallocScribble": "1"}, "enabling scribbling"
+    src = tmp_path / "poison_free.c"
+    src.write_text(_POISON_FREE_C)
+    lib = tmp_path / "poison_free.so"
+    subprocess.run(
+        ["gcc", "-shared", "-fPIC", "-O2", "-o", str(lib), str(src), "-ldl"],
+        check=True, capture_output=True)
+    return {"LD_PRELOAD": str(lib)}, "poison_free loaded"
+
+
 @pytest.mark.skipif(
-    sys.platform not in ("linux", "darwin") or shutil.which(_POISON_FREE_BUILD[0][0]) is None,
-    reason="needs Linux with gcc or macOS with cc to preload an allocator that poisons freed memory")
+    not (sys.platform == "darwin" or (sys.platform == "linux" and shutil.which("gcc"))),
+    reason="needs macOS, or Linux with gcc, for an allocator that poisons freed memory")
 def test_jit_destroy_calls_read_no_freed_buffer(tmp_path):
     """The JIT lifecycle tests and online_scoring's raise branches destroy
     handles through out-param buffers. A freed buffer's bytes normally survive
     until the memory is reused, so a destroy that reads a buffer numba has
     already freed still passes. Under an allocator that overwrites memory as it
     is freed, the same code reads garbage and crashes, so these tests are run
-    again with one preloaded. The library announces itself as it loads, and a
-    run without the announcement is skipped rather than passed: macOS drops the
-    DYLD variables for a restricted python."""
-    compile_cmd, link_libs, lib_name, preload_var = _POISON_FREE_BUILD
-    src = tmp_path / "poison_free.c"
-    src.write_text(_POISON_FREE_C)
-    lib = tmp_path / lib_name
-    subprocess.run(
-        compile_cmd + ["-o", str(lib), str(src)] + link_libs,
-        check=True, capture_output=True)
+    again under one. The allocator announces itself on stderr, and a run
+    without the announcement is skipped rather than passed: macOS ignores the
+    variable for a restricted python."""
+    updates, announcement = _poison_on_free(tmp_path)
     here = os.path.abspath(__file__)
     repo_root = os.path.dirname(os.path.dirname(here))
     env = dict(os.environ)
-    env[preload_var] = str(lib)
+    env.update(updates)
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
         + [f"{here}::{name}" for name in _BUFFER_LIFETIME_TESTS],
         cwd=repo_root, env=env, capture_output=True, text=True, timeout=600,
     )
-    if "poison_free loaded" not in proc.stderr:
-        pytest.skip(f"{preload_var} did not load the poisoning allocator: stderr={proc.stderr[-500:]!r}")
+    if announcement not in proc.stderr:
+        pytest.skip(f"the allocator did not announce itself: stderr={proc.stderr[-500:]!r}")
     assert proc.returncode == 0, f"stdout={proc.stdout[-3000:]!r} stderr={proc.stderr[-3000:]!r}"
 
 
