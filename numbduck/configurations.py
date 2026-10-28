@@ -1,8 +1,10 @@
+import inspect
 import json
 import os
 import warnings
 
 from numba.core.options import DefaultOptions
+from numbox.core.configurations import cache_remedy, check_cache_location, is_a_cache_error
 
 
 # njit's accepted compilation options. Take the target-level options straight
@@ -71,4 +73,61 @@ def get_jit_options():
     return options
 
 
-jit_options = get_jit_options()
+def _cache_probe():
+    """A function of this module that is never compiled.
+
+    The file that holds its code is the one numba looks up for the package.
+    """
+
+
+# The bound on the name of a file numba writes for a function of numbduck's, numbox's own bound for its files. The
+# name holds the module's stem, the function's qualified name, numba's line number, the interpreter tag and an index
+# number, and numba writes the file under a temporary name 21 bytes longer. numbox's proxy gives a binding's body a
+# qualified name with two leading underscores. The longest name is 96 bytes, so a location within the 32-byte
+# margin of the path limit turns caching off though its names would fit. The margin keeps a longer binding name
+# from overflowing a location that passed the check. A test holds every function of the package under the bound.
+LONGEST_CACHE_FILE_NAME = 128
+
+
+def uncached_where_no_cache_can_be_written(options):
+    """Return ``options``, with ``cache`` off after one warning where numba can write no cache for numbduck.
+
+    numba sets a cached function up when it is decorated, and raises ``RuntimeError`` at that point when no cache
+    location can be written. It has none on a read-only install whose user cache directory cannot be written
+    either, and none under an import from an ``.egg``, ``.whl`` or ``.pyz`` archive, which Spark's ``--py-files``
+    ships. For a ``.zip`` archive, numba takes the user's cache directory without checking that it can be written,
+    and the first write raises ``OSError`` instead, at the first call of a buffer allocator, which compiles lazily.
+    From numba 0.68 on, a ``.zip`` member shipped as ``.pyc`` alone raises ``KeyError`` instead, when numba reads
+    its source from the archive for the stamp. None of these errors names a remedy.
+
+    Every binding and buffer allocator takes its options from the one ``jit_options``, and all of them are in this
+    module's directory. The check is therefore made here, once, for this module's file, with numbox's
+    ``check_cache_location``. That function runs the cache set-up that numba runs at decoration and the writability
+    check that numba runs at the first save, and compiles nothing. Where numba can cache no function of the file,
+    the options are returned with ``cache`` off, and one warning names numbox's remedy for the placement. The
+    remedy is to set ``NUMBA_CACHE_DIR`` for a source file on disk, to make the user's cache directory writable
+    for a ``.zip``, and to put the source files on disk for any other archive.
+    ``NUMBDUCK_JIT_OPTIONS='{"cache": false}'`` turns caching off and silences the warning. An error that is not a
+    cache error, as numbox's ``is_a_cache_error`` decides, is raised as it was.
+    """
+    if not options.get("cache"):
+        return options
+    py_file = inspect.getfile(_cache_probe)
+    try:
+        check_cache_location(py_file, LONGEST_CACHE_FILE_NAME)
+    except (RuntimeError, OSError, KeyError, ValueError) as error:
+        if not is_a_cache_error(error):
+            raise
+        failure = error
+    else:
+        return options
+    silence = "NUMBDUCK_JIT_OPTIONS='{\"cache\": false}' to turn caching off and silence this warning"
+    remedy = cache_remedy(py_file, failure, silence, package="numbduck")
+    warnings.warn(
+        f"numba cannot cache numbduck here ({failure}); it compiles without a cache. {remedy}",
+        RuntimeWarning, stacklevel=2,
+    )
+    return {**options, "cache": False}
+
+
+jit_options = uncached_where_no_cache_can_be_written(get_jit_options())

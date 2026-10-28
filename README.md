@@ -5,6 +5,22 @@ Leverages [bindings](https://github.com/Goykhman/numbox/tree/main/numbox/core/bi
 
 Inspired by the [NumbSQL](https://github.com/cpcloud/numbsql) project.
 
+## Caching
+
+Every binding and buffer allocator compiles under the options in `NUMBDUCK_JIT_OPTIONS`, a JSON object read
+once at import. If it is not set, the options are `{"cache": true, "nogil": true}`, so compiled code goes into
+numba's on-disk cache, and `export NUMBDUCK_JIT_OPTIONS='{"cache": false}'` turns the cache off. A compile
+option that differs from the defaults turns it off too, since numba's cache key holds no compile options. The
+two bignum bindings never use the cache, since the name of their C symbol depends on the duckdb version and is
+not in any cache key.
+
+Where numba cannot write a cache for numbduck, numbduck compiles without one after a single `RuntimeWarning`
+that names the remedy. Those placements are a read-only install whose user cache directory cannot be written
+either, and an import from an `.egg`, `.whl` or `.pyz` archive. A `.zip` archive is such a placement where its user
+cache directory cannot be written, and, under numba 0.68 and later, where its modules ship as `.pyc` alone. numbox's
+[Where the cache lands](https://goykhman.github.io/numbox/numbox.core.configurations.html#where-the-cache-lands)
+covers each placement and its remedy.
+
 ## Examples
 
 Runnable narrative-style examples comparing numbduck against the closest stock
