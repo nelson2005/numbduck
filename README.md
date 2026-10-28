@@ -14,12 +14,12 @@ option that differs from the defaults turns it off too, since numba's cache key 
 two bignum bindings never use the cache, since the name of their C symbol depends on the duckdb version and is
 not in any cache key.
 
-Where numba cannot write a cache for numbduck, numbduck compiles without one after a single `RuntimeWarning`
-that names the remedy. Those placements are a read-only install whose user cache directory cannot be written
-either, and an import from an `.egg`, `.whl` or `.pyz` archive. A `.zip` archive is such a placement where its user
-cache directory cannot be written, and, under numba 0.68 and later, where its modules ship as `.pyc` alone. numbox's
+numbduck checks once at import whether numba can write a cache for it. If numba cannot, numbduck compiles
+without a cache and warns once, naming the remedy. That happens on a read-only install, and under an import from
+a `.zip`, when the user cache directory is read-only too. It also happens under an import from an `.egg`, `.whl`
+or `.pyz` archive, and on numba 0.68 and later under an import from a `.zip` that holds only `.pyc` files. numbox's
 [Where the cache lands](https://goykhman.github.io/numbox/numbox.core.configurations.html#where-the-cache-lands)
-covers each placement and its remedy.
+describes each placement and its remedy.
 
 ## Examples
 

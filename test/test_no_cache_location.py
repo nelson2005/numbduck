@@ -1,10 +1,9 @@
-"""Importing numbduck where numba can write no cache for it.
+"""These tests import numbduck where numba cannot write a cache for it.
 
-numba sets a cached function up when it is decorated, and raises at that point when no cache location can be
-written. So ``import numbduck.ducklib`` failed when its first binding was decorated under an archive import or a
-read-only install. Under an import from a ``.zip`` whose user cache directory cannot be written, a buffer allocator,
-which compiles lazily, failed at its first call. Every check here runs in a subprocess with its own tree and cache
-directory, so the subprocess sees only the placement under test.
+Each test runs the import in a child process with its own source tree and cache directory, so the child process
+imports only from the placement under test. The placements are an archive, a ``.zip``, a ``.zip`` of ``.pyc`` files
+alone, a read-only install, a cache directory at the path limit, and an error unrelated to the cache. One test holds
+every function's cache file name under the bound the check reserves.
 """
 import ast
 import compileall
@@ -39,7 +38,7 @@ WARNING = "numba cannot cache numbduck here"
 
 
 def _archive(path):
-    """Zip numbduck's modules into ``path`` and return it; the archive goes on PYTHONPATH unchanged."""
+    """Zip numbduck's modules into ``path`` and return it; the archive is put on PYTHONPATH unchanged."""
     with zipfile.ZipFile(path, "w") as zipped:
         for source in sorted((REPO / "numbduck").rglob("*.py")):
             zipped.write(source, str(source.relative_to(REPO)))
@@ -58,8 +57,8 @@ def _pyc_archive(path):
 
 
 def _run(env, cwd, warnings="always"):
-    # From a neutral cwd, the child process imports the placement that PYTHONPATH names, not the tree the test runs
-    # from.
+    # From a neutral cwd, the child process imports the placement that PYTHONPATH names, not the source tree the
+    # test runs from.
     return subprocess.run([sys.executable, "-W", warnings, "-c", IMPORT_AND_USE],
                           capture_output=True, text=True, env=env, cwd=str(cwd))
 
@@ -78,11 +77,10 @@ def _env(**changes):
 
 @pytest.mark.parametrize("name", ["numbduck-0.0.0-py3.12.egg", "numbduck-0.0.0-py3-none-any.whl"])
 def test_an_import_from_an_archive_compiles_uncached_with_one_warning_naming_the_remedy(tmp_path, name):
-    # numba's cache locators need the source file on disk, so an import from an .egg, .whl or .pyz archive, which
-    # Spark's --py-files ships, raised RuntimeError at the first binding. NUMBA_CACHE_DIR offers no cache here. It
-    # is set and writable, the warning fires regardless, and no file of numbduck's is written there. The warning
-    # therefore says that NUMBA_CACHE_DIR has no effect instead of offering it, and names numbduck as the package
-    # to install with its sources.
+    # numba's cache locators need the source file on disk, so an archive gives numba no cache location. Spark's
+    # --py-files option ships such archives. NUMBA_CACHE_DIR has no effect: it is set and writable here, and numba
+    # still writes none of numbduck's files there. So the warning states that the variable has no effect and tells
+    # the user to install numbduck with its source files on disk.
     archive = _archive(tmp_path / name)
     env = _env(PYTHONPATH=str(archive), NUMBA_CACHE_DIR=str(tmp_path / "cache"))
     run = _run(env, tmp_path)
@@ -96,8 +94,8 @@ def test_an_import_from_an_archive_compiles_uncached_with_one_warning_naming_the
 
 
 def test_a_zip_import_is_cached_by_numba_from_0_61(tmp_path):
-    # The warning points an archive's user to a .zip, which numba caches from 0.61 on, in the user's cache
-    # directory regardless of NUMBA_CACHE_DIR. Before 0.61, numba treats a .zip as any other archive.
+    # numba caches a .zip member from 0.61 on, in the user's cache directory regardless of NUMBA_CACHE_DIR, so the
+    # warning directs an archive's user to a .zip. Before numba 0.61, numba treats a .zip as any other archive.
     import numba
     archive = _archive(tmp_path / "numbduck.zip")
     home = tmp_path / "home"
@@ -114,10 +112,10 @@ def test_a_zip_import_is_cached_by_numba_from_0_61(tmp_path):
 
 
 def test_a_zip_of_pyc_files_alone_compiles_uncached_from_numba_0_68_and_is_cached_before(tmp_path):
-    # numba 0.68 and later read a .zip member's source from the archive for its stamp, and zipfile raises KeyError
-    # for a member the archive does not hold, as for a module shipped as .pyc alone. The check let that error
-    # through, and the import died. Before 0.68 nothing reads the source, and numba caches the member as it caches
-    # any other.
+    # From numba 0.68 on, numba reads a .zip member's source from the archive for its stamp, and zipfile raises
+    # KeyError when the archive holds the member as .pyc alone. The check turns caching off for that error as it
+    # does for the others. Before numba 0.68, numba does not read the source and caches the member as it caches any
+    # other member.
     import numba
     archive = _pyc_archive(tmp_path / "numbduck.zip")
     home = tmp_path / "home"
@@ -137,10 +135,9 @@ def test_a_zip_of_pyc_files_alone_compiles_uncached_from_numba_0_68_and_is_cache
 
 @needs_a_directory_it_cannot_write
 def test_a_zip_import_with_no_writable_user_cache_directory_compiles_uncached_with_a_warning(tmp_path):
-    # numba takes the user's cache directory for a .zip without checking that it can be written. Where it cannot
-    # be written, as on an executor with a read-only home, the first save raised PermissionError. For a binding
-    # the failure came at import. For a buffer allocator it came at the first call, which a check at decoration
-    # would never have reached.
+    # numba takes the user's cache directory for a .zip without checking that it can be written. So an executor
+    # with a read-only home receives numba's error at the first save: at import for a binding, at the first call
+    # for a buffer allocator. The check catches both cases before any binding is decorated.
     archive = _archive(tmp_path / "numbduck.zip")
     home = tmp_path / "home"
     home.mkdir()
@@ -158,8 +155,8 @@ def test_a_zip_import_with_no_writable_user_cache_directory_compiles_uncached_wi
 
 @needs_a_directory_it_cannot_write
 def test_a_read_only_install_warns_naming_numba_cache_dir_and_setting_it_caches(tmp_path):
-    # The other way to have no cache location is a source on disk where neither its directory nor the user's cache
-    # directory can be written. NUMBA_CACHE_DIR is the remedy in that case, and setting it enables caching.
+    # A source on disk has no cache location when neither its directory nor the user's cache directory can be
+    # written. NUMBA_CACHE_DIR is the remedy, and setting it enables caching.
     site = tmp_path / "site"
     shutil.copytree(REPO / "numbduck", site / "numbduck", ignore=shutil.ignore_patterns("__pycache__"))
     home = tmp_path / "home"
@@ -198,12 +195,11 @@ def _directory_of_length(root, length):
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="the path limit of 4096 bytes is Linux's")
 def test_a_location_too_close_to_the_path_limit_for_numbas_files_compiles_uncached_and_is_told_so(tmp_path):
-    # numba's own check of a location makes a temporary file without a name on Linux. So a NUMBA_CACHE_DIR whose
-    # location for numbduck fits the path limit passed the check while numba's files, at seventy bytes or more
-    # for a binding, did not fit. The import then failed at the first save. The probe makes a file whose name is
-    # as long as the longest numba writes for the package. numba's location for numbduck, the directory's name
-    # and a hash of its path under NUMBA_CACHE_DIR, ends 20 bytes short of the limit regardless of the checkout's
-    # own path.
+    # numba checks a location with a temporary file that has no name. So on Linux a NUMBA_CACHE_DIR within the path
+    # limit for numbduck's location can still leave no room for numba's file names, which run to seventy bytes and
+    # more for a binding. The check reserves LONGEST_CACHE_FILE_NAME bytes for them. numba's location for numbduck
+    # is the directory's name and a hash of its path under NUMBA_CACHE_DIR, and the test places the end of that
+    # location 20 bytes short of the limit, regardless of the checkout's own path.
     from numba.core.caching import _CacheLocator
     location = _CacheLocator.get_suitable_cache_subpath(str(REPO / "numbduck" / "configurations.py"))
     cache_dir = _directory_of_length(tmp_path, 4096 - 20 - 1 - len(location))
@@ -253,11 +249,11 @@ def _function_names(tree):
 
 
 def test_numbas_longest_file_name_for_the_package_is_within_the_probes_bound():
-    # The probe reserves LONGEST_CACHE_FILE_NAME bytes in a location for the files numba writes there. A file's
+    # The check reserves LONGEST_CACHE_FILE_NAME bytes in a location for the files numba writes there. A file's
     # name holds the module's stem, the function's qualified name, a line number, the interpreter tag with its
     # abiflags and an index number, and numba writes the file under a 21-byte temporary name. numbox's proxy
     # gives a binding's body a qualified name with two leading underscores. Every function of the package must
-    # fit, whether decorated or not, as a binding's body.
+    # stay within the bound, whether decorated or not, as a binding's body.
     from numbduck.configurations import LONGEST_CACHE_FILE_NAME
     tag = f".py{sys.version_info[0]}{sys.version_info[1]}t.99.nbc.tmp.0123456789abcdef"
     names = [f"{path.stem}.__{qualname}-{lineno}{tag}"
