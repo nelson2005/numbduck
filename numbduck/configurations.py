@@ -90,10 +90,11 @@ def uncached_where_no_cache_can_be_written(options):
     numba has no cache location in three placements: a read-only install whose user cache directory is read-only
     too, an import from an ``.egg``, ``.whl`` or ``.pyz`` archive, and an import from a ``.zip`` whose user cache
     directory is read-only. From numba 0.68 on, an import from a ``.zip`` that holds numbduck as ``.pyc`` files
-    alone is a fourth placement. The warning names numbox's remedy for the placement: ``NUMBA_CACHE_DIR`` for a
-    source install, a writable user cache directory for a ``.zip``, and the source files on disk for any other
-    archive. ``NUMBDUCK_JIT_OPTIONS='{"cache": false}'`` turns caching off without the warning. An error that
-    numbox's ``is_a_cache_error`` does not classify as a cache error is raised unchanged.
+    alone is a fourth placement. The warning names numbox's remedy for the placement. A source install needs
+    ``NUMBA_CACHE_DIR`` set. A ``.zip`` whose user cache directory is read-only needs that directory made writable.
+    A ``.zip`` of ``.pyc`` files alone, or any other archive, needs the source files on disk.
+    ``NUMBDUCK_JIT_OPTIONS='{"cache": false}'`` turns caching off without the warning. An error that numbox's
+    ``is_a_cache_error`` does not classify as a cache error is raised unchanged.
     """
     if not options.get("cache"):
         return options
