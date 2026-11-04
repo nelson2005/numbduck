@@ -188,8 +188,8 @@ def _directory_of_length(root, length):
 
     The path takes components of 200 bytes while one more of them leaves room for a last component, and then a last
     component of the remaining length, so the directory itself can always be made. Lengths are counted in the file
-    system's encoding, because Linux limits a path's bytes, and a root with non-ASCII characters has more bytes than
-    characters.
+    system's encoding, because Linux limits a path's bytes, and in a multi-byte encoding such as UTF-8 a root with
+    non-ASCII characters has more bytes than characters.
     """
     deep = root
     while len(os.fsencode(deep)) + 201 < length - 1:
@@ -222,7 +222,8 @@ def test_a_location_too_close_to_the_path_limit_for_numbas_files_compiles_uncach
     # more for a binding. The check reserves LONGEST_CACHE_FILE_NAME bytes for them. numba's location for numbduck
     # is the directory's name and a hash of its path under NUMBA_CACHE_DIR, and the test places the end of that
     # location 20 bytes short of the limit, regardless of the checkout's own path. The directory begins with a
-    # component that has more bytes than characters in the file system's encoding, so the lengths are counted in bytes.
+    # character that takes more than one byte in the file system's encoding, where the encoding has such a character,
+    # so the lengths are counted in bytes.
     from numba.core.caching import _CacheLocator
     location = _CacheLocator.get_suitable_cache_subpath(str(REPO / "numbduck" / "configurations.py"))
     cache_dir = _directory_of_length(tmp_path / _component_wider_in_bytes(), 4096 - 20 - 1 - len(os.fsencode(location)))
