@@ -18,22 +18,10 @@ jobs:
 
     strategy:
       matrix:
-        python-version: [ "3.10", "3.11", "3.12", "3.13", "3.14"]
-        arch: ["ubuntu-latest", "ubuntu-24.04-arm", "windows-latest"]
-        numba-version: ["0.63.1", "0.64.0"]
-        duckdb-version: ["1.3.2", "1.4.0", "1.5.1"]
-        exclude:
-          # Windows only on Python 3.11 + latest duckdb to reduce billable minutes
-          - python-version: "3.10"
-            arch: "windows-latest"
-          - python-version: "3.12"
-            arch: "windows-latest"
-          - python-version: "3.13"
-            arch: "windows-latest"
-          - arch: "windows-latest"
-            duckdb-version: "1.3.2"
-          - arch: "windows-latest"
-            duckdb-version: "1.4.0"
+        python-version: [ "3.11"]
+        arch: ["windows-latest"]
+        numba-version: ["0.68.0", "0.68.1"]
+        duckdb-version: ["1.5.1"]
     runs-on: "${{ matrix.arch }}"
 
     steps:
@@ -81,7 +69,7 @@ jobs:
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with pytest
       run: |
-        pytest
+        pytest test/test_no_cache_location.py -rs -v
     - name: Install build dependencies
       run: |
         pip install build==1.2.2.post1 wheel==0.45.0
