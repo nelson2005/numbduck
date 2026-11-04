@@ -21,7 +21,7 @@ jobs:
       matrix:
         python-version: [ "3.11"]
         arch: ["windows-latest"]
-        numba-version: ["0.68.0", "0.68.1"]
+        numba-version: ["0.68.0rc1", "0.68.0", "0.68.1rc2", "0.68.1"]
         duckdb-version: ["1.5.1"]
     runs-on: "${{ matrix.arch }}"
 
