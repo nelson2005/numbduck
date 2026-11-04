@@ -17,6 +17,7 @@ jobs:
   build:
 
     strategy:
+      fail-fast: false
       matrix:
         python-version: [ "3.11"]
         arch: ["windows-latest"]
