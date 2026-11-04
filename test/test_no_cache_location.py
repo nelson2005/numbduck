@@ -204,7 +204,7 @@ def _component_wider_in_bytes():
     """Return a one-character path component that has more bytes than characters in the file system's encoding.
 
     The function returns an ASCII component for an encoding in which no candidate is wider, such as a single-byte
-    encoding, since bytes and characters count alike there.
+    encoding, because a string's byte count equals its character count in such an encoding.
     """
     for candidate in ("ü", "中"):
         try:
