@@ -31,15 +31,16 @@ up to ``PY_MAX_N`` rows, 10,000. Under duckdb 1.x without pandas, the Python UDF
 million rows. With pandas installed, or under duckdb 2.0, raise ``PY_MAX_N`` to time it at every row count. The runs
 below were made with ``PY_MAX_N`` raised.
 
-The ratios depend on the machine, on the duckdb version, and on two packages that numbduck does not install: pandas,
-and python-dateutil, which pandas installs. Under duckdb 1.x, the duckdb module tries to import pandas for every
-value that a Python UDF returns. If pandas is not installed, every attempt fails. Each failed import takes far longer
-than the UDF itself. duckdb 2.0 does not try the import. pyarrow tries to import python-dateutil each time a UDF
-passes a Python number to a ``pyarrow.compute`` function. ``hv_arrow`` passes Python numbers to ``pyarrow.compute``
-functions. If python-dateutil is not installed, every attempt fails. The Arrow UDF then takes two to three times as
-long at a million rows. The runs below were made on two machines::
+The ratios depend on the machine, on the versions of duckdb and pyarrow, and on two more packages that numbduck does
+not install: pandas, and python-dateutil, which pandas requires. Under duckdb 1.x, the duckdb module tries to import
+pandas for every value that a Python UDF returns. If pandas is not installed, every attempt fails. Each failed import
+takes far longer than the UDF itself. duckdb 2.0 does not try the import. pyarrow tries to import python-dateutil
+each time a UDF passes a Python number to a ``pyarrow.compute`` function. ``hv_arrow`` passes Python numbers to
+``pyarrow.compute`` functions. If python-dateutil is not installed, every attempt fails. On the Linux machine below,
+the Arrow UDF then took two to three times as long at a million rows. That factor depends on the machine and on the
+pyarrow version. The runs below were made on two machines::
 
-    Linux x86_64, with pandas 3.1.1 installed and PY_MAX_N raised to cover every row count:
+    Linux x86_64, with pyarrow 26.0.1 and pandas 3.1.1 installed, and PY_MAX_N raised to cover every row count:
 
     env: python 3.12.3, duckdb 2.0.0, numba 0.66.0, numpy 2.4.6, x86_64, 8 cores
     Haversine UDF benchmark: [10000, 100000, 1000000] rows, radius 50.0 km

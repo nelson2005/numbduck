@@ -67,7 +67,7 @@ Without pyarrow, the two scripts fail at their first Arrow query. The duckdb mod
 as `duckdb.duckdb.Error` on 1.2.2. online_scoring.py and run_irr.py run without pyarrow.
 
 Two more packages change the timings, although every script runs without them: pandas, and python-dateutil, which
-pandas installs.
+pandas requires.
 
 - Under duckdb 1.x, the duckdb module tries to import pandas for every value that a Python UDF returns and for every
   parameter of a query. If pandas is not installed, every attempt fails. The Python UDF of haversine.py and
@@ -75,8 +75,8 @@ pandas installs.
   slower without pandas, and in a run under duckdb 1.5.6 it was no faster with more than two threads. duckdb 2.0 does
   not try the import.
 - pyarrow tries to import python-dateutil each time a UDF passes a Python number to a `pyarrow.compute` function. If
-  python-dateutil is not installed, every attempt fails. At a million rows, the Arrow UDF then takes two to three
-  times as long in haversine.py and three to four times as long in fraud_score.py.
+  python-dateutil is not installed, every attempt fails. The failed attempts slow the Arrow UDF of haversine.py and
+  fraud_score.py. The docstrings of the two scripts give the factors measured on one machine.
 
 Install pandas before timing the scripts:
 
@@ -154,9 +154,9 @@ The script prints each rate, and `All checks passed.` at the end. A wrong rate r
 counts the memory blocks that numba's runtime, NRT, allocates and frees during the run. If the counts differ, it
 prints `WARNING: NRT leak` and exits with status 1.
 
-The ratios depend on the machine, on the duckdb version, on whether pandas and python-dateutil are installed, and on
-what else runs at the time. Timings this short vary from run to run, and a larger `NUMBDUCK_BENCH_REPEATS` takes each
-median over more runs.
+The ratios depend on the machine, on the versions of duckdb and pyarrow, on whether pandas and python-dateutil are
+installed, and on what else runs at the time. Timings this short vary from run to run, and a larger
+`NUMBDUCK_BENCH_REPEATS` takes each median over more runs.
 
 ## Reading the code
 

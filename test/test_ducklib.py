@@ -3630,7 +3630,7 @@ def test_udf_benchmark(capsys):
     took 113 s for a million rows on the Linux machine below. With pandas 3.1.1 installed, the scalar UDF took 0.10 s
     for a million rows.
 
-    One run gave these times (Linux x86_64, Python 3.12.3, duckdb 2.0.0, numba 0.66.0, pandas 3.1.1 installed)::
+    One run gave these times (Linux x86_64, Python 3.12.3, duckdb 2.0.0, numba 0.66.0, pyarrow 26.0.1, pandas 3.1.1)::
 
              Rows      Python       Arrow         JIT    Py/JIT   Arr/JIT
            10,000     0.0011s     0.0005s     0.0006s        2x        1x
