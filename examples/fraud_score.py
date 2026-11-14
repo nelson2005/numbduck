@@ -35,8 +35,8 @@ The times of the Python UDF and the Arrow UDF also depend on pandas and python-d
 ``haversine.py`` gives the reasons. Under duckdb 1.x without pandas, the Python UDF would need more than a minute for
 a million rows. ``fr_arrow`` passes about twenty Python numbers to ``pyarrow.compute`` functions for every chunk.
 Without python-dateutil, the Arrow UDF therefore took about four times as long at a million rows on the Linux
-machine below. That factor depends on the machine and on the versions of duckdb and pyarrow. The runs below were made
-on two machines::
+machine below. That factor differs between machines and between Python environments. The runs below were made on two
+machines::
 
     Linux x86_64, with pyarrow 26.0.1 and pandas 3.1.1 installed, and PY_MAX_N raised to cover every row count:
 
