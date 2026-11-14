@@ -38,7 +38,7 @@ takes far longer than the UDF itself. duckdb 2.0 does not try the import. pyarro
 each time a UDF passes a Python number to a ``pyarrow.compute`` function. ``hv_arrow`` passes Python numbers to
 ``pyarrow.compute`` functions. If python-dateutil is not installed, every attempt fails. On the Linux machine below,
 the Arrow UDF then took about three times as long at a million rows. That factor depends on the machine and on the
-pyarrow version. The runs below were made on two machines::
+versions of duckdb and pyarrow. The runs below were made on two machines::
 
     Linux x86_64, with pyarrow 26.0.1 and pandas 3.1.1 installed, and PY_MAX_N raised to cover every row count:
 
